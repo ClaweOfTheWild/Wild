@@ -161,7 +161,7 @@ local ATTRIBUTES = {
     },
     {
         key = "item.id", label = "Item ID", category = "Item",
-        valueType = "number",
+        valueType = "id",
         resolve = function(itemID) return itemID end,
     },
     {
@@ -537,8 +537,8 @@ local DYNAMIC_REFS = {
 -- ============================================================
 
 local OPERATORS = {
-    { key = "=",            label = "=",               forTypes = { number = true, quality = true, upgradetrack = true } },
-    { key = "!=",           label = "!=",    forTypes = { number = true, quality = true, upgradetrack = true } },
+    { key = "=",            label = "=",               forTypes = { number = true, quality = true, upgradetrack = true, id = true } },
+    { key = "!=",           label = "!=",    forTypes = { number = true, quality = true, upgradetrack = true, id = true } },
     { key = "<",            label = "<",               forTypes = { number = true, quality = true, upgradetrack = true } },
     { key = "<=",           label = "<=",    forTypes = { number = true, quality = true, upgradetrack = true } },
     { key = ">",            label = ">",               forTypes = { number = true, quality = true, upgradetrack = true } },
@@ -815,28 +815,84 @@ local function EvaluateCondition(cond, itemID, containerInfo, charCtx)
 end
 
 local function IntentMatchesItem(intent, itemID, containerInfo, charCtx)
-    local conds = intent.conditions
-    if not conds or #conds == 0 then return false end
+    local groups = intent.groups
+    if not groups or #groups == 0 then return false end
 
     local isDebug = Wild.db and Wild.db.advanced and Wild.db.advanced.debug
     if isDebug then
         local itemName = GetItemInfo(itemID) or ("ItemID:" .. tostring(itemID))
-        local summary = GetConditionsSummary(conds)
-        DebugMsg(string.format("Evaluating |cffffffff%s|r against rule: %s", itemName, summary))
+        DebugMsg(string.format("Evaluating |cffffffff%s|r against %d group(s)", itemName, #groups))
     end
 
-    for _, cond in ipairs(conds) do
-        if not EvaluateCondition(cond, itemID, containerInfo, charCtx) then
-            if isDebug then
-                DebugMsg("  => |cffff4444NO MATCH|r (condition failed)")
-            end
-            return false
+    -- Separate include and exclude groups
+    local includeGroups, excludeGroups = {}, {}
+    for _, group in ipairs(groups) do
+        if group.mode == "exclude" then
+            excludeGroups[#excludeGroups + 1] = group
+        else
+            includeGroups[#includeGroups + 1] = group
         end
     end
 
-    if isDebug then
-        DebugMsg("  => |cff44ff44MATCH|r (all conditions passed)")
+    -- Must have at least one include group
+    if #includeGroups == 0 then return false end
+
+    -- Include: item must match at least one include group (OR between groups)
+    local matched = false
+    for gi, group in ipairs(includeGroups) do
+        local conds = group.conditions
+        if conds and #conds > 0 then
+            local groupMatch = true
+            if isDebug then
+                local summary = GetConditionsSummary(conds)
+                DebugMsg(string.format("  Include group %d: %s", gi, summary))
+            end
+            for _, cond in ipairs(conds) do
+                if not EvaluateCondition(cond, itemID, containerInfo, charCtx) then
+                    groupMatch = false
+                    break
+                end
+            end
+            if groupMatch then
+                if isDebug then DebugMsg(string.format("  Include group %d => |cff44ff44MATCH|r", gi)) end
+                matched = true
+                break
+            else
+                if isDebug then DebugMsg(string.format("  Include group %d => |cffff4444NO MATCH|r", gi)) end
+            end
+        end
     end
+
+    if not matched then
+        if isDebug then DebugMsg("  => |cffff4444NO MATCH|r (no include group matched)") end
+        return false
+    end
+
+    -- Exclude: if item matches ANY exclude group, reject it
+    for gi, group in ipairs(excludeGroups) do
+        local conds = group.conditions
+        if conds and #conds > 0 then
+            local groupMatch = true
+            if isDebug then
+                local summary = GetConditionsSummary(conds)
+                DebugMsg(string.format("  Exclude group %d: %s", gi, summary))
+            end
+            for _, cond in ipairs(conds) do
+                if not EvaluateCondition(cond, itemID, containerInfo, charCtx) then
+                    groupMatch = false
+                    break
+                end
+            end
+            if groupMatch then
+                if isDebug then DebugMsg("  => |cffff4444EXCLUDED|r (exclude group matched)") end
+                return false
+            else
+                if isDebug then DebugMsg(string.format("  Exclude group %d => |cff44ff44not excluded|r", gi)) end
+            end
+        end
+    end
+
+    if isDebug then DebugMsg("  => |cff44ff44MATCH|r (included, not excluded)") end
     return true
 end
 
@@ -860,16 +916,23 @@ local function ValidateIntent(intent)
         return true
     end
 
-    -- All other item-matching actions need at least one condition
+    -- All other item-matching actions need at least one group with conditions
     if ACTIONS_REQUIRING_CONDITIONS[intent.action] then
-        local conds = intent.conditions
-        if not conds or #conds == 0 then return false, "no conditions" end
-        for i, cond in ipairs(conds) do
-            if not cond.attr or cond.attr == "" then return false, "condition " .. i .. " missing attribute" end
-            if not cond.op or cond.op == "" then return false, "condition " .. i .. " missing operator" end
-            if cond.value == nil and not cond.ref then return false, "condition " .. i .. " missing value" end
-            if not ATTR_BY_KEY[cond.attr] then return false, "condition " .. i .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
+        local groups = intent.groups
+        if not groups or #groups == 0 then return false, "no groups" end
+        local hasInclude = false
+        for gi, group in ipairs(groups) do
+            local conds = group.conditions
+            if not conds or #conds == 0 then return false, "group " .. gi .. " has no conditions" end
+            if group.mode ~= "exclude" then hasInclude = true end
+            for ci, cond in ipairs(conds) do
+                if not cond.attr or cond.attr == "" then return false, "group " .. gi .. " condition " .. ci .. " missing attribute" end
+                if not cond.op or cond.op == "" then return false, "group " .. gi .. " condition " .. ci .. " missing operator" end
+                if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
+                if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
+            end
         end
+        if not hasInclude then return false, "no include groups" end
     end
 
     -- Target required for bank/gold actions
@@ -1221,15 +1284,17 @@ local function FormatItemDescription(itemConds)
 end
 
 local function GetIntentSummary(intent)
-    local conds = intent.conditions or {}
+    local groups = intent.groups or {}
 
-    -- Separate character conditions from item conditions
-    local charConds, itemConds = {}, {}
-    for _, c in ipairs(conds) do
-        if c.attr and c.attr:sub(1, 5) == "char." then
-            charConds[#charConds + 1] = c
-        else
-            itemConds[#itemConds + 1] = c
+    -- Collect all conditions across all groups for char/item separation
+    local charConds = {}
+    for _, group in ipairs(groups) do
+        if group.conditions then
+            for _, c in ipairs(group.conditions) do
+                if c.attr and c.attr:sub(1, 5) == "char." then
+                    charConds[#charConds + 1] = c
+                end
+            end
         end
     end
 
@@ -1270,7 +1335,37 @@ local function GetIntentSummary(intent)
 
     local verb = ACTION_LABELS[intent.action] or intent.action
     local keep = intent.keep or 0
-    local itemDesc = FormatItemDescription(itemConds)
+
+    -- Build per-group item descriptions
+    local includeDescs, excludeDescs = {}, {}
+    for _, group in ipairs(groups) do
+        local itemConds = {}
+        if group.conditions then
+            for _, c in ipairs(group.conditions) do
+                if not c.attr or c.attr:sub(1, 5) ~= "char." then
+                    itemConds[#itemConds + 1] = c
+                end
+            end
+        end
+        local desc = FormatItemDescription(itemConds)
+        if group.mode == "exclude" then
+            excludeDescs[#excludeDescs + 1] = desc
+        else
+            includeDescs[#includeDescs + 1] = desc
+        end
+    end
+
+    local itemDesc
+    if #includeDescs == 1 then
+        itemDesc = includeDescs[1]
+    elseif #includeDescs > 1 then
+        itemDesc = "(" .. table.concat(includeDescs, " |cff88aaffor|r ") .. ")"
+    else
+        itemDesc = "items"
+    end
+    if #excludeDescs > 0 then
+        itemDesc = itemDesc .. " |cffff6666except|r " .. table.concat(excludeDescs, " or ")
+    end
 
     -- Build: "Who verb [all] itemDesc [, keeping N] [to/from target]"
     local result = who .. " " .. verb

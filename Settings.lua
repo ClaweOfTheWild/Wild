@@ -2511,9 +2511,10 @@ local function CreateIntentRulesTab()
 
     -- Editor state
     local editorIntent = {}
-    local editorConditions = {}
+    local editorGroups = {}         -- working copy: { {mode="include"|"exclude", conditions={...}}, ... }
     local editingIndex = nil
     local editingCondIdx = nil
+    local editingGroupIdx = nil     -- which group is currently expanded for editing
 
     -- Actor filter list
     local actorSectionLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -2766,9 +2767,9 @@ local function CreateIntentRulesTab()
         editorIntent.destroyUnsellable = self:GetChecked() and true or false
     end)
 
-    -- Conditions section
+    -- Conditions section — group-based (include/exclude sets with OR between groups)
     local condLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    condLabel:SetText("Conditions (all must match):")
+    condLabel:SetText("Item Groups (include sets are OR'd, exclude sets filter out):")
 
     local condListFrame = CreateFrame("Frame", nil, editor, "BackdropTemplate")
     condListFrame:SetPoint("TOPLEFT", condLabel, "BOTTOMLEFT", 0, -6)
@@ -2785,14 +2786,19 @@ local function CreateIntentRulesTab()
     local condRows = {}
     local condEmptyText = condListFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     condEmptyText:SetPoint("TOPLEFT", 6, -6)
-    condEmptyText:SetText("|cff666666No conditions. Add at least one.|r")
+    condEmptyText:SetText("|cff666666No item groups. Add at least one include group.|r")
 
     local RefreshCondList
 
     local addCondBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
-    addCondBtn:SetSize(110, 20)
+    addCondBtn:SetSize(130, 20)
     addCondBtn:SetPoint("TOPLEFT", condListFrame, "BOTTOMLEFT", 2, -4)
-    addCondBtn:SetText("Add Condition")
+    addCondBtn:SetText("Add Include Group")
+
+    local addExclGroupBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
+    addExclGroupBtn:SetSize(130, 20)
+    addExclGroupBtn:SetPoint("LEFT", addCondBtn, "RIGHT", 6, 0)
+    addExclGroupBtn:SetText("Add Exclude Group")
 
     -- ===== Condition Sub-Editor =====
     local condEditor = CreateFrame("Frame", nil, editor, "BackdropTemplate")
@@ -2859,9 +2865,13 @@ local function CreateIntentRulesTab()
     ceStrInput:SetFontObject("GameFontHighlight")
 
     hooksecurefunc("HandleModifiedItemClick", function(link)
-        if ceStrInput:IsVisible() and ceStrInput:HasFocus() and link then
+        if not link then return end
+        if ceStrInput:IsVisible() and ceStrInput:HasFocus() then
             local itemID = link:match("item:(%d+)")
             if itemID then ceStrInput:SetText(itemID) else ceStrInput:SetText(link) end
+        elseif ceNumInput:IsVisible() and ceNumInput:HasFocus() then
+            local itemID = link:match("item:(%d+)")
+            if itemID then ceNumInput:SetText(itemID) end
         end
     end)
 
@@ -3179,6 +3189,7 @@ local function CreateIntentRulesTab()
             bottomAnchor = ceValLabel
 
             if vt == "string" then ceStrInput:Show()
+            elseif vt == "id" then ceNumInput:Show()
             elseif vt == "itemtype" then ceTypeDD:Show()
             elseif vt == "itemsubtype" then ceSubParentDD:Show(); ceSubTypeDD:Show()
             elseif vt == "equiploc" then ceEquipDD:Show()
@@ -3320,7 +3331,7 @@ local function CreateIntentRulesTab()
         else
             UIDropDownMenu_SetText(ceValModeDD, "Fixed value")
             ceOffsetInput:SetText("0")
-            if vt == "number" then
+            if vt == "number" or vt == "id" then
                 ceNumInput:SetText(tostring(condEditorState.value or ""))
             elseif vt == "string" then
                 ceStrInput:SetText(tostring(condEditorState.value or ""))
@@ -3369,7 +3380,7 @@ local function CreateIntentRulesTab()
         local attrDef = condEditorState.attr and Wild.ATTR_BY_KEY[condEditorState.attr]
         local vt = attrDef and attrDef.valueType or "string"
         if not condEditorState.ref then
-            if vt == "number" then condEditorState.value = tonumber(ceNumInput:GetText())
+            if vt == "number" or vt == "id" then condEditorState.value = tonumber(ceNumInput:GetText())
             elseif vt == "string" then condEditorState.value = ceStrInput:GetText() end
         end
         if condEditorState.ref then
@@ -3388,10 +3399,12 @@ local function CreateIntentRulesTab()
 
     local UpdateSaveBtnAnchor  -- forward declaration
 
-    local function ShowCondEditor(condIdx)
+    local function ShowCondEditor(groupIdx, condIdx)
+        editingGroupIdx = groupIdx
         editingCondIdx = condIdx
-        if condIdx and editorConditions[condIdx] then
-            PopulateCondEditor(editorConditions[condIdx])
+        local group = groupIdx and editorGroups[groupIdx]
+        if condIdx and group and group.conditions[condIdx] then
+            PopulateCondEditor(group.conditions[condIdx])
         else
             editingCondIdx = nil
             PopulateCondEditor(nil)
@@ -3403,6 +3416,7 @@ local function CreateIntentRulesTab()
     local function HideCondEditor()
         condEditor:Hide()
         editingCondIdx = nil
+        editingGroupIdx = nil
         UpdateSaveBtnAnchor()
     end
 
@@ -3414,68 +3428,213 @@ local function CreateIntentRulesTab()
             value = condEditorState.value, ref = condEditorState.ref,
             offset = condEditorState.offset,
         }
-        if editingCondIdx then
-            editorConditions[editingCondIdx] = saved
-        else
-            table.insert(editorConditions, saved)
+        if editingGroupIdx and editorGroups[editingGroupIdx] then
+            local group = editorGroups[editingGroupIdx]
+            if editingCondIdx then
+                group.conditions[editingCondIdx] = saved
+            else
+                table.insert(group.conditions, saved)
+            end
         end
         HideCondEditor()
         RefreshCondList()
     end)
 
     ceCancelBtn:SetScript("OnClick", HideCondEditor)
-    addCondBtn:SetScript("OnClick", function() ShowCondEditor(nil) end)
+
+    addCondBtn:SetScript("OnClick", function()
+        -- Add a new include group with no conditions, then open the condition editor for it
+        table.insert(editorGroups, { mode = "include", conditions = {} })
+        local gi = #editorGroups
+        RefreshCondList()
+        ShowCondEditor(gi, nil)
+    end)
+
+    addExclGroupBtn:SetScript("OnClick", function()
+        -- Add a new exclude group with no conditions, then open the condition editor for it
+        table.insert(editorGroups, { mode = "exclude", conditions = {} })
+        local gi = #editorGroups
+        RefreshCondList()
+        ShowCondEditor(gi, nil)
+    end)
 
     RefreshCondList = function()
         for _, row in ipairs(condRows) do row:Hide() end
-        condEmptyText:SetShown(#editorConditions == 0)
+        condEmptyText:SetShown(#editorGroups == 0)
         local yOff = 0
-        for i, cond in ipairs(editorConditions) do
-            local row = condRows[i]
-            if not row then
-                row = CreateFrame("Frame", nil, condListFrame)
-                row:SetHeight(20)
-                row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-                row.text:SetPoint("LEFT", 4, 0)
-                row.text:SetPoint("RIGHT", row, "RIGHT", -44, 0)
-                row.text:SetJustifyH("LEFT")
-                row.editBtn = CreateFrame("Button", nil, row)
-                row.editBtn:SetSize(14, 14)
-                row.editBtn:SetPoint("RIGHT", -20, 0)
-                row.editBtn.label = row.editBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                row.editBtn.label:SetPoint("CENTER")
-                row.editBtn.label:SetText("|cff88aaff...|r")
-                row.editBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffaaccff...|r") end)
-                row.editBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff88aaff...|r") end)
-                row.removeBtn = CreateFrame("Button", nil, row)
-                row.removeBtn:SetSize(14, 14)
-                row.removeBtn:SetPoint("RIGHT", -2, 0)
-                row.removeBtn.label = row.removeBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                row.removeBtn.label:SetPoint("CENTER")
-                row.removeBtn.label:SetText("|cffff4444X|r")
-                row.removeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff0000X|r") end)
-                row.removeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffff4444X|r") end)
-                condRows[i] = row
+        local rowIdx = 0
+
+        for gi, group in ipairs(editorGroups) do
+            -- Group header row
+            rowIdx = rowIdx + 1
+            local headerRow = condRows[rowIdx]
+            if not headerRow then
+                headerRow = CreateFrame("Frame", nil, condListFrame)
+                headerRow:SetHeight(22)
+                headerRow.text = headerRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                headerRow.text:SetPoint("LEFT", 4, 0)
+                headerRow.text:SetPoint("RIGHT", headerRow, "RIGHT", -44, 0)
+                headerRow.text:SetJustifyH("LEFT")
+                headerRow.addBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.addBtn:SetSize(14, 14)
+                headerRow.addBtn:SetPoint("RIGHT", -38, 0)
+                headerRow.addBtn.label = headerRow.addBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.addBtn.label:SetPoint("CENTER")
+                headerRow.addBtn.label:SetText("|cff44ff44+|r")
+                headerRow.addBtn:SetScript("OnEnter", function(self) self.label:SetText("|cff88ff88+|r") end)
+                headerRow.addBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff44ff44+|r") end)
+                headerRow.toggleBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.toggleBtn:SetSize(14, 14)
+                headerRow.toggleBtn:SetPoint("RIGHT", -20, 0)
+                headerRow.toggleBtn.label = headerRow.toggleBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.toggleBtn.label:SetPoint("CENTER")
+                headerRow.removeBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.removeBtn:SetSize(14, 14)
+                headerRow.removeBtn:SetPoint("RIGHT", -2, 0)
+                headerRow.removeBtn.label = headerRow.removeBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.removeBtn.label:SetPoint("CENTER")
+                headerRow.removeBtn.label:SetText("|cffff4444X|r")
+                headerRow.removeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff0000X|r") end)
+                headerRow.removeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffff4444X|r") end)
+                condRows[rowIdx] = headerRow
             end
-            row:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
-            row:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
-            local attrDef = cond.attr and Wild.ATTR_BY_KEY[cond.attr]
-            local attrLbl = attrDef and attrDef.label or (cond.attr or "?")
-            local opLbl = cond.op or "?"
-            for _, op in ipairs(Wild.OPERATORS) do
-                if op.key == cond.op then opLbl = op.label; break end
+            -- Ensure header-specific buttons exist (row may have been recycled from a condition row)
+            if not headerRow.toggleBtn then
+                headerRow.toggleBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.toggleBtn:SetSize(14, 14)
+                headerRow.toggleBtn:SetPoint("RIGHT", -20, 0)
+                headerRow.toggleBtn.label = headerRow.toggleBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.toggleBtn.label:SetPoint("CENTER")
             end
-            local valStr = Wild.FormatConditionValue(cond, attrDef)
-            row.text:SetText("|cffcccccc" .. i .. ".|r " .. attrLbl .. " |cff88aaff" .. opLbl .. "|r " .. (valStr or "?"))
-            local idx = i
-            row.editBtn:SetScript("OnClick", function() ShowCondEditor(idx) end)
-            row.removeBtn:SetScript("OnClick", function()
-                table.remove(editorConditions, idx)
+            if not headerRow.addBtn then
+                headerRow.addBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.addBtn:SetSize(14, 14)
+                headerRow.addBtn:SetPoint("RIGHT", -38, 0)
+                headerRow.addBtn.label = headerRow.addBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.addBtn.label:SetPoint("CENTER")
+                headerRow.addBtn.label:SetText("|cff44ff44+|r")
+                headerRow.addBtn:SetScript("OnEnter", function(self) self.label:SetText("|cff88ff88+|r") end)
+                headerRow.addBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff44ff44+|r") end)
+            end
+            headerRow.toggleBtn:Show()
+            headerRow.addBtn:Show()
+            if headerRow.editBtn then headerRow.editBtn:Hide() end
+            headerRow:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
+            headerRow:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
+
+            local modeColor = group.mode == "exclude" and "|cffff6666" or "|cff66ff66"
+            local modeLabel = group.mode == "exclude" and "EXCLUDE" or "INCLUDE"
+            local condCount = group.conditions and #group.conditions or 0
+            local condSummary = ""
+            if condCount > 0 then
+                condSummary = " — " .. Wild.GetConditionsSummary(group.conditions)
+            else
+                condSummary = " — |cff888888(empty)|r"
+            end
+            headerRow.text:SetText(modeColor .. modeLabel .. "|r" .. condSummary)
+
+            -- Toggle between include/exclude
+            local toggleLabel = group.mode == "exclude" and "|cff66ff66I|r" or "|cffff6666E|r"
+            headerRow.toggleBtn.label:SetText(toggleLabel)
+            local capturedGi = gi
+            headerRow.toggleBtn:SetScript("OnClick", function()
+                editorGroups[capturedGi].mode = editorGroups[capturedGi].mode == "exclude" and "include" or "exclude"
                 HideCondEditor()
                 RefreshCondList()
             end)
-            row:Show()
+            headerRow.toggleBtn:SetScript("OnEnter", function(self)
+                local tip = editorGroups[capturedGi] and editorGroups[capturedGi].mode == "exclude" and "Switch to Include" or "Switch to Exclude"
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(tip, 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            headerRow.toggleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            -- Add condition to this group
+            headerRow.addBtn:SetScript("OnClick", function()
+                ShowCondEditor(capturedGi, nil)
+            end)
+            headerRow.addBtn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Add condition to this group", 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            headerRow.addBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            -- Remove this group
+            headerRow.removeBtn:SetScript("OnClick", function()
+                table.remove(editorGroups, capturedGi)
+                HideCondEditor()
+                RefreshCondList()
+            end)
+            headerRow:Show()
             yOff = yOff + 22
+
+            -- Condition rows within this group
+            if group.conditions then
+                for ci, cond in ipairs(group.conditions) do
+                    rowIdx = rowIdx + 1
+                    local row = condRows[rowIdx]
+                    if not row then
+                        row = CreateFrame("Frame", nil, condListFrame)
+                        row:SetHeight(20)
+                        row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                        row.text:SetPoint("LEFT", 16, 0)
+                        row.text:SetPoint("RIGHT", row, "RIGHT", -44, 0)
+                        row.text:SetJustifyH("LEFT")
+                        row.editBtn = CreateFrame("Button", nil, row)
+                        row.editBtn:SetSize(14, 14)
+                        row.editBtn:SetPoint("RIGHT", -20, 0)
+                        row.editBtn.label = row.editBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                        row.editBtn.label:SetPoint("CENTER")
+                        row.editBtn.label:SetText("|cff88aaff...|r")
+                        row.editBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffaaccff...|r") end)
+                        row.editBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff88aaff...|r") end)
+                        row.removeBtn = CreateFrame("Button", nil, row)
+                        row.removeBtn:SetSize(14, 14)
+                        row.removeBtn:SetPoint("RIGHT", -2, 0)
+                        row.removeBtn.label = row.removeBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                        row.removeBtn.label:SetPoint("CENTER")
+                        row.removeBtn.label:SetText("|cffff4444X|r")
+                        row.removeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff0000X|r") end)
+                        row.removeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffff4444X|r") end)
+                        condRows[rowIdx] = row
+                    end
+                    row:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
+                    row:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
+                    local attrDef = cond.attr and Wild.ATTR_BY_KEY[cond.attr]
+                    local attrLbl = attrDef and attrDef.label or (cond.attr or "?")
+                    local opLbl = cond.op or "?"
+                    for _, op in ipairs(Wild.OPERATORS) do
+                        if op.key == cond.op then opLbl = op.label; break end
+                    end
+                    local valStr = Wild.FormatConditionValue(cond, attrDef)
+                    row.text:SetText("|cffcccccc" .. ci .. ".|r " .. attrLbl .. " |cff88aaff" .. opLbl .. "|r " .. (valStr or "?"))
+                    local capturedGi2, capturedCi = gi, ci
+                    if not row.editBtn then
+                        row.editBtn = CreateFrame("Button", nil, row)
+                        row.editBtn:SetSize(14, 14)
+                        row.editBtn:SetPoint("RIGHT", -20, 0)
+                        row.editBtn.label = row.editBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                        row.editBtn.label:SetPoint("CENTER")
+                        row.editBtn.label:SetText("|cff88aaff...|r")
+                        row.editBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffaaccff...|r") end)
+                        row.editBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff88aaff...|r") end)
+                    end
+                    row.editBtn:Show()
+                    row.editBtn:SetScript("OnClick", function() ShowCondEditor(capturedGi2, capturedCi) end)
+                    row.removeBtn:SetScript("OnClick", function()
+                        table.remove(editorGroups[capturedGi2].conditions, capturedCi)
+                        HideCondEditor()
+                        RefreshCondList()
+                    end)
+                    -- Hide header-only buttons if they exist on recycled rows
+                    if row.addBtn then row.addBtn:Hide() end
+                    if row.toggleBtn then row.toggleBtn:Hide() end
+                    row:Show()
+                    yOff = yOff + 20
+                end
+            end
         end
         condListFrame:SetHeight(math.max(24, yOff + 4))
         if UpdateSaveBtnAnchor then UpdateSaveBtnAnchor() end
@@ -3541,6 +3700,7 @@ local function CreateIntentRulesTab()
         condLabel:SetShown(needsCond)
         condListFrame:SetShown(needsCond)
         addCondBtn:SetShown(needsCond)
+        addExclGroupBtn:SetShown(needsCond)
 
         -- Update keep hint based on action
         if action == "withdraw" then
@@ -3738,10 +3898,14 @@ local function CreateIntentRulesTab()
             for _, a in ipairs(intent.actors or {}) do
                 table.insert(editorActors, { value = a.value, exclude = a.exclude })
             end
-            editorConditions = {}
-            for _, c in ipairs(intent.conditions or {}) do
-                local copy = {}; for k, v in pairs(c) do copy[k] = v end
-                table.insert(editorConditions, copy)
+            editorGroups = {}
+            for _, g in ipairs(intent.groups or {}) do
+                local groupCopy = { mode = g.mode or "include", conditions = {} }
+                for _, c in ipairs(g.conditions or {}) do
+                    local copy = {}; for k, v in pairs(c) do copy[k] = v end
+                    table.insert(groupCopy.conditions, copy)
+                end
+                table.insert(editorGroups, groupCopy)
             end
         else
             editingIndex = nil
@@ -3749,7 +3913,7 @@ local function CreateIntentRulesTab()
             saveBtn:SetText("Add")
             editorIntent = { action = "deposit", target = "warband", keep = 0 }
             editorActors = {}
-            editorConditions = {}
+            editorGroups = {}
         end
 
         -- Populate dropdowns
@@ -3802,9 +3966,25 @@ local function CreateIntentRulesTab()
     saveBtn:SetScript("OnClick", function()
         local action = editorIntent.action or "deposit"
 
-        if action ~= "gold" and #editorConditions == 0 then
-            print("|cffff6600Wild:|r Add at least one condition.")
-            return
+        if action ~= "gold" then
+            -- Validate: need at least one include group with conditions
+            local hasInclude = false
+            for _, g in ipairs(editorGroups) do
+                if g.mode ~= "exclude" and g.conditions and #g.conditions > 0 then
+                    hasInclude = true
+                    break
+                end
+            end
+            if not hasInclude then
+                print("|cffff6600Wild:|r Add at least one include group with conditions.")
+                return
+            end
+            -- Remove empty groups
+            for i = #editorGroups, 1, -1 do
+                if not editorGroups[i].conditions or #editorGroups[i].conditions == 0 then
+                    table.remove(editorGroups, i)
+                end
+            end
         end
 
         if action == "mail" and (not editorIntent.recipient or editorIntent.recipient == "") then
@@ -3821,7 +4001,7 @@ local function CreateIntentRulesTab()
             enabled = true,
             action = action,
             actors = {},
-            conditions = {},
+            groups = {},
             keep = 0,
         }
 
@@ -3857,9 +4037,13 @@ local function CreateIntentRulesTab()
             else
                 savedIntent.keep = tonumber(qtyInput:GetText()) or 0
             end
-            for _, c in ipairs(editorConditions) do
-                local copy = {}; for k, v in pairs(c) do copy[k] = v end
-                table.insert(savedIntent.conditions, copy)
+            for _, g in ipairs(editorGroups) do
+                local savedGroup = { mode = g.mode or "include", conditions = {} }
+                for _, c in ipairs(g.conditions or {}) do
+                    local copy = {}; for k, v in pairs(c) do copy[k] = v end
+                    table.insert(savedGroup.conditions, copy)
+                end
+                table.insert(savedIntent.groups, savedGroup)
             end
         end
 

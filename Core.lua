@@ -166,10 +166,27 @@ frame:SetScript("OnEvent", function(self, event, addon)
         ["item.isRecipe"] = true,
     }
     for _, intent in ipairs(WildDB.intents) do
-        if intent.conditions then
+        -- Migrate flat conditions to groups
+        if intent.conditions and not intent.groups then
             for _, cond in ipairs(intent.conditions) do
                 if LEGACY_KNOWN_ATTRS[cond.attr] then
                     cond.attr = "item.isKnown"
+                end
+            end
+            if #intent.conditions > 0 then
+                intent.groups = { { mode = "include", conditions = intent.conditions } }
+            else
+                intent.groups = {}
+            end
+            intent.conditions = nil
+        elseif intent.groups then
+            for _, group in ipairs(intent.groups) do
+                if group.conditions then
+                    for _, cond in ipairs(group.conditions) do
+                        if LEGACY_KNOWN_ATTRS[cond.attr] then
+                            cond.attr = "item.isKnown"
+                        end
+                    end
                 end
             end
         end
