@@ -1,0 +1,31 @@
+## Interface: 120001
+## Title: Wild
+## Notes: Quality of life addon that automates common interactions like repairs, banking, looting, and group applications.
+## Author: Clawe of the Wild
+## Version: 1.0.0
+## SavedVariables: WildDB
+## IconTexture: Interface\Icons\ability_druid_flourish
+## Category: Miscellaneous
+
+Core.lua
+Conditions.lua
+CharacterData.lua
+ScreenCenterCircle.lua
+LFG.lua
+Bank.lua
+Inventory.lua
+Vendor.lua
+Reputation.lua
+Currency.lua
+AuctionHouse.lua
+Mail.lua
+Delve.lua
+DungeonBar.lua
+AutoReply.lua
+Quests.lua
+Gossip.lua
+DarkmoonFaire.lua
+Loot.lua
+Tooltip.lua
+SlashCommands.lua
+Settings.lua
