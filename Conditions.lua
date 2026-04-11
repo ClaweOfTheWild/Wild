@@ -642,7 +642,10 @@ local function FormatConditionValue(cond, attrDef)
     end
 
     local vt = attrDef and attrDef.valueType
-    if vt == "quality" then
+    if vt == "id" then
+        local _, link = GetItemInfo(cond.value)
+        return link or tostring(cond.value)
+    elseif vt == "quality" then
         return QUALITY_NAMES[cond.value] or tostring(cond.value)
     elseif vt == "upgradetrack" then
         return UPGRADE_TRACK_NAMES[cond.value] or tostring(cond.value)

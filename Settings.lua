@@ -3560,8 +3560,13 @@ local function CreateIntentRulesTab()
             if not headerRow then
                 headerRow = CreateFrame("Frame", nil, condListFrame)
                 headerRow:SetHeight(22)
+                headerRow.collapseBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.collapseBtn:SetSize(14, 14)
+                headerRow.collapseBtn:SetPoint("LEFT", 2, 0)
+                headerRow.collapseBtn.label = headerRow.collapseBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.collapseBtn.label:SetPoint("CENTER")
                 headerRow.text = headerRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-                headerRow.text:SetPoint("LEFT", 4, 0)
+                headerRow.text:SetPoint("LEFT", 18, 0)
                 headerRow.text:SetPoint("RIGHT", headerRow, "RIGHT", -44, 0)
                 headerRow.text:SetJustifyH("LEFT")
                 headerRow.addBtn = CreateFrame("Button", nil, headerRow)
@@ -3588,6 +3593,13 @@ local function CreateIntentRulesTab()
                 condRows[rowIdx] = headerRow
             end
             -- Ensure header-specific buttons exist (row may have been recycled from a condition row)
+            if not headerRow.collapseBtn then
+                headerRow.collapseBtn = CreateFrame("Button", nil, headerRow)
+                headerRow.collapseBtn:SetSize(14, 14)
+                headerRow.collapseBtn:SetPoint("LEFT", 2, 0)
+                headerRow.collapseBtn.label = headerRow.collapseBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                headerRow.collapseBtn.label:SetPoint("CENTER")
+            end
             if not headerRow.toggleBtn then
                 headerRow.toggleBtn = CreateFrame("Button", nil, headerRow)
                 headerRow.toggleBtn:SetSize(14, 14)
@@ -3605,11 +3617,31 @@ local function CreateIntentRulesTab()
                 headerRow.addBtn:SetScript("OnEnter", function(self) self.label:SetText("|cff88ff88+|r") end)
                 headerRow.addBtn:SetScript("OnLeave", function(self) self.label:SetText("|cff44ff44+|r") end)
             end
+            headerRow.collapseBtn:Show()
             headerRow.toggleBtn:Show()
             headerRow.addBtn:Show()
             if headerRow.editBtn then headerRow.editBtn:Hide() end
+            headerRow.text:ClearAllPoints()
+            headerRow.text:SetPoint("LEFT", 18, 0)
+            headerRow.text:SetPoint("RIGHT", headerRow, "RIGHT", -44, 0)
             headerRow:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
             headerRow:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
+
+            local collapsed = group.collapsed
+            local collapseIcon = collapsed and "|cffaaaaaa+|r" or "|cffaaaaaa-|r"
+            headerRow.collapseBtn.label:SetText(collapseIcon)
+            local capturedGiCollapse = gi
+            headerRow.collapseBtn:SetScript("OnClick", function()
+                editorGroups[capturedGiCollapse].collapsed = not editorGroups[capturedGiCollapse].collapsed
+                RefreshCondList()
+            end)
+            headerRow.collapseBtn:SetScript("OnEnter", function(self)
+                local tip = editorGroups[capturedGiCollapse] and editorGroups[capturedGiCollapse].collapsed and "Expand" or "Collapse"
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(tip, 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            headerRow.collapseBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
             local modeColor = group.mode == "exclude" and "|cffff6666" or "|cff66ff66"
             local modeLabel = group.mode == "exclude" and "EXCLUDE" or "INCLUDE"
@@ -3660,7 +3692,7 @@ local function CreateIntentRulesTab()
             yOff = yOff + 22
 
             -- Condition rows within this group
-            if group.conditions then
+            if group.conditions and not group.collapsed then
                 for ci, cond in ipairs(group.conditions) do
                     rowIdx = rowIdx + 1
                     local row = condRows[rowIdx]
@@ -3668,7 +3700,7 @@ local function CreateIntentRulesTab()
                         row = CreateFrame("Frame", nil, condListFrame)
                         row:SetHeight(20)
                         row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-                        row.text:SetPoint("LEFT", 16, 0)
+                        row.text:SetPoint("LEFT", 32, 0)
                         row.text:SetPoint("RIGHT", row, "RIGHT", -44, 0)
                         row.text:SetJustifyH("LEFT")
                         row.editBtn = CreateFrame("Button", nil, row)
@@ -3691,6 +3723,9 @@ local function CreateIntentRulesTab()
                     end
                     row:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
                     row:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
+                    row.text:ClearAllPoints()
+                    row.text:SetPoint("LEFT", 32, 0)
+                    row.text:SetPoint("RIGHT", row, "RIGHT", -44, 0)
                     local attrDef = cond.attr and Wild.ATTR_BY_KEY[cond.attr]
                     local attrLbl = attrDef and attrDef.label or (cond.attr or "?")
                     local opLbl = cond.op or "?"
@@ -3699,6 +3734,23 @@ local function CreateIntentRulesTab()
                     end
                     local valStr = Wild.FormatConditionValue(cond, attrDef)
                     row.text:SetText("|cffcccccc" .. ci .. ".|r " .. attrLbl .. " |cff88aaff" .. opLbl .. "|r " .. (valStr or "?"))
+                    -- Item tooltip on hover for item.id conditions
+                    row.tooltipItemID = (attrDef and attrDef.valueType == "id") and tonumber(cond.value) or nil
+                    row:EnableMouse(true)
+                    row:SetScript("OnEnter", function(self)
+                        if self.tooltipItemID then
+                            GameTooltip:SetOwner(self, "ANCHOR_NONE")
+                            local x, y = GetCursorPosition()
+                            local scale = UIParent:GetEffectiveScale()
+                            GameTooltip:ClearAllPoints()
+                            GameTooltip:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale + 10, y / scale - 10)
+                            GameTooltip:SetItemByID(self.tooltipItemID)
+                            GameTooltip:Show()
+                        end
+                    end)
+                    row:SetScript("OnLeave", function()
+                        GameTooltip:Hide()
+                    end)
                     local capturedGi2, capturedCi = gi, ci
                     if not row.editBtn then
                         row.editBtn = CreateFrame("Button", nil, row)
@@ -3720,6 +3772,7 @@ local function CreateIntentRulesTab()
                     -- Hide header-only buttons if they exist on recycled rows
                     if row.addBtn then row.addBtn:Hide() end
                     if row.toggleBtn then row.toggleBtn:Hide() end
+                    if row.collapseBtn then row.collapseBtn:Hide() end
                     row:Show()
                     yOff = yOff + 20
                 end
