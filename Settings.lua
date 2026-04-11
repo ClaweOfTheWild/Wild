@@ -1208,13 +1208,13 @@ local function CreateCraftingOrdersTab()
         { section = "Equipment" },
         { key = "UpgradesOnly",         label = "Upgrades Only" },
         { section = "Rarity" },
-        { key = "PoorQuality",          label = "|cff9d9d9dPoor|r Quality" },
-        { key = "CommonQuality",        label = "|cffffffffCommon|r Quality" },
-        { key = "UncommonQuality",      label = "|cff1eff00Uncommon|r Quality" },
-        { key = "RareQuality",          label = "|cff0070ddRare|r Quality" },
-        { key = "EpicQuality",          label = "|cffa335eeEpic|r Quality" },
-        { key = "LegendaryQuality",     label = "|cffff8000Legendary|r Quality" },
-        { key = "ArtifactQuality",      label = "|cffe6cc80Artifact|r Quality" },
+        { key = "PoorQuality",          label = "|cff9d9d9dPoor|r Quality", rarity = true },
+        { key = "CommonQuality",        label = "|cffffffffCommon|r Quality", rarity = true },
+        { key = "UncommonQuality",      label = "|cff1eff00Uncommon|r Quality", rarity = true },
+        { key = "RareQuality",          label = "|cff0070ddRare|r Quality", rarity = true },
+        { key = "EpicQuality",          label = "|cffa335eeEpic|r Quality", rarity = true },
+        { key = "LegendaryQuality",     label = "|cffff8000Legendary|r Quality", rarity = true },
+        { key = "ArtifactQuality",      label = "|cffe6cc80Artifact|r Quality", rarity = true },
     }
 
     local filterHeader = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -1288,6 +1288,7 @@ local function CreateCraftingOrdersTab()
                     cb:SetPoint("TOPLEFT", lastAnchor, "BOTTOMLEFT", xOff, yOff)
                     cb.Text:SetText(def.label)
                     cb.enumVal = enumVal
+                    cb.isRarity = def.rarity
                     cb:SetScript("OnClick", function(self)
                         local checked = self:GetChecked()
                         Wild.db.craftingOrders.filters[self.enumVal] = checked
@@ -1314,7 +1315,10 @@ local function CreateCraftingOrdersTab()
         local cfg = Wild.db.craftingOrders
         enableCB:SetChecked(cfg.enabled)
         for _, cb in ipairs(filterCBs) do
-            cb:SetChecked(cfg.filters[cb.enumVal] and true or false)
+            local value = cfg.filters[cb.enumVal]
+            -- Rarity filters default to true in-game; show that when unconfigured
+            if value == nil and cb.isRarity then value = true end
+            cb:SetChecked(value and true or false)
         end
         minBox:SetText(tostring(cfg.minLevel or 0))
         maxBox:SetText(tostring(cfg.maxLevel or 0))
