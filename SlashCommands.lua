@@ -109,7 +109,6 @@ subcommands.help = function()
     Print("/wild bank on|off — Toggle warband bank")
     Print("/wild bank character on|off — Toggle character bank")
     Print("/wild bank guild on|off — Toggle guild bank")
-    Print("/wild bank keepgold <n> — Set warband gold-to-keep")
     Print("/wild bank run — Manually trigger bank filter rules")
     Print("/wild bank rules — List all bank filter rules")
     print(" ")
@@ -269,7 +268,7 @@ subcommands.loot = function(args)
     end
 end
 
--- /wild bank [on|off|character|guild|warband|keepgold|run|rules]
+-- /wild bank [on|off|character|guild|warband|run|rules]
 subcommands.bank = function(args)
     if #args == 0 then
         Print("Warband Bank: " .. StatusText(Wild.IsFeatureEnabled("bank")))
@@ -301,11 +300,6 @@ subcommands.bank = function(args)
         if v == nil then Print("Usage: /wild bank guild on|off") return end
         Wild.SetFeatureEnabled("bankguild", v)
         Print("Guild Bank " .. StatusText(v))
-    elseif sub == "keepgold" then
-        local n = tonumber(args[2])
-        if not n then Print("Usage: /wild bank keepgold <amount>") return end
-        Wild.SetSetting("bankWarband.goldKeep", n)
-        Print("Warband bank gold-to-keep set to " .. n .. "g")
     elseif sub == "run" then
         Wild.RunBankIntents()
         Print("Bank intents executed.")
@@ -320,7 +314,7 @@ subcommands.bank = function(args)
             local count = 0
             for i, intent in ipairs(Wild.db.intents) do
                 if intent.target == info.target
-                    and (intent.action == "deposit" or intent.action == "withdraw" or intent.action == "gold") then
+                    and (intent.action == "deposit" or intent.action == "withdraw" or intent.action == "hold") then
                     count = count + 1
                     if count == 1 then Print(info.label .. " bank intents:") end
                     any = true

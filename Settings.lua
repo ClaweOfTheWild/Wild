@@ -2546,7 +2546,7 @@ local function CreateIntentRulesTab()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Define automation intents: deposit, withdraw, sell, destroy, mail, or manage gold. Conditions control which items are matched.|r")
+    desc:SetText("|cff888888Define automation intents: deposit, withdraw, sell, destroy, mail, hold, or transfer. Conditions control which items are matched.|r")
 
     -- Intent list
     local listFrame = CreateFrame("Frame", nil, sc, "BackdropTemplate")
@@ -2752,7 +2752,7 @@ local function CreateIntentRulesTab()
         { text = "Sell", value = "sell" },
         { text = "Destroy", value = "destroy" },
         { text = "Mail", value = "mail" },
-        { text = "Gold", value = "gold" },
+        { text = "Hold", value = "hold" },
     }
 
     local actionDD = CreateFrame("Frame", "WildIntentActionDD", editor, "UIDropDownMenuTemplate")
@@ -2765,11 +2765,6 @@ local function CreateIntentRulesTab()
 
     local TARGET_OPTIONS = {
         { text = "Personal Bank", value = "character" },
-        { text = "Warband Bank", value = "warband" },
-        { text = "Guild Bank", value = "guild" },
-    }
-
-    local TARGET_OPTIONS_GOLD = {
         { text = "Warband Bank", value = "warband" },
         { text = "Guild Bank", value = "guild" },
     }
@@ -2804,7 +2799,7 @@ local function CreateIntentRulesTab()
     recipientInput:SetMaxLetters(50)
     recipientInput:SetFontObject("GameFontHighlight")
 
-    -- Gold target input (for gold action)
+    -- Gold target input (for hold action)
     local goldLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     goldLabel:SetText("Gold:")
 
@@ -2817,12 +2812,12 @@ local function CreateIntentRulesTab()
 
     local goldSuffix = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     goldSuffix:SetPoint("LEFT", goldInput, "RIGHT", 6, 0)
-    goldSuffix:SetText("|cffffd700gold to keep on character|r")
+    goldSuffix:SetText("|cffffd700gold to keep on character (0 = off)|r")
 
     local goldHint = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     goldHint:SetText("|cff888888Deposits excess / withdraws deficit to maintain this amount.|r")
 
-    -- Keep row (for deposit/withdraw/mail/destroy/sell)
+    -- Keep row (for deposit/withdraw/mail/destroy/sell/hold)
     local qtyLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     qtyLabel:SetText("Keep:")
 
@@ -3820,12 +3815,13 @@ local function CreateIntentRulesTab()
     -- Layout helper — positions rows in table layout based on action
     local function UpdateEditorLayout()
         local action = editorIntent.action or "deposit"
-        local isGold = (action == "gold")
+        local isHold = (action == "hold")
         local isMail = (action == "mail")
         local isTransfer = (action == "transfer")
-        local needsTarget = (action == "deposit" or action == "withdraw" or action == "gold" or action == "transfer")
-        local needsKeep = (action ~= "gold")
-        local needsCond = (action ~= "gold")
+        local needsTarget = (action == "deposit" or action == "withdraw" or action == "hold" or action == "transfer")
+        local needsKeep = true  -- all actions show keep (hold uses it for items)
+        local needsCond = true  -- all actions show conditions (hold uses them for items)
+        local needsGold = isHold
 
         sourceLabel:SetShown(needsTarget and not isTransfer)
         sourceDD:SetShown(needsTarget)
@@ -3834,10 +3830,10 @@ local function CreateIntentRulesTab()
         transferTargetLabel:SetShown(isTransfer)
         recipientLabel:SetShown(isMail)
         recipientInput:SetShown(isMail)
-        goldLabel:SetShown(isGold)
-        goldInput:SetShown(isGold)
-        goldSuffix:SetShown(isGold)
-        goldHint:SetShown(isGold)
+        goldLabel:SetShown(needsGold)
+        goldInput:SetShown(needsGold)
+        goldSuffix:SetShown(needsGold)
+        goldHint:SetShown(needsGold)
         qtyLabel:SetShown(needsKeep)
         qtyAllCB:SetShown(needsKeep)
         qtyInput:SetShown(needsKeep)
@@ -3853,14 +3849,10 @@ local function CreateIntentRulesTab()
             qtyHint:SetText("|cff888888items to keep in bank|r")
         elseif action == "transfer" then
             qtyHint:SetText("|cff888888items to keep in source bank|r")
+        elseif action == "hold" then
+            qtyHint:SetText("|cff888888items to maintain on character (0 = off)|r")
         else
             qtyHint:SetText("|cff888888items to keep on character|r")
-        end
-
-        -- For gold, exclude character bank from target options
-        if isGold and editorIntent.target == "character" then
-            editorIntent.target = "warband"
-            UIDropDownMenu_SetText(sourceDD, "Warband Bank")
         end
 
         -- For transfer, ensure source != target
@@ -3921,7 +3913,7 @@ local function CreateIntentRulesTab()
             lastRowAnchor = recipientLabel
         end
 
-        if isGold then
+        if needsGold then
             goldLabel:ClearAllPoints()
             goldLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING)
             goldInput:ClearAllPoints()
@@ -3976,9 +3968,7 @@ local function CreateIntentRulesTab()
     UIDropDownMenu_Initialize(sourceDD, function()
         local action = editorIntent.action or "deposit"
         local opts
-        if action == "gold" then
-            opts = TARGET_OPTIONS_GOLD
-        elseif action == "transfer" then
+        if action == "transfer" then
             -- For transfer, filter out the source value
             opts = {}
             for _, o in ipairs(TARGET_OPTIONS) do
@@ -4085,7 +4075,7 @@ local function CreateIntentRulesTab()
         UIDropDownMenu_SetText(transferSourceDD, sourceText)
 
         recipientInput:SetText(editorIntent.recipient or "")
-        goldInput:SetText(tostring(editorIntent.goldTarget or 1000))
+        goldInput:SetText(tostring(editorIntent.goldTarget or 0))
 
         -- Keep
         local keep = editorIntent.keep or 0
@@ -4112,7 +4102,36 @@ local function CreateIntentRulesTab()
     saveBtn:SetScript("OnClick", function()
         local action = editorIntent.action or "deposit"
 
-        if action ~= "gold" then
+        -- Hold: must have goldTarget > 0 or (keep > 0 with conditions)
+        if action == "hold" then
+            local goldVal = tonumber(goldInput:GetText()) or 0
+            local keepVal = qtyAllCB:GetChecked() and 0 or (tonumber(qtyInput:GetText()) or 0)
+            local hasGold = goldVal > 0
+            local hasItems = keepVal > 0
+            if hasItems then
+                local hasInclude = false
+                for _, g in ipairs(editorGroups) do
+                    if g.mode ~= "exclude" and g.conditions and #g.conditions > 0 then
+                        hasInclude = true
+                        break
+                    end
+                end
+                if not hasInclude then
+                    print("|cffff6600Wild:|r Hold with items needs at least one include group with conditions.")
+                    return
+                end
+            end
+            if not hasGold and not hasItems then
+                print("|cffff6600Wild:|r Hold needs a gold amount or items to keep (or both).")
+                return
+            end
+            -- Remove empty groups
+            for i = #editorGroups, 1, -1 do
+                if not editorGroups[i].conditions or #editorGroups[i].conditions == 0 then
+                    table.remove(editorGroups, i)
+                end
+            end
+        elseif action ~= "hold" then
             -- Validate: need at least one include group with conditions
             local hasInclude = false
             for _, g in ipairs(editorGroups) do
@@ -4166,9 +4185,9 @@ local function CreateIntentRulesTab()
         elseif action == "transfer" then
             savedIntent.source = editorIntent.source or "character"
             savedIntent.target = editorIntent.target or "warband"
-        elseif action == "gold" then
+        elseif action == "hold" then
             savedIntent.target = editorIntent.target or "warband"
-            savedIntent.goldTarget = tonumber(goldInput:GetText()) or 1000
+            savedIntent.goldTarget = tonumber(goldInput:GetText()) or 0
         elseif action == "mail" then
             savedIntent.recipient = recipientInput:GetText() or ""
         end
@@ -4177,20 +4196,18 @@ local function CreateIntentRulesTab()
             savedIntent.destroyUnsellable = true
         end
 
-        if action ~= "gold" then
-            if qtyAllCB:GetChecked() then
-                savedIntent.keep = 0
-            else
-                savedIntent.keep = tonumber(qtyInput:GetText()) or 0
+        if qtyAllCB:GetChecked() then
+            savedIntent.keep = 0
+        else
+            savedIntent.keep = tonumber(qtyInput:GetText()) or 0
+        end
+        for _, g in ipairs(editorGroups) do
+            local savedGroup = { mode = g.mode or "include", conditions = {} }
+            for _, c in ipairs(g.conditions or {}) do
+                local copy = {}; for k, v in pairs(c) do copy[k] = v end
+                table.insert(savedGroup.conditions, copy)
             end
-            for _, g in ipairs(editorGroups) do
-                local savedGroup = { mode = g.mode or "include", conditions = {} }
-                for _, c in ipairs(g.conditions or {}) do
-                    local copy = {}; for k, v in pairs(c) do copy[k] = v end
-                    table.insert(savedGroup.conditions, copy)
-                end
-                table.insert(savedIntent.groups, savedGroup)
-            end
+            table.insert(savedIntent.groups, savedGroup)
         end
 
         if editingIndex then

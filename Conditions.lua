@@ -905,17 +905,36 @@ end
 -- Returns false, reason if the intent is incomplete.
 -- ============================================================
 
-local ACTIONS_REQUIRING_TARGET = { deposit = true, withdraw = true, transfer = true, gold = true }
+local ACTIONS_REQUIRING_TARGET = { deposit = true, withdraw = true, transfer = true, hold = true }
 local ACTIONS_REQUIRING_CONDITIONS = { sell = true, destroy = true, deposit = true, withdraw = true, transfer = true, mail = true }
 
 local function ValidateIntent(intent)
     if not intent then return false, "nil intent" end
     if not intent.action or intent.action == "" then return false, "missing action" end
 
-    -- Gold intents don't need conditions
-    if intent.action == "gold" then
-        if not intent.target then return false, "gold intent missing target" end
-        if not intent.goldTarget or intent.goldTarget <= 0 then return false, "gold intent missing goldTarget" end
+    -- Hold intents: must have goldTarget > 0 or (keep > 0 with conditions)
+    if intent.action == "hold" then
+        if not intent.target then return false, "hold intent missing target" end
+        local hasGold = intent.goldTarget and intent.goldTarget > 0
+        local hasItems = (intent.keep or 0) > 0
+        if hasItems then
+            local groups = intent.groups
+            if not groups or #groups == 0 then return false, "hold intent with keep > 0 needs conditions" end
+            local hasInclude = false
+            for gi, group in ipairs(groups) do
+                local conds = group.conditions
+                if not conds or #conds == 0 then return false, "group " .. gi .. " has no conditions" end
+                if group.mode ~= "exclude" then hasInclude = true end
+                for ci, cond in ipairs(conds) do
+                    if not cond.attr or cond.attr == "" then return false, "group " .. gi .. " condition " .. ci .. " missing attribute" end
+                    if not cond.op or cond.op == "" then return false, "group " .. gi .. " condition " .. ci .. " missing operator" end
+                    if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
+                    if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
+                end
+            end
+            if not hasInclude then return false, "no include groups" end
+        end
+        if not hasGold and not hasItems then return false, "hold intent needs goldTarget or keep with conditions" end
         return true
     end
 
@@ -938,7 +957,7 @@ local function ValidateIntent(intent)
         if not hasInclude then return false, "no include groups" end
     end
 
-    -- Target required for bank/gold actions
+    -- Target required for bank/hold actions
     if ACTIONS_REQUIRING_TARGET[intent.action] and not intent.target then
         return false, "missing target"
     end
@@ -1043,7 +1062,7 @@ local ACTION_LABELS = {
     sell     = "|cffffcc00sells|r",
     destroy  = "|cffff4444destroys|r",
     mail     = "|cff88aaffmails|r",
-    gold     = "|cffffd700keeps|r",
+    hold     = "|cffffd700holds|r",
     transfer = "|cff00ccfftransfers|r",
 }
 
@@ -1329,11 +1348,34 @@ local function GetIntentSummary(intent)
         who = FormatWhoClause(charConds)
     end
 
-    -- Gold: special format
-    if intent.action == "gold" then
-        local goldAmt = intent.goldTarget or 0
+    -- Hold: special format (gold + items)
+    if intent.action == "hold" then
         local bank = TARGET_LABELS[intent.target] or intent.target or "Warband Bank"
-        return who .. " " .. ACTION_LABELS.gold .. " " .. string.format("%dg synced with %s", goldAmt, bank)
+        local holdParts = {}
+        local goldAmt = intent.goldTarget or 0
+        if goldAmt > 0 then
+            holdParts[#holdParts + 1] = string.format("%dg", goldAmt)
+        end
+        local keep = intent.keep or 0
+        if keep > 0 then
+            local itemIncDescs = {}
+            for _, group in ipairs(groups) do
+                if group.mode ~= "exclude" then
+                    local itemConds = {}
+                    if group.conditions then
+                        for _, c in ipairs(group.conditions) do
+                            if not c.attr or c.attr:sub(1, 5) ~= "char." then
+                                itemConds[#itemConds + 1] = c
+                            end
+                        end
+                    end
+                    itemIncDescs[#itemIncDescs + 1] = FormatItemDescription(itemConds)
+                end
+            end
+            local itemDesc = #itemIncDescs > 0 and table.concat(itemIncDescs, " or ") or "items"
+            holdParts[#holdParts + 1] = keep .. " " .. itemDesc
+        end
+        return who .. " " .. ACTION_LABELS.hold .. " " .. table.concat(holdParts, " + ") .. " synced with " .. bank
     end
 
     local verb = ACTION_LABELS[intent.action] or intent.action

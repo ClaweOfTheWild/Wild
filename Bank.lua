@@ -383,33 +383,88 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
     local prefix = string.format("|cff00ccffWild:|r [%d/%d] ", queuePos, queueLen)
     local movedItems = false
 
-    if intent.action == "gold" then
-        -- Gold actions are atomic — one pass is enough
-        local currentCopper = GetMoney()
-        local keepCopper = (intent.goldTarget or 1000) * Wild.COPPER_PER_GOLD
+    if intent.action == "hold" then
         local reservoir = intent.target or "warband"
+        local goldTarget = intent.goldTarget or 0
+        local keep = intent.keep or 0
 
-        if currentCopper > keepCopper then
-            local depositCopper = currentCopper - keepCopper
-            if reservoir == "warband" then
-                C_Bank.DepositMoney(Enum.BankType.Account, depositCopper)
-            elseif reservoir == "guild" then
-                DepositGuildBankMoney(depositCopper)
-            end
-            print(prefix .. "Deposited " .. Wild.FormatGold(depositCopper) .. ".")
-        elseif currentCopper < keepCopper then
-            local withdrawCopper = keepCopper - currentCopper
-            if reservoir == "warband" and triggerSource == "warband" then
-                C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
-                print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
-            elseif reservoir == "guild" and triggerSource == "guild" then
-                WithdrawGuildBankMoney(withdrawCopper)
-                print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+        -- Phase 1: Gold sync (atomic, one pass)
+        if goldTarget > 0 and reservoir ~= "character" then
+            local currentCopper = GetMoney()
+            local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
+
+            if currentCopper > keepCopper then
+                local depositCopper = currentCopper - keepCopper
+                if reservoir == "warband" then
+                    C_Bank.DepositMoney(Enum.BankType.Account, depositCopper)
+                elseif reservoir == "guild" then
+                    DepositGuildBankMoney(depositCopper)
+                end
+                print(prefix .. "Deposited " .. Wild.FormatGold(depositCopper) .. ".")
+            elseif currentCopper < keepCopper then
+                local withdrawCopper = keepCopper - currentCopper
+                if reservoir == "warband" and triggerSource == "warband" then
+                    C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
+                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                elseif reservoir == "guild" and triggerSource == "guild" then
+                    WithdrawGuildBankMoney(withdrawCopper)
+                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                else
+                    BlogMsg("Gold deficit but trigger source (" .. tostring(triggerSource) .. ") != reservoir (" .. reservoir .. ") — skipping withdraw.")
+                end
             else
-                print(prefix .. "Gold already at target. [" .. summary .. "]")
+                BlogMsg("Gold already at target.")
             end
-        else
-            print(prefix .. "Gold already at target. [" .. summary .. "]")
+        end
+
+        -- Phase 2: Item sync (bidirectional, retry-until-done)
+        if keep > 0 then
+            local current = Wild.CountMatchingInBags(intent, charCtx)
+            if current < keep then
+                -- Withdraw deficit from bank
+                local deficit = keep - current
+                local withdrawFunc = WITHDRAW_FUNCS[reservoir]
+                if withdrawFunc then
+                    local count, entries = withdrawFunc(intent, charCtx, deficit)
+                    if count > 0 then
+                        for _, entry in ipairs(entries) do
+                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                        end
+                        if passNum == 1 then
+                            print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                        end
+                        movedItems = true
+                    else
+                        if passNum == 1 then
+                            print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
+                        end
+                    end
+                else
+                    print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
+                end
+            elseif current > keep then
+                -- Deposit excess to bank
+                local excess = current - keep
+                local bankType = TARGET_BANK_TYPE[reservoir]
+                local count, entries = DepositFromBags(intent, charCtx, excess, bankType)
+                if count > 0 then
+                    for _, entry in ipairs(entries) do
+                        print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
+                    end
+                    if passNum == 1 then
+                        print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                    end
+                    movedItems = true
+                else
+                    if passNum == 1 then
+                        print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
+                    end
+                end
+            else
+                if passNum == 1 then
+                    BlogMsg("Items already at target (" .. current .. "/" .. keep .. ").")
+                end
+            end
         end
 
     elseif intent.action == "deposit" then
@@ -651,7 +706,7 @@ end
 -- ============================================================
 
 local function IntentFiresFor(intent, accessibleSources)
-    if intent.action == "deposit" or intent.action == "withdraw" or intent.action == "gold" then
+    if intent.action == "deposit" or intent.action == "withdraw" or intent.action == "hold" then
         if accessibleSources[intent.target] then
             return intent.target
         end

@@ -115,7 +115,6 @@ All features should support slash subcommands:
 /wild <feature> <setting>   — Get or set a specific setting
 /wild bank run              — Manually trigger bank filter rules (while bank is open)
 /wild bank rules            — List configured filter rules
-/wild bank keepgold <n>     — Set gold-to-keep amount
 /wild repair on|off         — Toggle auto-repair
 /wild repair guild on|off   — Toggle guild funds
 /wild loot on|off           — Toggle quick loot
