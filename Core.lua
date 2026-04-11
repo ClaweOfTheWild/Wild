@@ -70,6 +70,12 @@ local defaults = {
         minLevel = 0,
         maxLevel = 0,
     },
+    craftingOrders = {
+        enabled = false,
+        filters = {},
+        minLevel = 0,
+        maxLevel = 0,
+    },
     dungeonBar = {
         enabled = false,
         autoShowInInstance = false,
@@ -114,6 +120,10 @@ local defaults = {
     },
     mail = {
         autoOpen = false,
+    },
+    volumeControl = {
+        enabled = false,
+        buttonPos = nil,
     },
     intents = {},
     actors = {
@@ -460,10 +470,12 @@ local FEATURES = {
     delve            = { key = "delveAutoSelectPower" },
     tooltip          = { key = "tooltip.enabled" },
     auctionhouse     = { key = "auctionHouse.enabled" },
+    craftingorders   = { key = "craftingOrders.enabled" },
     mail             = { key = "mail.autoOpen" },
     dungeonbar       = { key = "dungeonBar.enabled" },
     autoaccept       = { key = "quests.autoAccept" },
     autohandin       = { key = "quests.autoHandIn" },
+    volume           = { key = "volumeControl.enabled", onToggle = function() Wild.UpdateVolumeControl() end },
 }
 
 Wild.FEATURES = FEATURES

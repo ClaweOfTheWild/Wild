@@ -1119,6 +1119,167 @@ local function CreateAuctionHouseTab()
 end
 
 -- ============================================================
+-- Tab: Crafting Orders
+-- ============================================================
+local function CreateCraftingOrdersTab()
+    local panel = CreateFrame("Frame")
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(800)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Crafting Orders")
+
+    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Configure default filters applied every time the Crafting Orders UI opens.|r")
+
+    -- Enable checkbox
+    local enableCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    enableCB.Text:SetText("Enable default Crafting Orders filters")
+    enableCB.tooltipText = "Automatically apply the selected filters whenever you open the Crafting Orders UI."
+
+    enableCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.craftingOrders.enabled = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    -- Filter list: enum key, display label (enum resolved lazily since the UI loads on demand)
+    local filterDefs = {
+        { key = "UncollectedOnly",      label = "Uncollected Only" },
+        { key = "UsableOnly",           label = "Usable Only" },
+        { key = "CurrentExpansionOnly", label = "Current Expansion Only" },
+        { section = "Equipment" },
+        { key = "UpgradesOnly",         label = "Upgrades Only" },
+        { section = "Rarity" },
+        { key = "PoorQuality",          label = "|cff9d9d9dPoor|r Quality" },
+        { key = "CommonQuality",        label = "|cffffffffCommon|r Quality" },
+        { key = "UncommonQuality",      label = "|cff1eff00Uncommon|r Quality" },
+        { key = "RareQuality",          label = "|cff0070ddRare|r Quality" },
+        { key = "EpicQuality",          label = "|cffa335eeEpic|r Quality" },
+        { key = "LegendaryQuality",     label = "|cffff8000Legendary|r Quality" },
+        { key = "ArtifactQuality",      label = "|cffe6cc80Artifact|r Quality" },
+    }
+
+    local filterHeader = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    filterHeader:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 2, -16)
+    filterHeader:SetText("Default Filters")
+
+    -- Level range
+    local levelHeader = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    local levelDesc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    local minLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    local minBox = CreateFrame("EditBox", nil, sc, "InputBoxTemplate")
+    local maxLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    local maxBox = CreateFrame("EditBox", nil, sc, "InputBoxTemplate")
+
+    levelHeader:SetPoint("TOPLEFT", filterHeader, "BOTTOMLEFT", 0, -12)
+    levelHeader:SetText("Level Range")
+    levelDesc:SetPoint("TOPLEFT", levelHeader, "BOTTOMLEFT", 0, -4)
+    levelDesc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    levelDesc:SetJustifyH("LEFT")
+    levelDesc:SetText("|cff888888Set minimum and maximum item level. Leave at 0 to ignore.|r")
+    minLabel:SetText("Min Level:")
+    minLabel:SetPoint("TOPLEFT", levelDesc, "BOTTOMLEFT", 0, -10)
+    minBox:SetSize(60, 20)
+    minBox:SetPoint("LEFT", minLabel, "RIGHT", 8, 0)
+    minBox:SetAutoFocus(false)
+    minBox:SetNumeric(true)
+    minBox:SetMaxLetters(4)
+    minBox:SetScript("OnEnterPressed", function(self)
+        Wild.db.craftingOrders.minLevel = tonumber(self:GetText()) or 0
+        self:ClearFocus()
+    end)
+    minBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    maxLabel:SetText("Max Level:")
+    maxLabel:SetPoint("LEFT", minBox, "RIGHT", 20, 0)
+    maxBox:SetSize(60, 20)
+    maxBox:SetPoint("LEFT", maxLabel, "RIGHT", 8, 0)
+    maxBox:SetAutoFocus(false)
+    maxBox:SetNumeric(true)
+    maxBox:SetMaxLetters(4)
+    maxBox:SetScript("OnEnterPressed", function(self)
+        Wild.db.craftingOrders.maxLevel = tonumber(self:GetText()) or 0
+        self:ClearFocus()
+    end)
+    maxBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    -- Checkboxes are created lazily because Enum.AuctionHouseFilter
+    -- may not exist until Blizzard_AuctionHouseUI is loaded.
+    local filterCBs = {}
+    local filtersBuilt = false
+
+    local function BuildFilterCheckboxes()
+        if filtersBuilt then return end
+        filtersBuilt = true
+
+        local ahEnum = Enum and Enum.AuctionHouseFilter
+        local lastAnchor = minLabel
+        local lastType = "levelrange"
+        for _, def in ipairs(filterDefs) do
+            if def.section then
+                local sectionHdr = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+                sectionHdr:SetPoint("TOPLEFT", lastAnchor, "BOTTOMLEFT", lastType == "cb" and 2 or 0, -16)
+                sectionHdr:SetText(def.section)
+                lastAnchor = sectionHdr
+                lastType = "header"
+            else
+                local enumVal = ahEnum and ahEnum[def.key]
+                if enumVal then
+                    local cb = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+                    local xOff = (lastType == "header" or lastType == "levelrange") and -2 or 0
+                    local yOff = lastType == "levelrange" and -16 or -4
+                    cb:SetPoint("TOPLEFT", lastAnchor, "BOTTOMLEFT", xOff, yOff)
+                    cb.Text:SetText(def.label)
+                    cb.enumVal = enumVal
+                    cb:SetScript("OnClick", function(self)
+                        local checked = self:GetChecked()
+                        Wild.db.craftingOrders.filters[self.enumVal] = checked
+                        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+                    end)
+                    filterCBs[#filterCBs + 1] = cb
+                    lastAnchor = cb
+                    lastType = "cb"
+                end
+            end
+        end
+
+        if #filterCBs == 0 then
+            local noEnum = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            noEnum:SetPoint("TOPLEFT", minLabel, "BOTTOMLEFT", 0, -8)
+            noEnum:SetText("|cffff8888Crafting Orders filters are not yet available. Open the Crafting Orders or Auction House UI once first.|r")
+        end
+    end
+
+    -- OnShow: build checkboxes lazily, then sync UI with saved data
+    panel:SetScript("OnShow", function()
+        BuildFilterCheckboxes()
+        if not Wild.db then return end
+        local cfg = Wild.db.craftingOrders
+        enableCB:SetChecked(cfg.enabled)
+        for _, cb in ipairs(filterCBs) do
+            cb:SetChecked(cfg.filters[cb.enumVal] and true or false)
+        end
+        minBox:SetText(tostring(cfg.minLevel or 0))
+        maxBox:SetText(tostring(cfg.maxLevel or 0))
+    end)
+
+    return panel
+end
+
+-- ============================================================
 -- Tab: Mail
 -- ============================================================
 local function CreateMailTab()
@@ -4585,6 +4746,43 @@ local function CreateActorsTab()
 end
 
 -- ============================================================
+-- Volume Control tab
+-- ============================================================
+local function CreateVolumeTab()
+    local panel = CreateFrame("Frame")
+
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Volume Control")
+
+    local desc = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Show a small draggable speaker icon with quick volume sliders.|r")
+
+    local enableCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    enableCB.Text:SetText("Enable Volume Button")
+    enableCB.tooltipText = "Show a small speaker icon on screen. Click it to open volume controls."
+
+    enableCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.volumeControl.enabled = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        Wild.UpdateVolumeControl()
+    end)
+
+    panel:SetScript("OnShow", function()
+        if Wild.db and Wild.db.volumeControl then
+            enableCB:SetChecked(Wild.db.volumeControl.enabled)
+        end
+    end)
+
+    return panel
+end
+
+-- ============================================================
 -- Initialize
 -- ============================================================
 local loader = CreateFrame("Frame")
@@ -4602,6 +4800,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     EndCollapsibleGroup()
     AddTab("Character", CreateCharacterTab())
     AddTab("Auction House", CreateAuctionHouseTab())
+    AddTab("Crafting Orders", CreateCraftingOrdersTab())
     AddTab("Mail", CreateMailTab())
     AddTab("Inventory", CreateInventoryTab())
     AddTab("Loot", CreateLootTab())
@@ -4614,6 +4813,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     AddTab("Auto-Reply", CreateAutoReplyTab(), true)
     EndCollapsibleGroup()
     AddTab("Delve", CreateDelveTab())
+    AddTab("Volume", CreateVolumeTab())
     AddTab("Advanced", CreateAdvancedTab())
     LayoutSidebar()
     SelectTab("LFG")

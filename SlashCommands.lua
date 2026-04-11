@@ -46,6 +46,7 @@ local FEATURE_NAMES = {
     delve            = "Delve Auto-Select Power",
     tooltip          = "Tooltip Enhancements",
     auctionhouse     = "Auction House Defaults",
+    craftingorders   = "Crafting Orders Defaults",
     dungeonbar       = "Dungeon Bar",
     autoaccept       = "Quest Auto-Accept",
     autohandin       = "Quest Auto-Hand-In",
@@ -86,8 +87,9 @@ subcommands.help = function()
     print(" ")
     print("|cff00ccff  Features:|r lfg, circle, repair, sell, loot, autoloot,")
     print("    bank, bankcharacter, bankguild, inventory, reputation,")
-    print("    delve, tooltip, auctionhouse (ah), dungeonbar (bar),")
-    print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters")
+    print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar),")
+    print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
+    print("    volume (vol)")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -132,6 +134,8 @@ subcommands.help = function()
     Print("/wild dungeonbar on|off — Toggle dungeon bar")
     Print("/wild dungeonbar show|hide|toggle — Control visibility")
     print(" ")
+    Print("/wild volume on|off — Toggle volume control button")
+    print(" ")
     Print("/wild trace start — Start recording events")
     Print("/wild trace stop — Stop recording")
     Print("/wild trace filter <text> — Filter events by name")
@@ -154,7 +158,7 @@ subcommands.status = function()
         "circle", "repair", "sell", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
         "inventory", "reputation", "delve", "tooltip",
-        "auctionhouse", "dungeonbar", "autoaccept", "autohandin",
+        "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -415,6 +419,13 @@ subcommands.auctionhouse = function(args)
 end
 subcommands.ah = subcommands.auctionhouse
 
+-- /wild craftingorders [on|off]  (alias: co)
+subcommands.craftingorders = function(args)
+    if HandleGenericFeature("craftingorders", args) then return end
+    Print("Usage: /wild craftingorders on|off")
+end
+subcommands.co = subcommands.craftingorders
+
 -- /wild dungeonbar [on|off|show|hide|toggle]  (alias: bar)
 subcommands.dungeonbar = function(args)
     if #args == 0 then
@@ -556,6 +567,12 @@ subcommands.find = function(args)
     end
 end
 subcommands.search = subcommands.find
+
+-- /wild volume on|off — toggle volume control button
+subcommands.volume = function(args)
+    HandleGenericFeature("volume", args)
+end
+subcommands.vol = subcommands.volume
 
 -- /wild datastore [status|clear|refresh] — manage cross-character datastore
 subcommands.datastore = function(args)

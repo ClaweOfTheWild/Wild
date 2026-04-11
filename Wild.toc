@@ -18,6 +18,7 @@ Vendor.lua
 Reputation.lua
 Currency.lua
 AuctionHouse.lua
+CraftingOrders.lua
 Mail.lua
 Delve.lua
 DungeonBar.lua
@@ -27,5 +28,6 @@ Gossip.lua
 DarkmoonFaire.lua
 Loot.lua
 Tooltip.lua
+VolumeControl.lua
 SlashCommands.lua
 Settings.lua
