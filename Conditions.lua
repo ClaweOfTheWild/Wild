@@ -827,10 +827,12 @@ local function IntentMatchesItem(intent, itemID, containerInfo, charCtx)
         DebugMsg(string.format("Evaluating |cffffffff%s|r against %d group(s)", itemName, #groups))
     end
 
-    -- Separate include and exclude groups
+    -- Separate include and exclude groups (skip gold groups — they don't match items)
     local includeGroups, excludeGroups = {}, {}
     for _, group in ipairs(groups) do
-        if group.mode == "exclude" then
+        if group.kind == "gold" then
+            -- gold groups are not item matchers
+        elseif group.mode == "exclude" then
             excludeGroups[#excludeGroups + 1] = group
         else
             includeGroups[#includeGroups + 1] = group
@@ -912,16 +914,45 @@ local function ValidateIntent(intent)
     if not intent then return false, "nil intent" end
     if not intent.action or intent.action == "" then return false, "missing action" end
 
-    -- Hold intents: must have goldTarget > 0 or (keep > 0 with conditions)
+    local groups = intent.groups or {}
+
+    -- Hold intents: must have at least one gold or items group
     if intent.action == "hold" then
         if not intent.target then return false, "hold intent missing target" end
-        local hasGold = intent.goldTarget and intent.goldTarget > 0
-        local hasItems = (intent.keep or 0) > 0
-        if hasItems then
-            local groups = intent.groups
-            if not groups or #groups == 0 then return false, "hold intent with keep > 0 needs conditions" end
-            local hasInclude = false
-            for gi, group in ipairs(groups) do
+        local hasGold = false
+        local hasItems = false
+        for gi, group in ipairs(groups) do
+            if group.mode ~= "exclude" then
+                if group.kind == "gold" then
+                    if (group.gold or 0) > 0 then hasGold = true end
+                else
+                    local conds = group.conditions
+                    if conds and #conds > 0 and (group.count or 0) > 0 then
+                        hasItems = true
+                    end
+                    if conds then
+                        for ci, cond in ipairs(conds) do
+                            if not cond.attr or cond.attr == "" then return false, "group " .. gi .. " condition " .. ci .. " missing attribute" end
+                            if not cond.op or cond.op == "" then return false, "group " .. gi .. " condition " .. ci .. " missing operator" end
+                            if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
+                            if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
+                        end
+                    end
+                end
+            end
+        end
+        if not hasGold and not hasItems then return false, "hold intent needs a gold group or item groups with count" end
+        return true
+    end
+
+    -- All other item-matching actions need at least one item include group with conditions
+    if ACTIONS_REQUIRING_CONDITIONS[intent.action] then
+        if not groups or #groups == 0 then return false, "no groups" end
+        local hasInclude = false
+        for gi, group in ipairs(groups) do
+            if group.kind == "gold" then
+                -- gold groups are only valid for hold action
+            else
                 local conds = group.conditions
                 if not conds or #conds == 0 then return false, "group " .. gi .. " has no conditions" end
                 if group.mode ~= "exclude" then hasInclude = true end
@@ -931,27 +962,6 @@ local function ValidateIntent(intent)
                     if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
                     if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
                 end
-            end
-            if not hasInclude then return false, "no include groups" end
-        end
-        if not hasGold and not hasItems then return false, "hold intent needs goldTarget or keep with conditions" end
-        return true
-    end
-
-    -- All other item-matching actions need at least one group with conditions
-    if ACTIONS_REQUIRING_CONDITIONS[intent.action] then
-        local groups = intent.groups
-        if not groups or #groups == 0 then return false, "no groups" end
-        local hasInclude = false
-        for gi, group in ipairs(groups) do
-            local conds = group.conditions
-            if not conds or #conds == 0 then return false, "group " .. gi .. " has no conditions" end
-            if group.mode ~= "exclude" then hasInclude = true end
-            for ci, cond in ipairs(conds) do
-                if not cond.attr or cond.attr == "" then return false, "group " .. gi .. " condition " .. ci .. " missing attribute" end
-                if not cond.op or cond.op == "" then return false, "group " .. gi .. " condition " .. ci .. " missing operator" end
-                if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
-                if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
             end
         end
         if not hasInclude then return false, "no include groups" end
@@ -1348,19 +1358,15 @@ local function GetIntentSummary(intent)
         who = FormatWhoClause(charConds)
     end
 
-    -- Hold: special format (gold + items)
+    -- Hold: special format (gold + items per group)
     if intent.action == "hold" then
         local bank = TARGET_LABELS[intent.target] or intent.target or "Warband Bank"
         local holdParts = {}
-        local goldAmt = intent.goldTarget or 0
-        if goldAmt > 0 then
-            holdParts[#holdParts + 1] = string.format("%dg", goldAmt)
-        end
-        local keep = intent.keep or 0
-        if keep > 0 then
-            local itemIncDescs = {}
-            for _, group in ipairs(groups) do
-                if group.mode ~= "exclude" then
+        for _, group in ipairs(groups) do
+            if group.mode ~= "exclude" then
+                if group.kind == "gold" and (group.gold or 0) > 0 then
+                    holdParts[#holdParts + 1] = string.format("%dg", group.gold)
+                elseif group.kind ~= "gold" and (group.count or 0) > 0 then
                     local itemConds = {}
                     if group.conditions then
                         for _, c in ipairs(group.conditions) do
@@ -1369,34 +1375,40 @@ local function GetIntentSummary(intent)
                             end
                         end
                     end
-                    itemIncDescs[#itemIncDescs + 1] = FormatItemDescription(itemConds)
+                    local desc = FormatItemDescription(itemConds)
+                    holdParts[#holdParts + 1] = group.count .. " " .. desc
                 end
             end
-            local itemDesc = #itemIncDescs > 0 and table.concat(itemIncDescs, " or ") or "items"
-            holdParts[#holdParts + 1] = keep .. " " .. itemDesc
         end
         return who .. " " .. ACTION_LABELS.hold .. " " .. table.concat(holdParts, " + ") .. " synced with " .. bank
     end
 
     local verb = ACTION_LABELS[intent.action] or intent.action
-    local keep = intent.keep or 0
 
-    -- Build per-group item descriptions
+    -- Build per-group item descriptions (with per-group count)
     local includeDescs, excludeDescs = {}, {}
     for _, group in ipairs(groups) do
-        local itemConds = {}
-        if group.conditions then
-            for _, c in ipairs(group.conditions) do
-                if not c.attr or c.attr:sub(1, 5) ~= "char." then
-                    itemConds[#itemConds + 1] = c
+        if group.kind == "gold" then
+            -- skip gold groups for non-hold actions
+        else
+            local itemConds = {}
+            if group.conditions then
+                for _, c in ipairs(group.conditions) do
+                    if not c.attr or c.attr:sub(1, 5) ~= "char." then
+                        itemConds[#itemConds + 1] = c
+                    end
                 end
             end
-        end
-        local desc = FormatItemDescription(itemConds)
-        if group.mode == "exclude" then
-            excludeDescs[#excludeDescs + 1] = desc
-        else
-            includeDescs[#includeDescs + 1] = desc
+            local desc = FormatItemDescription(itemConds)
+            local count = group.count or 0
+            if count > 0 and group.mode ~= "exclude" then
+                desc = desc .. " (keep " .. count .. ")"
+            end
+            if group.mode == "exclude" then
+                excludeDescs[#excludeDescs + 1] = desc
+            else
+                includeDescs[#includeDescs + 1] = desc
+            end
         end
     end
 
@@ -1412,17 +1424,8 @@ local function GetIntentSummary(intent)
         itemDesc = itemDesc .. " |cffff6666except|r " .. table.concat(excludeDescs, " or ")
     end
 
-    -- Build: "Who verb [all] itemDesc [, keeping N] [to/from target]"
-    local result = who .. " " .. verb
-
-    if keep == 0 then
-        result = result .. " all " .. itemDesc
-    else
-        result = result .. " " .. itemDesc .. ", keeping " .. keep
-        if intent.action == "withdraw" or intent.action == "transfer" then
-            result = result .. " in source bank"
-        end
-    end
+    -- Build: "Who verb itemDesc [to/from target]"
+    local result = who .. " " .. verb .. " " .. itemDesc
 
     -- Target / recipient
     if intent.action == "deposit" and intent.target then
@@ -1466,6 +1469,51 @@ local function CountMatchingInBags(intent, charCtx)
         end
     end
     return total
+end
+
+-- ============================================================
+-- Per-group helpers
+-- ============================================================
+
+-- Build a sub-intent scoped to a single include group + all exclude groups.
+-- This lets existing matching/counting functions work per-group.
+local function SubIntentForGroup(intent, group)
+    local groups = { group }
+    for _, g in ipairs(intent.groups or {}) do
+        if g.mode == "exclude" then
+            groups[#groups + 1] = g
+        end
+    end
+    return {
+        action = intent.action,
+        target = intent.target,
+        source = intent.source,
+        recipient = intent.recipient,
+        actors = intent.actors,
+        groups = groups,
+    }
+end
+
+-- Sum gold target from all gold-kind include groups.
+local function GetIntentGoldTarget(intent)
+    local total = 0
+    for _, g in ipairs(intent.groups or {}) do
+        if g.mode ~= "exclude" and g.kind == "gold" then
+            total = total + (g.gold or 0)
+        end
+    end
+    return total
+end
+
+-- Collect all item-kind include groups (convenience iterator).
+local function GetItemGroups(intent)
+    local result = {}
+    for _, g in ipairs(intent.groups or {}) do
+        if g.mode ~= "exclude" and g.kind ~= "gold" then
+            result[#result + 1] = g
+        end
+    end
+    return result
 end
 
 -- ============================================================
@@ -1515,5 +1563,8 @@ Wild.GetIntentSummary = GetIntentSummary
 Wild.FormatConditionValue = FormatConditionValue
 Wild.ValidateIntent = ValidateIntent
 Wild.CountMatchingInBags = CountMatchingInBags
+Wild.SubIntentForGroup = SubIntentForGroup
+Wild.GetIntentGoldTarget = GetIntentGoldTarget
+Wild.GetItemGroups = GetItemGroups
 Wild.FormatGold = FormatGold
 Wild.COPPER_PER_GOLD = COPPER_PER_GOLD

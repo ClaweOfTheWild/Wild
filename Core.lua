@@ -193,6 +193,37 @@ frame:SetScript("OnEvent", function(self, event, addon)
         end
     end
 
+    -- Migrate goldTarget / keep from intent root into groups
+    for _, intent in ipairs(WildDB.intents) do
+        local migrated = false
+        -- Migrate goldTarget into a gold-kind include group
+        if intent.goldTarget and intent.goldTarget > 0 then
+            if not intent.groups then intent.groups = {} end
+            table.insert(intent.groups, 1, { mode = "include", kind = "gold", gold = intent.goldTarget })
+            migrated = true
+        end
+        intent.goldTarget = nil
+        -- Migrate keep into existing item include groups as count
+        local keep = intent.keep
+        if keep and keep > 0 then
+            for _, g in ipairs(intent.groups or {}) do
+                if g.mode ~= "exclude" and g.kind ~= "gold" then
+                    if g.count == nil then
+                        g.count = keep
+                    end
+                end
+            end
+            migrated = true
+        end
+        intent.keep = nil
+        -- Ensure all include item groups have kind = "items"
+        for _, g in ipairs(intent.groups or {}) do
+            if g.mode ~= "exclude" and not g.kind then
+                g.kind = "items"
+            end
+        end
+    end
+
     ApplyDefaults(WildDB, defaults)
     Wild.db = WildDB
 

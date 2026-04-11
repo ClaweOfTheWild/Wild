@@ -385,10 +385,9 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
 
     if intent.action == "hold" then
         local reservoir = intent.target or "warband"
-        local goldTarget = intent.goldTarget or 0
-        local keep = intent.keep or 0
 
-        -- Phase 1: Gold sync (atomic, one pass)
+        -- Phase 1: Gold sync (atomic, one pass) from gold-kind groups
+        local goldTarget = Wild.GetIntentGoldTarget(intent)
         if goldTarget > 0 and reservoir ~= "character" then
             local currentCopper = GetMoney()
             local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
@@ -417,87 +416,92 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
             end
         end
 
-        -- Phase 2: Item sync (bidirectional, retry-until-done)
-        if keep > 0 then
-            local current = Wild.CountMatchingInBags(intent, charCtx)
-            if current < keep then
-                -- Withdraw deficit from bank
-                local deficit = keep - current
-                local withdrawFunc = WITHDRAW_FUNCS[reservoir]
-                if withdrawFunc then
-                    local count, entries = withdrawFunc(intent, charCtx, deficit)
+        -- Phase 2: Item sync per include group (bidirectional, retry-until-done)
+        for _, group in ipairs(Wild.GetItemGroups(intent)) do
+            local keep = group.count or 0
+            if keep > 0 then
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                local current = Wild.CountMatchingInBags(subIntent, charCtx)
+                if current < keep then
+                    local deficit = keep - current
+                    local withdrawFunc = WITHDRAW_FUNCS[reservoir]
+                    if withdrawFunc then
+                        local count, entries = withdrawFunc(subIntent, charCtx, deficit)
+                        if count > 0 then
+                            for _, entry in ipairs(entries) do
+                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                            end
+                            if passNum == 1 then
+                                print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                            end
+                            movedItems = true
+                        else
+                            if passNum == 1 then
+                                print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
+                            end
+                        end
+                    else
+                        print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
+                    end
+                elseif current > keep then
+                    local excess = current - keep
+                    local bankType = TARGET_BANK_TYPE[reservoir]
+                    local count, entries = DepositFromBags(subIntent, charCtx, excess, bankType)
                     if count > 0 then
                         for _, entry in ipairs(entries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                            print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
                         end
                         if passNum == 1 then
-                            print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                            print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
                         end
                         movedItems = true
                     else
                         if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
+                            print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
                         end
                     end
                 else
-                    print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
-                end
-            elseif current > keep then
-                -- Deposit excess to bank
-                local excess = current - keep
-                local bankType = TARGET_BANK_TYPE[reservoir]
-                local count, entries = DepositFromBags(intent, charCtx, excess, bankType)
-                if count > 0 then
-                    for _, entry in ipairs(entries) do
-                        print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
-                    end
                     if passNum == 1 then
-                        print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                        BlogMsg("Items already at target (" .. current .. "/" .. keep .. ").")
                     end
-                    movedItems = true
-                else
-                    if passNum == 1 then
-                        print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
-                    end
-                end
-            else
-                if passNum == 1 then
-                    BlogMsg("Items already at target (" .. current .. "/" .. keep .. ").")
                 end
             end
         end
 
     elseif intent.action == "deposit" then
-        local keep = intent.keep or 0
-        local maxDeposit = 0
-        if keep > 0 then
-            local current = Wild.CountMatchingInBags(intent, charCtx)
-            local excess = current - keep
-            if excess <= 0 then
-                maxDeposit = -1
-            else
-                maxDeposit = excess
-            end
-        end
-        if maxDeposit ~= -1 then
-            local bankType = TARGET_BANK_TYPE[intent.target]
-            local count, entries = DepositFromBags(intent, charCtx, maxDeposit, bankType)
-            if count > 0 then
-                for _, entry in ipairs(entries) do
-                    print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
-                end
-                if passNum == 1 then
-                    print(prefix .. string.format("Deposited %d item(s). [%s]", count, summary))
-                end
-                movedItems = true
-            else
-                if passNum == 1 then
-                    print(prefix .. "|cff888888No matching items in bags.|r [" .. summary .. "]")
+        local bankType = TARGET_BANK_TYPE[intent.target]
+        for _, group in ipairs(Wild.GetItemGroups(intent)) do
+            local keep = group.count or 0
+            local subIntent = Wild.SubIntentForGroup(intent, group)
+            local maxDeposit = 0
+            if keep > 0 then
+                local current = Wild.CountMatchingInBags(subIntent, charCtx)
+                local excess = current - keep
+                if excess <= 0 then
+                    maxDeposit = -1
+                else
+                    maxDeposit = excess
                 end
             end
-        else
-            if passNum == 1 then
-                print(prefix .. "|cff888888Keeping all (have " .. Wild.CountMatchingInBags(intent, charCtx) .. ", keep " .. keep .. ").|r [" .. summary .. "]")
+            if maxDeposit ~= -1 then
+                local count, entries = DepositFromBags(subIntent, charCtx, maxDeposit, bankType)
+                if count > 0 then
+                    for _, entry in ipairs(entries) do
+                        print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
+                    end
+                    if passNum == 1 then
+                        print(prefix .. string.format("Deposited %d item(s). [%s]", count, summary))
+                    end
+                    movedItems = true
+                else
+                    if passNum == 1 then
+                        print(prefix .. "|cff888888No matching items in bags.|r [" .. summary .. "]")
+                    end
+                end
+            else
+                if passNum == 1 then
+                    print(prefix .. "|cff888888Keeping all (have " .. Wild.CountMatchingInBags(subIntent, charCtx) .. ", keep " .. keep .. ").|r [" .. summary .. "]")
+                end
             end
         end
 
@@ -505,28 +509,11 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
         local bankTarget = intent.target or triggerSource
         local withdrawFunc = WITHDRAW_FUNCS[bankTarget]
         if withdrawFunc then
-            local keep = intent.keep or 0
-            if keep == 0 then
-                local count, entries = withdrawFunc(intent, charCtx, 0)
-                if count > 0 then
-                    for _, entry in ipairs(entries) do
-                        print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
-                    end
-                    if passNum == 1 then
-                        print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
-                    end
-                    movedItems = true
-                else
-                    if passNum == 1 then
-                        print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
-                    end
-                end
-            else
-                local countFunc = BANK_COUNT_FUNCS[bankTarget]
-                local bankCount = countFunc and countFunc(intent, charCtx) or 0
-                local excess = bankCount - keep
-                if excess > 0 then
-                    local count, entries = withdrawFunc(intent, charCtx, excess)
+            for _, group in ipairs(Wild.GetItemGroups(intent)) do
+                local keep = group.count or 0
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                if keep == 0 then
+                    local count, entries = withdrawFunc(subIntent, charCtx, 0)
                     if count > 0 then
                         for _, entry in ipairs(entries) do
                             print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
@@ -541,8 +528,28 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                         end
                     end
                 else
-                    if passNum == 1 then
-                        print(prefix .. "|cff888888Keeping all (" .. bankCount .. " in bank, keep " .. keep .. ").|r [" .. summary .. "]")
+                    local countFunc = BANK_COUNT_FUNCS[bankTarget]
+                    local bankCount = countFunc and countFunc(subIntent, charCtx) or 0
+                    local excess = bankCount - keep
+                    if excess > 0 then
+                        local count, entries = withdrawFunc(subIntent, charCtx, excess)
+                        if count > 0 then
+                            for _, entry in ipairs(entries) do
+                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                            end
+                            if passNum == 1 then
+                                print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
+                            end
+                            movedItems = true
+                        else
+                            if passNum == 1 then
+                                print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
+                            end
+                        end
+                    else
+                        if passNum == 1 then
+                            print(prefix .. "|cff888888Keeping all (" .. bankCount .. " in bank, keep " .. keep .. ").|r [" .. summary .. "]")
+                        end
                     end
                 end
             end
@@ -556,34 +563,37 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
         local withdrawFunc = WITHDRAW_FUNCS[source]
         local bankType = TARGET_BANK_TYPE[target]
         if withdrawFunc then
-            local keep = intent.keep or 0
-            local neededCount = 0
-            if keep > 0 then
-                local countFunc = BANK_COUNT_FUNCS[source]
-                local bankCount = countFunc and countFunc(intent, charCtx) or 0
-                local excess = bankCount - keep
-                if excess <= 0 then
-                    neededCount = -1
-                else
-                    neededCount = excess
-                end
-            end
-            if neededCount ~= -1 then
-                local wCount, wEntries = withdrawFunc(intent, charCtx, neededCount)
-                if wCount > 0 then
-                    for _, entry in ipairs(wEntries) do
-                        print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+            for _, group in ipairs(Wild.GetItemGroups(intent)) do
+                local keep = group.count or 0
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                local neededCount = 0
+                if keep > 0 then
+                    local countFunc = BANK_COUNT_FUNCS[source]
+                    local bankCount = countFunc and countFunc(subIntent, charCtx) or 0
+                    local excess = bankCount - keep
+                    if excess <= 0 then
+                        neededCount = -1
+                    else
+                        neededCount = excess
                     end
-                    movedItems = true
-                    intent._transferPending = { count = wCount, bankType = bankType, summary = summary, prefix = prefix }
+                end
+                if neededCount ~= -1 then
+                    local wCount, wEntries = withdrawFunc(subIntent, charCtx, neededCount)
+                    if wCount > 0 then
+                        for _, entry in ipairs(wEntries) do
+                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                        end
+                        movedItems = true
+                        intent._transferPending = { count = wCount, bankType = bankType, summary = summary, prefix = prefix }
+                    else
+                        if passNum == 1 then
+                            print(prefix .. "|cff888888No matching items in source bank.|r [" .. summary .. "]")
+                        end
+                    end
                 else
                     if passNum == 1 then
-                        print(prefix .. "|cff888888No matching items in source bank.|r [" .. summary .. "]")
+                        print(prefix .. "|cff888888Keeping all in source bank.|r [" .. summary .. "]")
                     end
-                end
-            else
-                if passNum == 1 then
-                    print(prefix .. "|cff888888Keeping all in source bank.|r [" .. summary .. "]")
                 end
             end
         else

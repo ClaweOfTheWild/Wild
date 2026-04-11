@@ -49,40 +49,33 @@ local function BuildMailQueue()
                 byRecipient[recipient] = {}
             end
 
-            local keep = intent.keep or 0
-            local sent = 0
-            local maxSend = 0
+            for _, group in ipairs(Wild.GetItemGroups(intent)) do
+                local count = group.count or 0
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                local sent = 0
+                local maxSend = 0
 
-            if keep > 0 then
-                local totalMatching = 0
-                for _, bag in ipairs(bags) do
-                    local numSlots = C_Container.GetContainerNumSlots(bag)
-                    for slot = 1, numSlots do
-                        local info = C_Container.GetContainerItemInfo(bag, slot)
-                        if info then info.bag = bag; info.slot = slot end
-                        if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                            totalMatching = totalMatching + (info.stackCount or 1)
-                        end
-                    end
+                if count > 0 then
+                    local totalMatching = Wild.CountMatchingInBags(subIntent, charCtx)
+                    maxSend = totalMatching - count
+                    if maxSend <= 0 then maxSend = -1 end
                 end
-                maxSend = totalMatching - keep
-                if maxSend <= 0 then maxSend = -1 end
-            end
 
-            if maxSend ~= -1 then
-                for _, bag in ipairs(bags) do
-                    local numSlots = C_Container.GetContainerNumSlots(bag)
-                    for slot = 1, numSlots do
-                        if maxSend > 0 and sent >= maxSend then break end
-                        local info = C_Container.GetContainerItemInfo(bag, slot)
-                        if info then info.bag = bag; info.slot = slot end
-                        if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                            local stackCount = info.stackCount or 1
-                            table.insert(byRecipient[recipient], { bag = bag, slot = slot, count = stackCount, link = info.hyperlink })
-                            sent = sent + stackCount
+                if maxSend ~= -1 then
+                    for _, bag in ipairs(bags) do
+                        local numSlots = C_Container.GetContainerNumSlots(bag)
+                        for slot = 1, numSlots do
+                            if maxSend > 0 and sent >= maxSend then break end
+                            local info = C_Container.GetContainerItemInfo(bag, slot)
+                            if info then info.bag = bag; info.slot = slot end
+                            if info and info.itemID and Wild.IntentMatchesItem(subIntent, info.itemID, info, charCtx) then
+                                local stackCount = info.stackCount or 1
+                                table.insert(byRecipient[recipient], { bag = bag, slot = slot, count = stackCount, link = info.hyperlink })
+                                sent = sent + stackCount
+                            end
                         end
+                        if maxSend > 0 and sent >= maxSend then break end
                     end
-                    if maxSend > 0 and sent >= maxSend then break end
                 end
             end
         end

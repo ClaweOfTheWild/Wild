@@ -2857,7 +2857,7 @@ local function CreateIntentRulesTab()
 
     -- Conditions section — group-based (include/exclude sets with OR between groups)
     local condLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    condLabel:SetText("Item Groups (include sets are OR'd, exclude sets filter out):")
+    condLabel:SetText("Groups (item groups are OR'd, exclude groups filter out):")
 
     local condListFrame = CreateFrame("Frame", nil, editor, "BackdropTemplate")
     condListFrame:SetPoint("TOPLEFT", condLabel, "BOTTOMLEFT", 0, -6)
@@ -2874,18 +2874,23 @@ local function CreateIntentRulesTab()
     local condRows = {}
     local condEmptyText = condListFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     condEmptyText:SetPoint("TOPLEFT", 6, -6)
-    condEmptyText:SetText("|cff666666No item groups. Add at least one include group.|r")
+    condEmptyText:SetText("|cff666666No groups. Add at least one item or gold group.|r")
 
     local RefreshCondList
 
     local addCondBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
     addCondBtn:SetSize(130, 20)
     addCondBtn:SetPoint("TOPLEFT", condListFrame, "BOTTOMLEFT", 2, -4)
-    addCondBtn:SetText("Add Include Group")
+    addCondBtn:SetText("Add Item Group")
+
+    local addGoldGroupBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
+    addGoldGroupBtn:SetSize(130, 20)
+    addGoldGroupBtn:SetPoint("LEFT", addCondBtn, "RIGHT", 6, 0)
+    addGoldGroupBtn:SetText("Add Gold Group")
 
     local addExclGroupBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
     addExclGroupBtn:SetSize(130, 20)
-    addExclGroupBtn:SetPoint("LEFT", addCondBtn, "RIGHT", 6, 0)
+    addExclGroupBtn:SetPoint("LEFT", addGoldGroupBtn, "RIGHT", 6, 0)
     addExclGroupBtn:SetText("Add Exclude Group")
 
     -- ===== Condition Sub-Editor =====
@@ -3531,11 +3536,17 @@ local function CreateIntentRulesTab()
     ceCancelBtn:SetScript("OnClick", HideCondEditor)
 
     addCondBtn:SetScript("OnClick", function()
-        -- Add a new include group with no conditions, then open the condition editor for it
-        table.insert(editorGroups, { mode = "include", conditions = {} })
+        -- Add a new item include group with no conditions, then open the condition editor for it
+        table.insert(editorGroups, { mode = "include", kind = "items", count = 0, conditions = {} })
         local gi = #editorGroups
         RefreshCondList()
         ShowCondEditor(gi, nil)
+    end)
+
+    addGoldGroupBtn:SetScript("OnClick", function()
+        -- Add a new gold include group
+        table.insert(editorGroups, { mode = "include", kind = "gold", gold = 0 })
+        RefreshCondList()
     end)
 
     addExclGroupBtn:SetScript("OnClick", function()
@@ -3642,23 +3653,102 @@ local function CreateIntentRulesTab()
             end)
             headerRow.collapseBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-            local modeColor = group.mode == "exclude" and "|cffff6666" or "|cff66ff66"
-            local modeLabel = group.mode == "exclude" and "EXCLUDE" or "INCLUDE"
-            local condCount = group.conditions and #group.conditions or 0
-            local condSummary = ""
-            if condCount > 0 then
-                condSummary = " — " .. Wild.GetConditionsSummary(group.conditions)
-            else
-                condSummary = " — |cff888888(empty)|r"
-            end
-            headerRow.text:SetText(modeColor .. modeLabel .. "|r" .. condSummary)
-
-            -- Toggle between include/exclude
-            local toggleLabel = group.mode == "exclude" and "|cff66ff66I|r" or "|cffff6666E|r"
-            headerRow.toggleBtn.label:SetText(toggleLabel)
+            local isGold = group.kind == "gold"
+            local isExclude = group.mode == "exclude"
+            local modeColor = isExclude and "|cffff6666" or "|cff66ff66"
             local capturedGi = gi
+
+            -- Lazily create per-group gold amount input
+            if not headerRow.goldInput then
+                headerRow.goldInput = CreateFrame("EditBox", nil, headerRow, "InputBoxTemplate")
+                headerRow.goldInput:SetSize(80, 18)
+                headerRow.goldInput:SetAutoFocus(false)
+                headerRow.goldInput:SetNumeric(true)
+                headerRow.goldInput:SetMaxLetters(9)
+                headerRow.goldInput:SetFontObject("GameFontHighlightSmall")
+                headerRow.goldSuffix = headerRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                headerRow.goldSuffix:SetPoint("LEFT", headerRow.goldInput, "RIGHT", 4, 0)
+                headerRow.goldSuffix:SetText("|cffffd700gold|r")
+            end
+
+            -- Lazily create per-group item count input
+            if not headerRow.countInput then
+                headerRow.countLabel = headerRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                headerRow.countLabel:SetText("|cff888888keep:|r")
+                headerRow.countInput = CreateFrame("EditBox", nil, headerRow, "InputBoxTemplate")
+                headerRow.countInput:SetSize(50, 18)
+                headerRow.countInput:SetAutoFocus(false)
+                headerRow.countInput:SetNumeric(true)
+                headerRow.countInput:SetMaxLetters(5)
+                headerRow.countInput:SetFontObject("GameFontHighlightSmall")
+            end
+
+            if isGold then
+                -- Gold group: show gold input, hide conditions/toggle/add
+                local kindLabel = "|cffffd700Gold|r"
+                headerRow.text:SetText(modeColor .. "INCLUDE|r (" .. kindLabel .. ")")
+                headerRow.goldInput:SetText(tostring(group.gold or 0))
+                headerRow.goldInput:ClearAllPoints()
+                headerRow.goldInput:SetPoint("LEFT", headerRow.text, "RIGHT", 8, 0)
+                headerRow.goldInput:SetScript("OnTextChanged", function(self)
+                    if editorGroups[capturedGi] then
+                        editorGroups[capturedGi].gold = tonumber(self:GetText()) or 0
+                    end
+                end)
+                headerRow.goldInput:Show()
+                headerRow.goldSuffix:Show()
+                headerRow.collapseBtn:Hide()
+                headerRow.toggleBtn:Hide()
+                headerRow.addBtn:Hide()
+                headerRow.countInput:Hide()
+                headerRow.countLabel:Hide()
+            else
+                -- Item group (include or exclude): show conditions, toggle, add, count
+                local condCount = group.conditions and #group.conditions or 0
+                local condSummary = ""
+                if condCount > 0 then
+                    condSummary = " — " .. Wild.GetConditionsSummary(group.conditions)
+                else
+                    condSummary = " — |cff888888(empty)|r"
+                end
+                local modeLabel = isExclude and "EXCLUDE" or "INCLUDE"
+                headerRow.text:SetText(modeColor .. modeLabel .. "|r" .. condSummary)
+
+                headerRow.goldInput:Hide()
+                headerRow.goldSuffix:Hide()
+                headerRow.collapseBtn:Show()
+                headerRow.addBtn:Show()
+
+                if isExclude then
+                    headerRow.toggleBtn:Show()
+                    headerRow.countInput:Hide()
+                    headerRow.countLabel:Hide()
+                else
+                    headerRow.toggleBtn:Hide()
+                    headerRow.countLabel:ClearAllPoints()
+                    headerRow.countLabel:SetPoint("RIGHT", headerRow.removeBtn, "LEFT", -58, 0)
+                    headerRow.countInput:ClearAllPoints()
+                    headerRow.countInput:SetPoint("LEFT", headerRow.countLabel, "RIGHT", 4, 0)
+                    headerRow.countInput:SetText(tostring(group.count or 0))
+                    headerRow.countInput:SetScript("OnTextChanged", function(self)
+                        if editorGroups[capturedGi] then
+                            editorGroups[capturedGi].count = tonumber(self:GetText()) or 0
+                        end
+                    end)
+                    headerRow.countLabel:Show()
+                    headerRow.countInput:Show()
+                end
+            end
+
+            -- Toggle between include/exclude (only for item exclude groups switching back)
+            local toggleLabel = isExclude and "|cff66ff66I|r" or "|cffff6666E|r"
+            headerRow.toggleBtn.label:SetText(toggleLabel)
             headerRow.toggleBtn:SetScript("OnClick", function()
                 editorGroups[capturedGi].mode = editorGroups[capturedGi].mode == "exclude" and "include" or "exclude"
+                if editorGroups[capturedGi].mode == "include" then
+                    editorGroups[capturedGi].kind = "items"
+                    if not editorGroups[capturedGi].count then editorGroups[capturedGi].count = 0 end
+                end
                 HideCondEditor()
                 RefreshCondList()
             end)
@@ -3690,8 +3780,8 @@ local function CreateIntentRulesTab()
             headerRow:Show()
             yOff = yOff + 22
 
-            -- Condition rows within this group
-            if group.conditions and not group.collapsed then
+            -- Condition rows within this group (skip for gold groups)
+            if not isGold and group.conditions and not group.collapsed then
                 for ci, cond in ipairs(group.conditions) do
                     rowIdx = rowIdx + 1
                     local row = condRows[rowIdx]
@@ -3772,6 +3862,10 @@ local function CreateIntentRulesTab()
                     if row.addBtn then row.addBtn:Hide() end
                     if row.toggleBtn then row.toggleBtn:Hide() end
                     if row.collapseBtn then row.collapseBtn:Hide() end
+                    if row.goldInput then row.goldInput:Hide() end
+                    if row.goldSuffix then row.goldSuffix:Hide() end
+                    if row.countInput then row.countInput:Hide() end
+                    if row.countLabel then row.countLabel:Hide() end
                     row:Show()
                     yOff = yOff + 20
                 end
@@ -3796,8 +3890,6 @@ local function CreateIntentRulesTab()
             saveBtn:SetPoint("TOPLEFT", condEditor, "BOTTOMLEFT", 2, -8)
         elseif addCondBtn:IsShown() then
             saveBtn:SetPoint("TOPLEFT", addCondBtn, "BOTTOMLEFT", -2, -12)
-        elseif goldHint:IsShown() then
-            saveBtn:SetPoint("TOPLEFT", goldHint, "BOTTOMLEFT", 0, -12)
         else
             saveBtn:SetPoint("TOPLEFT", actionLabel, "BOTTOMLEFT", 0, -40)
         end
@@ -3819,9 +3911,7 @@ local function CreateIntentRulesTab()
         local isMail = (action == "mail")
         local isTransfer = (action == "transfer")
         local needsTarget = (action == "deposit" or action == "withdraw" or action == "hold" or action == "transfer")
-        local needsKeep = true  -- all actions show keep (hold uses it for items)
-        local needsCond = true  -- all actions show conditions (hold uses them for items)
-        local needsGold = isHold
+        local needsCond = true  -- all actions show conditions/groups
 
         sourceLabel:SetShown(needsTarget and not isTransfer)
         sourceDD:SetShown(needsTarget)
@@ -3830,30 +3920,21 @@ local function CreateIntentRulesTab()
         transferTargetLabel:SetShown(isTransfer)
         recipientLabel:SetShown(isMail)
         recipientInput:SetShown(isMail)
-        goldLabel:SetShown(needsGold)
-        goldInput:SetShown(needsGold)
-        goldSuffix:SetShown(needsGold)
-        goldHint:SetShown(needsGold)
-        qtyLabel:SetShown(needsKeep)
-        qtyAllCB:SetShown(needsKeep)
-        qtyInput:SetShown(needsKeep)
-        qtyHint:SetShown(needsKeep)
+        -- Root gold/keep fields are removed — now per-group
+        goldLabel:SetShown(false)
+        goldInput:SetShown(false)
+        goldSuffix:SetShown(false)
+        goldHint:SetShown(false)
+        qtyLabel:SetShown(false)
+        qtyAllCB:SetShown(false)
+        qtyInput:SetShown(false)
+        qtyHint:SetShown(false)
         destroyUnsellableCB:SetShown(action == "sell")
         condLabel:SetShown(needsCond)
         condListFrame:SetShown(needsCond)
         addCondBtn:SetShown(needsCond)
+        addGoldGroupBtn:SetShown(needsCond and isHold)
         addExclGroupBtn:SetShown(needsCond)
-
-        -- Update keep hint based on action
-        if action == "withdraw" then
-            qtyHint:SetText("|cff888888items to keep in bank|r")
-        elseif action == "transfer" then
-            qtyHint:SetText("|cff888888items to keep in source bank|r")
-        elseif action == "hold" then
-            qtyHint:SetText("|cff888888items to maintain on character (0 = off)|r")
-        else
-            qtyHint:SetText("|cff888888items to keep on character|r")
-        end
 
         -- For transfer, ensure source != target
         if isTransfer then
@@ -3911,30 +3992,6 @@ local function CreateIntentRulesTab()
             recipientInput:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
             recipientInput:SetPoint("TOP", recipientLabel, "TOP", 0, 0)
             lastRowAnchor = recipientLabel
-        end
-
-        if needsGold then
-            goldLabel:ClearAllPoints()
-            goldLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING)
-            goldInput:ClearAllPoints()
-            goldInput:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
-            goldInput:SetPoint("TOP", goldLabel, "TOP", 0, 0)
-            goldHint:ClearAllPoints()
-            goldHint:SetPoint("TOPLEFT", goldLabel, "BOTTOMLEFT", 0, -4)
-            lastRowAnchor = goldHint
-        end
-
-        if needsKeep then
-            qtyLabel:ClearAllPoints()
-            qtyLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING - 4)
-            qtyAllCB:ClearAllPoints()
-            qtyAllCB:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
-            qtyAllCB:SetPoint("TOP", qtyLabel, "TOP", 0, 3)
-            qtyInput:ClearAllPoints()
-            qtyInput:SetPoint("LEFT", qtyAllCB.Text, "RIGHT", 16, 0)
-            qtyHint:ClearAllPoints()
-            qtyHint:SetPoint("LEFT", qtyInput, "RIGHT", 8, 0)
-            lastRowAnchor = qtyLabel
         end
 
         if action == "sell" then
@@ -4026,8 +4083,6 @@ local function CreateIntentRulesTab()
                 target = intent.target,
                 source = intent.source,
                 recipient = intent.recipient,
-                goldTarget = intent.goldTarget,
-                keep = intent.keep or 0,
                 destroyUnsellable = intent.destroyUnsellable or false,
             }
             editorActors = {}
@@ -4036,7 +4091,12 @@ local function CreateIntentRulesTab()
             end
             editorGroups = {}
             for _, g in ipairs(intent.groups or {}) do
-                local groupCopy = { mode = g.mode or "include", conditions = {} }
+                local groupCopy = { mode = g.mode or "include", kind = g.kind or "items", conditions = {} }
+                if g.kind == "gold" then
+                    groupCopy.gold = g.gold or 0
+                else
+                    groupCopy.count = g.count or 0
+                end
                 for _, c in ipairs(g.conditions or {}) do
                     local copy = {}; for k, v in pairs(c) do copy[k] = v end
                     table.insert(groupCopy.conditions, copy)
@@ -4047,7 +4107,7 @@ local function CreateIntentRulesTab()
             editingIndex = nil
             editorTitle:SetText("New Intent")
             saveBtn:SetText("Add")
-            editorIntent = { action = "deposit", target = "warband", keep = 0 }
+            editorIntent = { action = "deposit", target = "warband" }
             editorActors = {}
             editorGroups = {}
         end
@@ -4075,14 +4135,6 @@ local function CreateIntentRulesTab()
         UIDropDownMenu_SetText(transferSourceDD, sourceText)
 
         recipientInput:SetText(editorIntent.recipient or "")
-        goldInput:SetText(tostring(editorIntent.goldTarget or 0))
-
-        -- Keep
-        local keep = editorIntent.keep or 0
-        qtyAllCB:SetChecked(keep == 0)
-        qtyInput:SetText(tostring(keep))
-        qtyInput:SetEnabled(keep ~= 0)
-        qtyInput:SetTextColor(keep == 0 and 0.5 or 1, keep == 0 and 0.5 or 1, keep == 0 and 0.5 or 1)
 
         -- Destroy unsellable
         destroyUnsellableCB:SetChecked(editorIntent.destroyUnsellable or false)
@@ -4102,51 +4154,47 @@ local function CreateIntentRulesTab()
     saveBtn:SetScript("OnClick", function()
         local action = editorIntent.action or "deposit"
 
-        -- Hold: must have goldTarget > 0 or (keep > 0 with conditions)
+        -- Hold: must have at least one gold or item group
         if action == "hold" then
-            local goldVal = tonumber(goldInput:GetText()) or 0
-            local keepVal = qtyAllCB:GetChecked() and 0 or (tonumber(qtyInput:GetText()) or 0)
-            local hasGold = goldVal > 0
-            local hasItems = keepVal > 0
-            if hasItems then
-                local hasInclude = false
-                for _, g in ipairs(editorGroups) do
-                    if g.mode ~= "exclude" and g.conditions and #g.conditions > 0 then
-                        hasInclude = true
-                        break
+            local hasGold = false
+            local hasItems = false
+            for _, g in ipairs(editorGroups) do
+                if g.mode ~= "exclude" then
+                    if g.kind == "gold" and (g.gold or 0) > 0 then
+                        hasGold = true
+                    elseif g.kind ~= "gold" and g.conditions and #g.conditions > 0 and (g.count or 0) > 0 then
+                        hasItems = true
                     end
-                end
-                if not hasInclude then
-                    print("|cffff6600Wild:|r Hold with items needs at least one include group with conditions.")
-                    return
                 end
             end
             if not hasGold and not hasItems then
-                print("|cffff6600Wild:|r Hold needs a gold amount or items to keep (or both).")
+                print("|cffff6600Wild:|r Hold needs a gold group with amount or item groups with count (or both).")
                 return
             end
-            -- Remove empty groups
+            -- Remove empty item groups
             for i = #editorGroups, 1, -1 do
-                if not editorGroups[i].conditions or #editorGroups[i].conditions == 0 then
+                local g = editorGroups[i]
+                if g.kind ~= "gold" and (not g.conditions or #g.conditions == 0) then
                     table.remove(editorGroups, i)
                 end
             end
-        elseif action ~= "hold" then
-            -- Validate: need at least one include group with conditions
+        else
+            -- Validate: need at least one item include group with conditions
             local hasInclude = false
             for _, g in ipairs(editorGroups) do
-                if g.mode ~= "exclude" and g.conditions and #g.conditions > 0 then
+                if g.mode ~= "exclude" and g.kind ~= "gold" and g.conditions and #g.conditions > 0 then
                     hasInclude = true
                     break
                 end
             end
             if not hasInclude then
-                print("|cffff6600Wild:|r Add at least one include group with conditions.")
+                print("|cffff6600Wild:|r Add at least one item group with conditions.")
                 return
             end
             -- Remove empty groups
             for i = #editorGroups, 1, -1 do
-                if not editorGroups[i].conditions or #editorGroups[i].conditions == 0 then
+                local g = editorGroups[i]
+                if g.kind ~= "gold" and (not g.conditions or #g.conditions == 0) then
                     table.remove(editorGroups, i)
                 end
             end
@@ -4167,7 +4215,6 @@ local function CreateIntentRulesTab()
             action = action,
             actors = {},
             groups = {},
-            keep = 0,
         }
 
         -- Copy actor filter entries
@@ -4187,7 +4234,6 @@ local function CreateIntentRulesTab()
             savedIntent.target = editorIntent.target or "warband"
         elseif action == "hold" then
             savedIntent.target = editorIntent.target or "warband"
-            savedIntent.goldTarget = tonumber(goldInput:GetText()) or 0
         elseif action == "mail" then
             savedIntent.recipient = recipientInput:GetText() or ""
         end
@@ -4196,16 +4242,17 @@ local function CreateIntentRulesTab()
             savedIntent.destroyUnsellable = true
         end
 
-        if qtyAllCB:GetChecked() then
-            savedIntent.keep = 0
-        else
-            savedIntent.keep = tonumber(qtyInput:GetText()) or 0
-        end
         for _, g in ipairs(editorGroups) do
-            local savedGroup = { mode = g.mode or "include", conditions = {} }
-            for _, c in ipairs(g.conditions or {}) do
-                local copy = {}; for k, v in pairs(c) do copy[k] = v end
-                table.insert(savedGroup.conditions, copy)
+            local savedGroup = { mode = g.mode or "include", kind = g.kind or "items" }
+            if g.kind == "gold" then
+                savedGroup.gold = g.gold or 0
+            else
+                savedGroup.count = g.count or 0
+                savedGroup.conditions = {}
+                for _, c in ipairs(g.conditions or {}) do
+                    local copy = {}; for k, v in pairs(c) do copy[k] = v end
+                    table.insert(savedGroup.conditions, copy)
+                end
             end
             table.insert(savedIntent.groups, savedGroup)
         end

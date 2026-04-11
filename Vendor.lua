@@ -106,12 +106,24 @@ local function BuildSellBatch()
     local pending = {}
     local destroyPending = {}
 
-    -- For intents with keep > 0, pre-count matching items
-    local intentCounts = {}
-    for idx, intent in ipairs(Wild.db.intents) do
-        if intent.enabled ~= false and intent.action == "sell" and Wild.ValidateIntent(intent) and intent.keep and intent.keep > 0 and Wild.IntentMatchesActor(intent) then
-            local total = Wild.CountMatchingInBags(intent, charCtx)
-            intentCounts[idx] = { total = total, toSell = math.max(0, total - intent.keep), sold = 0 }
+    -- Build per-group sell entries with individual quotas
+    local groupEntries = {}
+    for _, intent in ipairs(Wild.db.intents) do
+        if intent.enabled ~= false and intent.action == "sell" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
+            for _, group in ipairs(Wild.GetItemGroups(intent)) do
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                local count = group.count or 0
+                local entry = {
+                    subIntent = subIntent,
+                    destroyUnsellable = intent.destroyUnsellable,
+                }
+                if count > 0 then
+                    local total = Wild.CountMatchingInBags(subIntent, charCtx)
+                    entry.toSell = math.max(0, total - count)
+                    entry.sold = 0
+                end
+                groupEntries[#groupEntries + 1] = entry
+            end
         end
     end
 
@@ -125,40 +137,37 @@ local function BuildSellBatch()
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
                 info.bag = bag; info.slot = slot
-                for idx, intent in ipairs(Wild.db.intents) do
-                    if intent.enabled ~= false and intent.action == "sell" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
-                        if Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                            local shouldSell = true
-                            local ic = intentCounts[idx]
-                            if ic then
-                                if ic.sold >= ic.toSell then
-                                    shouldSell = false
-                                else
-                                    ic.sold = ic.sold + (info.stackCount or 1)
-                                end
+                for _, ge in ipairs(groupEntries) do
+                    if Wild.IntentMatchesItem(ge.subIntent, info.itemID, info, charCtx) then
+                        local shouldSell = true
+                        if ge.toSell then
+                            if ge.sold >= ge.toSell then
+                                shouldSell = false
+                            else
+                                ge.sold = ge.sold + (info.stackCount or 1)
                             end
-                            if shouldSell then
-                                local _, _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(info.itemID)
-                                if sellPrice and sellPrice > 0 then
-                                    pending[#pending + 1] = {
-                                        bag = bag,
-                                        slot = slot,
-                                        link = info.hyperlink,
-                                        count = info.stackCount or 1,
-                                        copper = sellPrice * (info.stackCount or 1),
-                                    }
-                                elseif intent.destroyUnsellable then
-                                    destroyPending[#destroyPending + 1] = {
-                                        bag = bag,
-                                        slot = slot,
-                                        link = info.hyperlink,
-                                        count = info.stackCount or 1,
-                                        itemID = info.itemID,
-                                    }
-                                end
-                            end
-                            break
                         end
+                        if shouldSell then
+                            local _, _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(info.itemID)
+                            if sellPrice and sellPrice > 0 then
+                                pending[#pending + 1] = {
+                                    bag = bag,
+                                    slot = slot,
+                                    link = info.hyperlink,
+                                    count = info.stackCount or 1,
+                                    copper = sellPrice * (info.stackCount or 1),
+                                }
+                            elseif ge.destroyUnsellable then
+                                destroyPending[#destroyPending + 1] = {
+                                    bag = bag,
+                                    slot = slot,
+                                    link = info.hyperlink,
+                                    count = info.stackCount or 1,
+                                    itemID = info.itemID,
+                                }
+                            end
+                        end
+                        break
                     end
                 end
             end

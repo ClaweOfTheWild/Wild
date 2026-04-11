@@ -188,45 +188,57 @@ local function RunDestroyPass()
     if not Wild.GetPlayerBags then
         for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
     end
+    -- Build per-group destroy entries with individual quotas
+    local groupEntries = {}
+    for _, intent in ipairs(Wild.db.intents) do
+        if intent.enabled ~= false and intent.action == "destroy" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
+            for _, group in ipairs(Wild.GetItemGroups(intent)) do
+                local subIntent = Wild.SubIntentForGroup(intent, group)
+                local count = group.count or 0
+                groupEntries[#groupEntries + 1] = {
+                    subIntent = subIntent,
+                    count = count,
+                }
+            end
+        end
+    end
+
     for _, bag in ipairs(bags) do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
                 info.bag = bag; info.slot = slot
-                for _, intent in ipairs(Wild.db.intents) do
-                    if intent.enabled ~= false and intent.action == "destroy" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
-                        if Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                            local shouldDestroy = true
-                            local keepQty = intent.keep or 0
-                            if keepQty > 0 then
-                                local totalCount = 0
-                                for _, b in ipairs(bags) do
-                                    local ns = C_Container.GetContainerNumSlots(b)
-                                    for s = 1, ns do
-                                        local bi = C_Container.GetContainerItemInfo(b, s)
-                                        if bi and bi.itemID == info.itemID then
-                                            totalCount = totalCount + (bi.stackCount or 1)
-                                        end
+                for _, ge in ipairs(groupEntries) do
+                    if Wild.IntentMatchesItem(ge.subIntent, info.itemID, info, charCtx) then
+                        local shouldDestroy = true
+                        if ge.count > 0 then
+                            local totalCount = 0
+                            for _, b in ipairs(bags) do
+                                local ns = C_Container.GetContainerNumSlots(b)
+                                for s = 1, ns do
+                                    local bi = C_Container.GetContainerItemInfo(b, s)
+                                    if bi and bi.itemID == info.itemID then
+                                        totalCount = totalCount + (bi.stackCount or 1)
                                     end
                                 end
-                                if totalCount <= keepQty then
-                                    shouldDestroy = false
-                                end
                             end
+                            if totalCount <= ge.count then
+                                shouldDestroy = false
+                            end
+                        end
 
-                            if shouldDestroy then
-                                local itemName = GetItemInfo(info.itemID) or ("Item " .. info.itemID)
-                                pendingItems[#pendingItems + 1] = {
-                                    bag = bag,
-                                    slot = slot,
-                                    itemID = info.itemID,
-                                    link = info.hyperlink or itemName,
-                                    name = itemName,
-                                    count = info.stackCount or 1,
-                                }
-                                break
-                            end
+                        if shouldDestroy then
+                            local itemName = GetItemInfo(info.itemID) or ("Item " .. info.itemID)
+                            pendingItems[#pendingItems + 1] = {
+                                bag = bag,
+                                slot = slot,
+                                itemID = info.itemID,
+                                link = info.hyperlink or itemName,
+                                name = itemName,
+                                count = info.stackCount or 1,
+                            }
+                            break
                         end
                     end
                 end
