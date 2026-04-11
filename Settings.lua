@@ -712,10 +712,52 @@ local function CreateCharacterTab()
     HookScrollChildWidth(scrollFrame, sc)
 
     -- =========================================
+    -- Section: Vendor
+    -- =========================================
+    local vendorTitle = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    vendorTitle:SetPoint("TOPLEFT", 16, -16)
+    vendorTitle:SetText("Vendor")
+
+    local vendorDesc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    vendorDesc:SetPoint("TOPLEFT", vendorTitle, "BOTTOMLEFT", 0, -8)
+    vendorDesc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    vendorDesc:SetJustifyH("LEFT")
+    vendorDesc:SetText("|cff888888Automate interactions when visiting a vendor.|r")
+
+    local repairCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    repairCB:SetPoint("TOPLEFT", vendorDesc, "BOTTOMLEFT", -2, -16)
+    repairCB.Text:SetText("Auto-Repair")
+    repairCB.tooltipText = "Automatically repair all equipment when you open a vendor that can repair."
+
+    repairCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.vendorAutoRepair = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    local guildRepairCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    guildRepairCB:SetPoint("TOPLEFT", repairCB, "BOTTOMLEFT", 20, -4)
+    guildRepairCB.Text:SetText("Use guild funds first")
+    guildRepairCB.tooltipText = "Attempt to repair using guild bank funds before using your own gold."
+
+    guildRepairCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.vendorRepairUseGuild = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    -- Separator before Reputation
+    local vendorSep = sc:CreateTexture(nil, "ARTWORK")
+    vendorSep:SetHeight(1)
+    vendorSep:SetPoint("TOPLEFT", guildRepairCB, "BOTTOMLEFT", -18, -24)
+    vendorSep:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    vendorSep:SetColorTexture(0.3, 0.3, 0.35, 0.6)
+
+    -- =========================================
     -- Section: Reputation
     -- =========================================
     local repTitle = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    repTitle:SetPoint("TOPLEFT", 16, -16)
+    repTitle:SetPoint("TOPLEFT", vendorSep, "BOTTOMLEFT", 0, -16)
     repTitle:SetText("Reputation")
 
     local repDesc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -941,6 +983,8 @@ local function CreateCharacterTab()
 
     panel:SetScript("OnShow", function()
         if Wild.db then
+            repairCB:SetChecked(Wild.db.vendorAutoRepair)
+            guildRepairCB:SetChecked(Wild.db.vendorRepairUseGuild)
             UIDropDownMenu_SetText(repModeDropdown, REP_MODE_DISPLAY[Wild.db.reputationCollapseMode] or "Off")
             UIDropDownMenu_SetText(currModeDropdown, CURR_MODE_DISPLAY[Wild.db.currencyCollapseMode] or "Off")
         end
@@ -1331,122 +1375,6 @@ local function CreateMailTab()
     return panel
 end
 
--- ============================================================
--- Tab: Inventory (Auto-Destroy)
--- ============================================================
-local function CreateInventoryTab()
-    local panel = CreateFrame("Frame")
-
-    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
-
-    local sc = CreateFrame("Frame")
-    sc:SetWidth(520)
-    sc:SetHeight(1200)
-    scrollFrame:SetScrollChild(sc)
-    HookScrollChildWidth(scrollFrame, sc)
-
-    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Inventory")
-
-    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Automate inventory management. Auto-destroy matching items and simplify the destroy confirmation.|r")
-
-    -- Enable auto-destroy
-    local destroyCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
-    destroyCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
-    destroyCB.Text:SetText("Enable auto-destroy")
-    destroyCB.tooltipText = "Automatically destroy items matching your filter rules."
-
-    destroyCB:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        Wild.db.inventory.destroyEnabled = checked
-        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-    end)
-
-    local destroyWarn = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    destroyWarn:SetPoint("TOPLEFT", destroyCB, "BOTTOMLEFT", 22, -4)
-    destroyWarn:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    destroyWarn:SetJustifyH("LEFT")
-    destroyWarn:SetText("|cffff6600Warning:|r Items destroyed this way are |cffff4444permanently deleted|r. Double-check your rules before enabling.")
-
-    -- Triggers section
-    local trigSep = sc:CreateTexture(nil, "ARTWORK")
-    trigSep:SetHeight(1)
-    trigSep:SetPoint("TOPLEFT", destroyWarn, "BOTTOMLEFT", -22, -16)
-    trigSep:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    trigSep:SetColorTexture(0.4, 0.4, 0.4, 0.6)
-
-    local trigHeader = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    trigHeader:SetPoint("TOPLEFT", trigSep, "BOTTOMLEFT", 0, -12)
-    trigHeader:SetText("Triggers")
-
-    local trigDesc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    trigDesc:SetPoint("TOPLEFT", trigHeader, "BOTTOMLEFT", 0, -4)
-    trigDesc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    trigDesc:SetJustifyH("LEFT")
-    trigDesc:SetText("|cff888888Choose when auto-destroy should run. At least one trigger must be enabled.|r")
-
-    local trigLootCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
-    trigLootCB:SetPoint("TOPLEFT", trigDesc, "BOTTOMLEFT", -2, -10)
-    trigLootCB.Text:SetText("After looting")
-    trigLootCB.tooltipText = "Run auto-destroy after the loot window closes."
-
-    trigLootCB:SetScript("OnClick", function(self)
-        Wild.db.inventory.destroyTriggers.onLoot = self:GetChecked()
-        PlaySound(self:GetChecked() and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-    end)
-
-    local trigVendorCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
-    trigVendorCB:SetPoint("TOPLEFT", trigLootCB, "BOTTOMLEFT", 0, -4)
-    trigVendorCB.Text:SetText("When opening a vendor")
-    trigVendorCB.tooltipText = "Run auto-destroy when you open a merchant window."
-
-    trigVendorCB:SetScript("OnClick", function(self)
-        Wild.db.inventory.destroyTriggers.onVendor = self:GetChecked()
-        PlaySound(self:GetChecked() and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-    end)
-
-    local trigBankCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
-    trigBankCB:SetPoint("TOPLEFT", trigVendorCB, "BOTTOMLEFT", 0, -4)
-    trigBankCB.Text:SetText("When opening a bank")
-    trigBankCB.tooltipText = "Run auto-destroy when opening any bank (character, warband, or guild)."
-
-    trigBankCB:SetScript("OnClick", function(self)
-        Wild.db.inventory.destroyTriggers.onBank = self:GetChecked()
-        PlaySound(self:GetChecked() and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-    end)
-
-    -- ===== Info =====
-    local infoSep = sc:CreateTexture(nil, "ARTWORK")
-    infoSep:SetHeight(1)
-    infoSep:SetPoint("TOPLEFT", trigBankCB, "BOTTOMLEFT", 2, -16)
-    infoSep:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    infoSep:SetColorTexture(0.4, 0.4, 0.4, 0.6)
-
-    local infoText = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoSep, "BOTTOMLEFT", 0, -12)
-    infoText:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetText("|cff888888Destroy rules are managed in the Intent Rules tab. Create an intent with action 'Destroy' to auto-destroy items.|r")
-
-    panel:SetScript("OnShow", function()
-        if Wild.db and Wild.db.inventory then
-            local cfg = Wild.db.inventory
-            destroyCB:SetChecked(cfg.destroyEnabled)
-            trigLootCB:SetChecked(cfg.destroyTriggers and cfg.destroyTriggers.onLoot)
-            trigVendorCB:SetChecked(cfg.destroyTriggers and cfg.destroyTriggers.onVendor)
-            trigBankCB:SetChecked(cfg.destroyTriggers and cfg.destroyTriggers.onBank)
-        end
-    end)
-
-    return panel
-end
 -- ============================================================
 -- Tab: Tooltips
 -- ============================================================
@@ -4802,7 +4730,6 @@ loader:SetScript("OnEvent", function(self, event, addon)
     AddTab("Auction House", CreateAuctionHouseTab())
     AddTab("Crafting Orders", CreateCraftingOrdersTab())
     AddTab("Mail", CreateMailTab())
-    AddTab("Inventory", CreateInventoryTab())
     AddTab("Loot", CreateLootTab())
     AddTab("Quests", CreateQuestsTab())
     AddTab("Gossip", CreateGossipTab())

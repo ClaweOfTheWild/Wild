@@ -35,13 +35,11 @@ local FEATURE_NAMES = {
     lfgfilters       = "LFG Result Filters",
     circle           = "Screen Center Circle",
     repair           = "Auto-Repair",
-    sell             = "Auto-Sell",
     loot             = "Quick Loot",
     autoloot         = "Auto-Loot",
     bank             = "Warband Bank",
     bankcharacter    = "Character Bank",
     bankguild        = "Guild Bank",
-    inventory        = "Inventory Auto-Destroy",
     reputation       = "Reputation Auto-Collapse",
     delve            = "Delve Auto-Select Power",
     tooltip          = "Tooltip Enhancements",
@@ -85,8 +83,8 @@ subcommands.help = function()
     Print("/wild status — Show all feature states")
     Print("/wild <feature> on|off — Toggle a feature")
     print(" ")
-    print("|cff00ccff  Features:|r lfg, circle, repair, sell, loot, autoloot,")
-    print("    bank, bankcharacter, bankguild, inventory, reputation,")
+    print("|cff00ccff  Features:|r lfg, circle, repair, loot, autoloot,")
+    print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar),")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
     print("    volume (vol)")
@@ -105,8 +103,6 @@ subcommands.help = function()
     print(" ")
     Print("/wild repair on|off — Toggle auto-repair")
     Print("/wild repair guild on|off — Toggle guild funds")
-    Print("/wild sell on|off — Toggle auto-sell")
-    Print("/wild sell rules — List sell rules")
     Print("/wild loot on|off — Toggle quick loot")
     Print("/wild loot modifier shift|ctrl|alt|none — Set auto-loot modifier key")
     print(" ")
@@ -116,10 +112,6 @@ subcommands.help = function()
     Print("/wild bank keepgold <n> — Set warband gold-to-keep")
     Print("/wild bank run — Manually trigger bank filter rules")
     Print("/wild bank rules — List all bank filter rules")
-    print(" ")
-    Print("/wild inventory on|off — Toggle auto-destroy")
-    Print("/wild inventory rules — List destroy rules")
-    Print("/wild inventory run — Manually run destroy rules")
     print(" ")
     Print("/wild quests on|off — Toggle all quest automation")
     Print("/wild quests accept on|off — Toggle quest auto-accept")
@@ -155,9 +147,9 @@ subcommands.status = function()
     -- Ordered list for predictable output
     local order = {
         "lfg", "autoconfirmrole", "autoacceptqueue", "lfgfilters",
-        "circle", "repair", "sell", "loot", "autoloot",
+        "circle", "repair", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
-        "inventory", "reputation", "delve", "tooltip",
+        "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
     }
     for _, feature in ipairs(order) do
@@ -259,28 +251,6 @@ subcommands.repair = function(args)
     end
 end
 
--- /wild sell [on|off|rules]
-subcommands.sell = function(args)
-    if HandleGenericFeature("sell", args) then return end
-
-    local sub = args[1]:lower()
-    if sub == "rules" then
-        if not Wild.db or not Wild.db.intents then Print("No sell intents configured.") return end
-        local idx = 0
-        for i, intent in ipairs(Wild.db.intents) do
-            if intent.action == "sell" then
-                idx = idx + 1
-                local state = (intent.enabled ~= false) and "|cff44ff44ON|r" or "|cffff4444OFF|r"
-                local summary = Wild.GetIntentSummary and Wild.GetIntentSummary(intent) or "?"
-                print(string.format("  %d. [%s] %s", i, state, summary))
-            end
-        end
-        if idx == 0 then Print("No sell intents configured.") else Print(idx .. " sell intent(s).") end
-    else
-        Print("Unknown sell subcommand: " .. sub .. ". Try /wild help")
-    end
-end
-
 -- /wild loot [on|off|modifier]
 subcommands.loot = function(args)
     if HandleGenericFeature("loot", args) then return end
@@ -363,33 +333,6 @@ subcommands.bank = function(args)
         if not any then Print("No bank intents configured.") end
     else
         Print("Unknown bank subcommand: " .. sub .. ". Try /wild help")
-    end
-end
-
--- /wild inventory [on|off|rules|run]
-subcommands.inventory = function(args)
-    if HandleGenericFeature("inventory", args) then return end
-
-    local sub = args[1]:lower()
-    if sub == "rules" then
-        if not Wild.db or not Wild.db.intents then Print("No destroy intents configured.") return end
-        local idx = 0
-        for i, intent in ipairs(Wild.db.intents) do
-            if intent.action == "destroy" then
-                idx = idx + 1
-                local state = (intent.enabled ~= false) and "|cff44ff44ON|r" or "|cffff4444OFF|r"
-                local summary = Wild.GetIntentSummary and Wild.GetIntentSummary(intent) or "?"
-                print(string.format("  %d. [%s] %s", i, state, summary))
-            end
-        end
-        if idx == 0 then Print("No destroy intents configured.") else Print(idx .. " destroy intent(s).") end
-    elseif sub == "run" then
-        if Wild.ProcessDestroyIntents then
-            Wild.ProcessDestroyIntents()
-            Print("Destroy intents executed.")
-        end
-    else
-        Print("Unknown inventory subcommand: " .. sub .. ". Try /wild help")
     end
 end
 
