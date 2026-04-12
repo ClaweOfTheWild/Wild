@@ -222,6 +222,20 @@ frame:SetScript("OnEvent", function(self, event, addon)
                 g.kind = "items"
             end
         end
+
+        -- Migrate hold condition-based item groups to simplified kind="item"
+        if intent.action == "hold" then
+            for _, g in ipairs(intent.groups or {}) do
+                if g.kind == "items" and g.conditions and #g.conditions == 1 then
+                    local c = g.conditions[1]
+                    if c.attr == "item.id" and c.op == "=" and c.value then
+                        g.kind = "item"
+                        g.itemID = tonumber(c.value)
+                        g.conditions = nil
+                    end
+                end
+            end
+        end
     end
 
     ApplyDefaults(WildDB, defaults)

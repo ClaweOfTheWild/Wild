@@ -2893,6 +2893,190 @@ local function CreateIntentRulesTab()
     addExclGroupBtn:SetPoint("LEFT", addGoldGroupBtn, "RIGHT", 6, 0)
     addExclGroupBtn:SetText("Add Exclude Group")
 
+    -- ===== Simplified Hold Table =====
+    local holdLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    holdLabel:SetText("Hold entries:")
+
+    local holdListFrame = CreateFrame("Frame", nil, editor, "BackdropTemplate")
+    holdListFrame:SetPoint("TOPLEFT", holdLabel, "BOTTOMLEFT", 0, -6)
+    holdListFrame:SetPoint("RIGHT", editor, "RIGHT", -8, 0)
+    holdListFrame:SetHeight(80)
+    holdListFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    holdListFrame:SetBackdropColor(0, 0, 0, 0.3)
+    holdListFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.4)
+
+    local holdRows = {}
+    local holdEmptyText = holdListFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    holdEmptyText:SetPoint("TOPLEFT", 6, -6)
+    holdEmptyText:SetText("|cff666666No entries. Add gold or item rows.|r")
+
+    local RefreshHoldList
+
+    local addHoldGoldBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
+    addHoldGoldBtn:SetSize(100, 20)
+    addHoldGoldBtn:SetPoint("TOPLEFT", holdListFrame, "BOTTOMLEFT", 2, -4)
+    addHoldGoldBtn:SetText("Add Gold")
+
+    local addHoldItemBtn = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
+    addHoldItemBtn:SetSize(100, 20)
+    addHoldItemBtn:SetPoint("LEFT", addHoldGoldBtn, "RIGHT", 6, 0)
+    addHoldItemBtn:SetText("Add Item")
+
+    addHoldGoldBtn:SetScript("OnClick", function()
+        table.insert(editorGroups, { kind = "gold", gold = 0 })
+        RefreshHoldList()
+    end)
+
+    addHoldItemBtn:SetScript("OnClick", function()
+        table.insert(editorGroups, { kind = "item", itemID = nil, count = 0 })
+        RefreshHoldList()
+    end)
+
+    RefreshHoldList = function()
+        for _, row in ipairs(holdRows) do row:Hide() end
+        holdEmptyText:SetShown(#editorGroups == 0)
+        local yOff = 0
+
+        for gi, group in ipairs(editorGroups) do
+            local row = holdRows[gi]
+            if not row then
+                row = CreateFrame("Frame", nil, holdListFrame)
+                row:SetHeight(24)
+
+                row.typeLabel = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                row.typeLabel:SetPoint("LEFT", 6, 0)
+                row.typeLabel:SetWidth(40)
+                row.typeLabel:SetJustifyH("LEFT")
+
+                -- Gold amount input
+                row.goldInput = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+                row.goldInput:SetSize(100, 20)
+                row.goldInput:SetPoint("LEFT", 50, 0)
+                row.goldInput:SetAutoFocus(false)
+                row.goldInput:SetNumeric(true)
+                row.goldInput:SetMaxLetters(9)
+                row.goldInput:SetFontObject("GameFontHighlightSmall")
+
+                row.goldSuffix = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                row.goldSuffix:SetPoint("LEFT", row.goldInput, "RIGHT", 4, 0)
+                row.goldSuffix:SetText("|cffffd700gold to keep on character|r")
+
+                -- Item input (accepts item links or IDs)
+                row.itemInput = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+                row.itemInput:SetSize(220, 20)
+                row.itemInput:SetPoint("LEFT", 50, 0)
+                row.itemInput:SetAutoFocus(false)
+                row.itemInput:SetMaxLetters(80)
+                row.itemInput:SetFontObject("GameFontHighlightSmall")
+
+                -- Count input
+                row.countInput = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+                row.countInput:SetSize(50, 20)
+                row.countInput:SetPoint("LEFT", row.itemInput, "RIGHT", 8, 0)
+                row.countInput:SetAutoFocus(false)
+                row.countInput:SetNumeric(true)
+                row.countInput:SetMaxLetters(5)
+                row.countInput:SetFontObject("GameFontHighlightSmall")
+
+                row.countLabel = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+                row.countLabel:SetPoint("LEFT", row.countInput, "RIGHT", 4, 0)
+                row.countLabel:SetText("|cff888888count|r")
+
+                -- Remove button
+                row.removeBtn = CreateFrame("Button", nil, row)
+                row.removeBtn:SetSize(14, 14)
+                row.removeBtn:SetPoint("RIGHT", -2, 0)
+                row.removeBtn.label = row.removeBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                row.removeBtn.label:SetPoint("CENTER")
+                row.removeBtn.label:SetText("|cffff4444X|r")
+                row.removeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff0000X|r") end)
+                row.removeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffff4444X|r") end)
+
+                holdRows[gi] = row
+            end
+
+            row:SetPoint("TOPLEFT", holdListFrame, "TOPLEFT", 0, -yOff)
+            row:SetPoint("RIGHT", holdListFrame, "RIGHT", 0, 0)
+
+            local capturedGi = gi
+            row.removeBtn:SetScript("OnClick", function()
+                table.remove(editorGroups, capturedGi)
+                RefreshHoldList()
+            end)
+
+            if group.kind == "gold" then
+                row.typeLabel:SetText("|cffffd700Gold|r")
+                row.goldInput:SetText(tostring(group.gold or 0))
+                row.goldInput:SetScript("OnTextChanged", function(self)
+                    if editorGroups[capturedGi] then
+                        editorGroups[capturedGi].gold = tonumber(self:GetText()) or 0
+                    end
+                end)
+                row.goldInput:Show()
+                row.goldSuffix:Show()
+                row.itemInput:Hide()
+                row.countInput:Hide()
+                row.countLabel:Hide()
+            else
+                row.typeLabel:SetText("Item")
+                -- Display item name if we have an ID
+                if group.itemID then
+                    local itemName = GetItemInfo(group.itemID)
+                    if itemName then
+                        row.itemInput:SetText(itemName)
+                    else
+                        row.itemInput:SetText(tostring(group.itemID))
+                    end
+                else
+                    row.itemInput:SetText("")
+                end
+                -- Parse item link or ID from input
+                row.itemInput:SetScript("OnTextChanged", function(self, userInput)
+                    if not userInput then return end
+                    local text = self:GetText() or ""
+                    local id = tonumber(text:match("item:(%d+)")) or tonumber(text)
+                    if id and editorGroups[capturedGi] then
+                        editorGroups[capturedGi].itemID = id
+                    end
+                end)
+                -- Accept item link drops
+                row.itemInput:SetScript("OnReceiveDrag", function(self)
+                    local infoType, id = GetCursorInfo()
+                    if infoType == "item" then
+                        ClearCursor()
+                        if editorGroups[capturedGi] then
+                            editorGroups[capturedGi].itemID = id
+                        end
+                        local itemName = GetItemInfo(id)
+                        self:SetText(itemName or tostring(id))
+                    end
+                end)
+                row.itemInput:SetScript("OnMouseDown", row.itemInput:GetScript("OnReceiveDrag"))
+                row.countInput:SetText(tostring(group.count or 0))
+                row.countInput:SetScript("OnTextChanged", function(self)
+                    if editorGroups[capturedGi] then
+                        editorGroups[capturedGi].count = tonumber(self:GetText()) or 0
+                    end
+                end)
+                row.goldInput:Hide()
+                row.goldSuffix:Hide()
+                row.itemInput:Show()
+                row.countInput:Show()
+                row.countLabel:Show()
+            end
+
+            row:Show()
+            yOff = yOff + 24
+        end
+
+        holdListFrame:SetHeight(math.max(24, yOff + 4))
+        if UpdateSaveBtnAnchor then UpdateSaveBtnAnchor() end
+    end
+
     -- ===== Condition Sub-Editor =====
     local condEditor = CreateFrame("Frame", nil, editor, "BackdropTemplate")
     condEditor:SetPoint("TOPLEFT", addCondBtn, "BOTTOMLEFT", -2, -8)
@@ -3631,9 +3815,6 @@ local function CreateIntentRulesTab()
             headerRow.toggleBtn:Show()
             headerRow.addBtn:Show()
             if headerRow.editBtn then headerRow.editBtn:Hide() end
-            headerRow.text:ClearAllPoints()
-            headerRow.text:SetPoint("LEFT", 18, 0)
-            headerRow.text:SetPoint("RIGHT", headerRow, "RIGHT", -44, 0)
             headerRow:SetPoint("TOPLEFT", condListFrame, "TOPLEFT", 0, -yOff)
             headerRow:SetPoint("RIGHT", condListFrame, "RIGHT", 0, 0)
 
@@ -3685,11 +3866,16 @@ local function CreateIntentRulesTab()
 
             if isGold then
                 -- Gold group: show gold input, hide conditions/toggle/add
+                headerRow.text:ClearAllPoints()
+                headerRow.text:SetPoint("LEFT", 4, 0)
+                headerRow.text:SetPoint("RIGHT", headerRow.goldInput, "LEFT", -6, 0)
                 local kindLabel = "|cffffd700Gold|r"
                 headerRow.text:SetText(modeColor .. "INCLUDE|r (" .. kindLabel .. ")")
                 headerRow.goldInput:SetText(tostring(group.gold or 0))
                 headerRow.goldInput:ClearAllPoints()
-                headerRow.goldInput:SetPoint("LEFT", headerRow.text, "RIGHT", 8, 0)
+                headerRow.goldInput:SetPoint("RIGHT", headerRow.removeBtn, "LEFT", -30, 0)
+                headerRow.goldSuffix:ClearAllPoints()
+                headerRow.goldSuffix:SetPoint("LEFT", headerRow.goldInput, "RIGHT", 4, 0)
                 headerRow.goldInput:SetScript("OnTextChanged", function(self)
                     if editorGroups[capturedGi] then
                         editorGroups[capturedGi].gold = tonumber(self:GetText()) or 0
@@ -3704,6 +3890,8 @@ local function CreateIntentRulesTab()
                 headerRow.countLabel:Hide()
             else
                 -- Item group (include or exclude): show conditions, toggle, add, count
+                headerRow.text:ClearAllPoints()
+                headerRow.text:SetPoint("LEFT", 18, 0)
                 local condCount = group.conditions and #group.conditions or 0
                 local condSummary = ""
                 if condCount > 0 then
@@ -3720,10 +3908,12 @@ local function CreateIntentRulesTab()
                 headerRow.addBtn:Show()
 
                 if isExclude then
+                    headerRow.text:SetPoint("RIGHT", headerRow, "RIGHT", -56, 0)
                     headerRow.toggleBtn:Show()
                     headerRow.countInput:Hide()
                     headerRow.countLabel:Hide()
                 else
+                    headerRow.text:SetPoint("RIGHT", headerRow.countLabel, "LEFT", -6, 0)
                     headerRow.toggleBtn:Hide()
                     headerRow.countLabel:ClearAllPoints()
                     headerRow.countLabel:SetPoint("RIGHT", headerRow.removeBtn, "LEFT", -58, 0)
@@ -3888,6 +4078,8 @@ local function CreateIntentRulesTab()
         saveBtn:ClearAllPoints()
         if condEditor:IsShown() then
             saveBtn:SetPoint("TOPLEFT", condEditor, "BOTTOMLEFT", 2, -8)
+        elseif addHoldGoldBtn:IsShown() then
+            saveBtn:SetPoint("TOPLEFT", addHoldGoldBtn, "BOTTOMLEFT", -2, -12)
         elseif addCondBtn:IsShown() then
             saveBtn:SetPoint("TOPLEFT", addCondBtn, "BOTTOMLEFT", -2, -12)
         else
@@ -3930,11 +4122,16 @@ local function CreateIntentRulesTab()
         qtyInput:SetShown(false)
         qtyHint:SetShown(false)
         destroyUnsellableCB:SetShown(action == "sell")
-        condLabel:SetShown(needsCond)
-        condListFrame:SetShown(needsCond)
-        addCondBtn:SetShown(needsCond)
-        addGoldGroupBtn:SetShown(needsCond and isHold)
-        addExclGroupBtn:SetShown(needsCond)
+        -- Hold uses simplified table; others use condition groups
+        condLabel:SetShown(needsCond and not isHold)
+        condListFrame:SetShown(needsCond and not isHold)
+        addCondBtn:SetShown(needsCond and not isHold)
+        addGoldGroupBtn:SetShown(false) -- replaced by hold table
+        addExclGroupBtn:SetShown(needsCond and not isHold)
+        holdLabel:SetShown(isHold)
+        holdListFrame:SetShown(isHold)
+        addHoldGoldBtn:SetShown(isHold)
+        addHoldItemBtn:SetShown(isHold)
 
         -- For transfer, ensure source != target
         if isTransfer then
@@ -4001,8 +4198,13 @@ local function CreateIntentRulesTab()
         end
 
         if needsCond then
-            condLabel:ClearAllPoints()
-            condLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, -12)
+            if isHold then
+                holdLabel:ClearAllPoints()
+                holdLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, -12)
+            else
+                condLabel:ClearAllPoints()
+                condLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, -12)
+            end
         end
 
         UpdateSaveBtnAnchor()
@@ -4094,6 +4296,9 @@ local function CreateIntentRulesTab()
                 local groupCopy = { mode = g.mode or "include", kind = g.kind or "items", conditions = {} }
                 if g.kind == "gold" then
                     groupCopy.gold = g.gold or 0
+                elseif g.kind == "item" then
+                    groupCopy.itemID = g.itemID
+                    groupCopy.count = g.count or 0
                 else
                     groupCopy.count = g.count or 0
                 end
@@ -4140,6 +4345,7 @@ local function CreateIntentRulesTab()
         destroyUnsellableCB:SetChecked(editorIntent.destroyUnsellable or false)
 
         RefreshCondList()
+        RefreshHoldList()
         UpdateEditorLayout()
         editor:Show()
     end
@@ -4159,22 +4365,20 @@ local function CreateIntentRulesTab()
             local hasGold = false
             local hasItems = false
             for _, g in ipairs(editorGroups) do
-                if g.mode ~= "exclude" then
-                    if g.kind == "gold" and (g.gold or 0) > 0 then
-                        hasGold = true
-                    elseif g.kind ~= "gold" and g.conditions and #g.conditions > 0 and (g.count or 0) > 0 then
-                        hasItems = true
-                    end
+                if g.kind == "gold" and (g.gold or 0) > 0 then
+                    hasGold = true
+                elseif g.kind == "item" and g.itemID and (g.count or 0) > 0 then
+                    hasItems = true
                 end
             end
             if not hasGold and not hasItems then
-                print("|cffff6600Wild:|r Hold needs a gold group with amount or item groups with count (or both).")
+                print("|cffff6600Wild:|r Hold needs a gold entry with amount or item entries with ID and count (or both).")
                 return
             end
-            -- Remove empty item groups
+            -- Remove incomplete item entries
             for i = #editorGroups, 1, -1 do
                 local g = editorGroups[i]
-                if g.kind ~= "gold" and (not g.conditions or #g.conditions == 0) then
+                if g.kind == "item" and (not g.itemID or (g.count or 0) <= 0) then
                     table.remove(editorGroups, i)
                 end
             end
@@ -4246,6 +4450,9 @@ local function CreateIntentRulesTab()
             local savedGroup = { mode = g.mode or "include", kind = g.kind or "items" }
             if g.kind == "gold" then
                 savedGroup.gold = g.gold or 0
+            elseif g.kind == "item" then
+                savedGroup.itemID = g.itemID
+                savedGroup.count = g.count or 0
             else
                 savedGroup.count = g.count or 0
                 savedGroup.conditions = {}

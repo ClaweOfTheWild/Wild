@@ -916,32 +916,27 @@ local function ValidateIntent(intent)
 
     local groups = intent.groups or {}
 
-    -- Hold intents: must have at least one gold or items group
+    -- Hold intents: must have at least one gold or item entry
     if intent.action == "hold" then
         if not intent.target then return false, "hold intent missing target" end
         local hasGold = false
         local hasItems = false
-        for gi, group in ipairs(groups) do
+        for _, group in ipairs(groups) do
             if group.mode ~= "exclude" then
                 if group.kind == "gold" then
                     if (group.gold or 0) > 0 then hasGold = true end
+                elseif group.kind == "item" then
+                    if group.itemID and (group.count or 0) > 0 then hasItems = true end
                 else
+                    -- Legacy condition-based groups
                     local conds = group.conditions
                     if conds and #conds > 0 and (group.count or 0) > 0 then
                         hasItems = true
                     end
-                    if conds then
-                        for ci, cond in ipairs(conds) do
-                            if not cond.attr or cond.attr == "" then return false, "group " .. gi .. " condition " .. ci .. " missing attribute" end
-                            if not cond.op or cond.op == "" then return false, "group " .. gi .. " condition " .. ci .. " missing operator" end
-                            if cond.value == nil and not cond.ref then return false, "group " .. gi .. " condition " .. ci .. " missing value" end
-                            if not ATTR_BY_KEY[cond.attr] then return false, "group " .. gi .. " condition " .. ci .. " unknown attribute '" .. tostring(cond.attr) .. "'" end
-                        end
-                    end
                 end
             end
         end
-        if not hasGold and not hasItems then return false, "hold intent needs a gold group or item groups with count" end
+        if not hasGold and not hasItems then return false, "hold intent needs a gold or item entry" end
         return true
     end
 
@@ -1366,7 +1361,10 @@ local function GetIntentSummary(intent)
             if group.mode ~= "exclude" then
                 if group.kind == "gold" and (group.gold or 0) > 0 then
                     holdParts[#holdParts + 1] = string.format("%dg", group.gold)
-                elseif group.kind ~= "gold" and (group.count or 0) > 0 then
+                elseif group.kind == "item" and group.itemID then
+                    local itemName = GetItemInfo(group.itemID) or ("Item:" .. group.itemID)
+                    holdParts[#holdParts + 1] = (group.count or 0) .. " " .. itemName
+                elseif group.kind ~= "gold" and group.kind ~= "item" and (group.count or 0) > 0 then
                     local itemConds = {}
                     if group.conditions then
                         for _, c in ipairs(group.conditions) do
@@ -1477,8 +1475,18 @@ end
 
 -- Build a sub-intent scoped to a single include group + all exclude groups.
 -- This lets existing matching/counting functions work per-group.
+-- For kind="item" groups, synthesizes a condition so matching works.
 local function SubIntentForGroup(intent, group)
-    local groups = { group }
+    local synthGroup = group
+    if group.kind == "item" and group.itemID then
+        synthGroup = {
+            mode = "include",
+            kind = "items",
+            count = group.count,
+            conditions = { { attr = "item.id", op = "=", value = group.itemID } },
+        }
+    end
+    local groups = { synthGroup }
     for _, g in ipairs(intent.groups or {}) do
         if g.mode == "exclude" then
             groups[#groups + 1] = g
