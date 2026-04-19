@@ -72,6 +72,54 @@ end
 Wild.GetPlayerBags = GetPlayerBags
 
 -- ============================================================
+-- Place cursor item into a free player bag slot
+-- Used after SplitContainerItem to drop partial stacks.
+-- ============================================================
+
+local function PlaceCursorInBags()
+    for _, bag in ipairs(GetPlayerBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if not info then
+                C_Container.PickupContainerItem(bag, slot)
+                return true
+            end
+        end
+    end
+    ClearCursor()
+    return false
+end
+
+-- ============================================================
+-- Place cursor item into a free bank slot
+-- Used after SplitContainerItem to drop partial stacks into bank.
+-- ============================================================
+
+local function PlaceCursorInBank(bankType)
+    local bankBags
+    if bankType == Enum.BankType.Account then
+        bankBags = ACCOUNT_BANK_TABS
+    else
+        bankBags = CHARACTER_BANK_BAGS
+    end
+    for _, bag in ipairs(bankBags) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if not info then
+                    C_Container.PickupContainerItem(bag, slot)
+                    return true
+                end
+            end
+        end
+    end
+    ClearCursor()
+    return false
+end
+
+-- ============================================================
 -- Deposit from bags (shared across all bank types)
 -- ============================================================
 
@@ -97,11 +145,8 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
                 if remaining < stackCount then
                     moveCount = remaining
                     C_Container.SplitContainerItem(bag, slot, moveCount)
-                    if bankType then
-                        C_Container.UseContainerItem(bag, slot, nil, bankType)
-                    else
-                        C_Container.UseContainerItem(bag, slot)
-                    end
+                    -- Cursor now holds the split portion; deposit it into the bank
+                    PlaceCursorInBank(bankType or Enum.BankType.Character)
                 else
                     if bankType then
                         C_Container.UseContainerItem(bag, slot, nil, bankType)
@@ -144,7 +189,8 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                     if remaining < stackCount then
                         moveCount = remaining
                         C_Container.SplitContainerItem(bag, slot, moveCount)
-                        C_Container.UseContainerItem(bag, slot)
+                        -- Cursor now holds the split portion; place it into bags
+                        PlaceCursorInBags()
                     else
                         C_Container.UseContainerItem(bag, slot)
                     end
@@ -185,7 +231,8 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                     if remaining < stackCount then
                         moveCount = remaining
                         C_Container.SplitContainerItem(bankBag, slot, moveCount)
-                        C_Container.UseContainerItem(bankBag, slot)
+                        -- Cursor now holds the split portion; place it into bags
+                        PlaceCursorInBags()
                     else
                         C_Container.UseContainerItem(bankBag, slot)
                     end
