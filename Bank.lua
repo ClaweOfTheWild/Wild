@@ -416,9 +416,13 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
 
         -- Phase 1: Gold sync (atomic, one pass) from gold-kind groups
         local goldTarget = Wild.GetIntentGoldTarget(intent)
+        BlogMsg(string.format("Hold phase 1: goldTarget=%s reservoir=%s trigger=%s groups=%d",
+            tostring(goldTarget), tostring(reservoir), tostring(triggerSource), #(intent.groups or {})))
         if goldTarget > 0 and reservoir ~= "character" then
             local currentCopper = GetMoney()
             local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
+            BlogMsg(string.format("Gold sync: target=%dg current=%s keep=%s reservoir=%s trigger=%s",
+                goldTarget, Wild.FormatGold(currentCopper), Wild.FormatGold(keepCopper), tostring(reservoir), tostring(triggerSource)))
 
             if currentCopper > keepCopper then
                 local depositCopper = currentCopper - keepCopper
@@ -431,11 +435,28 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
             elseif currentCopper < keepCopper then
                 local withdrawCopper = keepCopper - currentCopper
                 if reservoir == "warband" and triggerSource == "warband" then
-                    C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
-                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    local bankCopper = C_Bank.FetchDepositedMoney(Enum.BankType.Account) or 0
+                    BlogMsg("Warband bank gold: " .. Wild.FormatGold(bankCopper) .. " — need to withdraw: " .. Wild.FormatGold(withdrawCopper))
+                    if bankCopper <= 0 then
+                        print(prefix .. "|cff888888Warband bank has no gold to withdraw.|r [" .. summary .. "]")
+                    else
+                        if withdrawCopper > bankCopper then
+                            withdrawCopper = bankCopper
+                        end
+                        C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
+                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    end
                 elseif reservoir == "guild" and triggerSource == "guild" then
-                    WithdrawGuildBankMoney(withdrawCopper)
-                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    local bankCopper = GetGuildBankMoney and GetGuildBankMoney() or 0
+                    if bankCopper <= 0 then
+                        print(prefix .. "|cff888888Guild bank has no gold to withdraw.|r [" .. summary .. "]")
+                    else
+                        if withdrawCopper > bankCopper then
+                            withdrawCopper = bankCopper
+                        end
+                        WithdrawGuildBankMoney(withdrawCopper)
+                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    end
                 else
                     BlogMsg("Gold deficit but trigger source (" .. tostring(triggerSource) .. ") != reservoir (" .. reservoir .. ") — skipping withdraw.")
                 end
@@ -763,9 +784,15 @@ end
 -- ============================================================
 
 local function ProcessIntents(accessibleSources)
-    if not Wild.db or not Wild.db.intents then return end
+    if not Wild.db or not Wild.db.intents then
+        BlogMsg("ProcessIntents: no db or no intents table.")
+        return
+    end
     local intents = Wild.db.intents
-    if #intents == 0 then return end
+    if #intents == 0 then
+        BlogMsg("ProcessIntents: intents table is empty.")
+        return
+    end
 
     -- Don't start a new queue if one is already running
     if activeQueue then
@@ -773,17 +800,38 @@ local function ProcessIntents(accessibleSources)
         return
     end
 
+    BlogMsg("ProcessIntents: evaluating " .. #intents .. " intent(s). Accessible sources: "
+        .. (accessibleSources.character and "character " or "")
+        .. (accessibleSources.warband and "warband " or "")
+        .. (accessibleSources.guild and "guild " or ""))
+
     local queue = {}
-    for _, intent in ipairs(intents) do
-        if intent.enabled ~= false and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
-            local triggerSource = IntentFiresFor(intent, accessibleSources)
-            if triggerSource then
-                queue[#queue + 1] = { intent = intent, triggerSource = triggerSource }
+    for i, intent in ipairs(intents) do
+        local summary = Wild.GetIntentSummary(intent) or ("intent #" .. i)
+        if intent.enabled == false then
+            BlogMsg("  [" .. i .. "] SKIP (disabled): " .. summary)
+        else
+            local valid, reason = Wild.ValidateIntent(intent)
+            if not valid then
+                BlogMsg("  [" .. i .. "] SKIP (invalid: " .. tostring(reason) .. "): " .. summary)
+            elseif not Wild.IntentMatchesActor(intent) then
+                BlogMsg("  [" .. i .. "] SKIP (actor mismatch): " .. summary)
+            else
+                local triggerSource = IntentFiresFor(intent, accessibleSources)
+                if triggerSource then
+                    BlogMsg("  [" .. i .. "] QUEUED (trigger=" .. triggerSource .. "): " .. summary)
+                    queue[#queue + 1] = { intent = intent, triggerSource = triggerSource }
+                else
+                    BlogMsg("  [" .. i .. "] SKIP (target '" .. tostring(intent.target) .. "' not accessible): " .. summary)
+                end
             end
         end
     end
 
-    if #queue == 0 then return end
+    if #queue == 0 then
+        BlogMsg("ProcessIntents: no intents matched — queue empty.")
+        return
+    end
 
     print(string.format("|cff00ccffWild:|r Processing %d intent(s)...", #queue))
 
