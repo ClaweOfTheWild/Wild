@@ -91,14 +91,26 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info then info.bag = bag; info.slot = slot end
             if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                if bankType then
-                    C_Container.UseContainerItem(bag, slot, nil, bankType)
-                else
-                    C_Container.UseContainerItem(bag, slot)
-                end
                 local stackCount = info.stackCount or 1
-                deposited = deposited + stackCount
-                entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                local remaining = maxCount - deposited
+                local moveCount = stackCount
+                if remaining < stackCount then
+                    moveCount = remaining
+                    C_Container.SplitContainerItem(bag, slot, moveCount)
+                    if bankType then
+                        C_Container.UseContainerItem(bag, slot, nil, bankType)
+                    else
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                else
+                    if bankType then
+                        C_Container.UseContainerItem(bag, slot, nil, bankType)
+                    else
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                end
+                deposited = deposited + moveCount
+                entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
             end
         end
     end
@@ -126,10 +138,18 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                     itemCount = itemCount + 1
                 end
                 if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                    C_Container.UseContainerItem(bag, slot)
                     local stackCount = info.stackCount or 1
-                    withdrawn = withdrawn + stackCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                    local remaining = neededCount - withdrawn
+                    local moveCount = stackCount
+                    if remaining < stackCount then
+                        moveCount = remaining
+                        C_Container.SplitContainerItem(bag, slot, moveCount)
+                        C_Container.UseContainerItem(bag, slot)
+                    else
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                    withdrawn = withdrawn + moveCount
+                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
                 end
             end
             BlogMsg("  Bank bag " .. tostring(bag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
@@ -159,10 +179,18 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                     itemCount = itemCount + 1
                 end
                 if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                    C_Container.UseContainerItem(bankBag, slot)
                     local stackCount = info.stackCount or 1
-                    withdrawn = withdrawn + stackCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                    local remaining = neededCount - withdrawn
+                    local moveCount = stackCount
+                    if remaining < stackCount then
+                        moveCount = remaining
+                        C_Container.SplitContainerItem(bankBag, slot, moveCount)
+                        C_Container.UseContainerItem(bankBag, slot)
+                    else
+                        C_Container.UseContainerItem(bankBag, slot)
+                    end
+                    withdrawn = withdrawn + moveCount
+                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
                 end
             end
             BlogMsg("  Warband tab " .. tostring(bankBag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
