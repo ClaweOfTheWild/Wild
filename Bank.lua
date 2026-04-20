@@ -72,6 +72,54 @@ end
 Wild.GetPlayerBags = GetPlayerBags
 
 -- ============================================================
+-- Place cursor item into a free player bag slot
+-- Used after SplitContainerItem to drop partial stacks.
+-- ============================================================
+
+local function PlaceCursorInBags()
+    for _, bag in ipairs(GetPlayerBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if not info then
+                C_Container.PickupContainerItem(bag, slot)
+                return true
+            end
+        end
+    end
+    ClearCursor()
+    return false
+end
+
+-- ============================================================
+-- Place cursor item into a free bank slot
+-- Used after SplitContainerItem to drop partial stacks into bank.
+-- ============================================================
+
+local function PlaceCursorInBank(bankType)
+    local bankBags
+    if bankType == Enum.BankType.Account then
+        bankBags = ACCOUNT_BANK_TABS
+    else
+        bankBags = CHARACTER_BANK_BAGS
+    end
+    for _, bag in ipairs(bankBags) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if not info then
+                    C_Container.PickupContainerItem(bag, slot)
+                    return true
+                end
+            end
+        end
+    end
+    ClearCursor()
+    return false
+end
+
+-- ============================================================
 -- Deposit from bags (shared across all bank types)
 -- ============================================================
 
@@ -91,14 +139,23 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info then info.bag = bag; info.slot = slot end
             if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                if bankType then
-                    C_Container.UseContainerItem(bag, slot, nil, bankType)
-                else
-                    C_Container.UseContainerItem(bag, slot)
-                end
                 local stackCount = info.stackCount or 1
-                deposited = deposited + stackCount
-                entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                local remaining = maxCount - deposited
+                local moveCount = stackCount
+                if remaining < stackCount then
+                    moveCount = remaining
+                    C_Container.SplitContainerItem(bag, slot, moveCount)
+                    -- Cursor now holds the split portion; deposit it into the bank
+                    PlaceCursorInBank(bankType or Enum.BankType.Character)
+                else
+                    if bankType then
+                        C_Container.UseContainerItem(bag, slot, nil, bankType)
+                    else
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                end
+                deposited = deposited + moveCount
+                entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
             end
         end
     end
@@ -126,10 +183,19 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                     itemCount = itemCount + 1
                 end
                 if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                    C_Container.UseContainerItem(bag, slot)
                     local stackCount = info.stackCount or 1
-                    withdrawn = withdrawn + stackCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                    local remaining = neededCount - withdrawn
+                    local moveCount = stackCount
+                    if remaining < stackCount then
+                        moveCount = remaining
+                        C_Container.SplitContainerItem(bag, slot, moveCount)
+                        -- Cursor now holds the split portion; place it into bags
+                        PlaceCursorInBags()
+                    else
+                        C_Container.UseContainerItem(bag, slot)
+                    end
+                    withdrawn = withdrawn + moveCount
+                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
                 end
             end
             BlogMsg("  Bank bag " .. tostring(bag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
@@ -159,10 +225,19 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                     itemCount = itemCount + 1
                 end
                 if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
-                    C_Container.UseContainerItem(bankBag, slot)
                     local stackCount = info.stackCount or 1
-                    withdrawn = withdrawn + stackCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = stackCount }
+                    local remaining = neededCount - withdrawn
+                    local moveCount = stackCount
+                    if remaining < stackCount then
+                        moveCount = remaining
+                        C_Container.SplitContainerItem(bankBag, slot, moveCount)
+                        -- Cursor now holds the split portion; place it into bags
+                        PlaceCursorInBags()
+                    else
+                        C_Container.UseContainerItem(bankBag, slot)
+                    end
+                    withdrawn = withdrawn + moveCount
+                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
                 end
             end
             BlogMsg("  Warband tab " .. tostring(bankBag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
@@ -388,9 +463,13 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
 
         -- Phase 1: Gold sync (atomic, one pass) from gold-kind groups
         local goldTarget = Wild.GetIntentGoldTarget(intent)
+        BlogMsg(string.format("Hold phase 1: goldTarget=%s reservoir=%s trigger=%s groups=%d",
+            tostring(goldTarget), tostring(reservoir), tostring(triggerSource), #(intent.groups or {})))
         if goldTarget > 0 and reservoir ~= "character" then
             local currentCopper = GetMoney()
             local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
+            BlogMsg(string.format("Gold sync: target=%dg current=%s keep=%s reservoir=%s trigger=%s",
+                goldTarget, Wild.FormatGold(currentCopper), Wild.FormatGold(keepCopper), tostring(reservoir), tostring(triggerSource)))
 
             if currentCopper > keepCopper then
                 local depositCopper = currentCopper - keepCopper
@@ -403,11 +482,28 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
             elseif currentCopper < keepCopper then
                 local withdrawCopper = keepCopper - currentCopper
                 if reservoir == "warband" and triggerSource == "warband" then
-                    C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
-                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    local bankCopper = C_Bank.FetchDepositedMoney(Enum.BankType.Account) or 0
+                    BlogMsg("Warband bank gold: " .. Wild.FormatGold(bankCopper) .. " — need to withdraw: " .. Wild.FormatGold(withdrawCopper))
+                    if bankCopper <= 0 then
+                        print(prefix .. "|cff888888Warband bank has no gold to withdraw.|r [" .. summary .. "]")
+                    else
+                        if withdrawCopper > bankCopper then
+                            withdrawCopper = bankCopper
+                        end
+                        C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
+                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    end
                 elseif reservoir == "guild" and triggerSource == "guild" then
-                    WithdrawGuildBankMoney(withdrawCopper)
-                    print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    local bankCopper = GetGuildBankMoney and GetGuildBankMoney() or 0
+                    if bankCopper <= 0 then
+                        print(prefix .. "|cff888888Guild bank has no gold to withdraw.|r [" .. summary .. "]")
+                    else
+                        if withdrawCopper > bankCopper then
+                            withdrawCopper = bankCopper
+                        end
+                        WithdrawGuildBankMoney(withdrawCopper)
+                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                    end
                 else
                     BlogMsg("Gold deficit but trigger source (" .. tostring(triggerSource) .. ") != reservoir (" .. reservoir .. ") — skipping withdraw.")
                 end
@@ -735,9 +831,15 @@ end
 -- ============================================================
 
 local function ProcessIntents(accessibleSources)
-    if not Wild.db or not Wild.db.intents then return end
+    if not Wild.db or not Wild.db.intents then
+        BlogMsg("ProcessIntents: no db or no intents table.")
+        return
+    end
     local intents = Wild.db.intents
-    if #intents == 0 then return end
+    if #intents == 0 then
+        BlogMsg("ProcessIntents: intents table is empty.")
+        return
+    end
 
     -- Don't start a new queue if one is already running
     if activeQueue then
@@ -745,17 +847,38 @@ local function ProcessIntents(accessibleSources)
         return
     end
 
+    BlogMsg("ProcessIntents: evaluating " .. #intents .. " intent(s). Accessible sources: "
+        .. (accessibleSources.character and "character " or "")
+        .. (accessibleSources.warband and "warband " or "")
+        .. (accessibleSources.guild and "guild " or ""))
+
     local queue = {}
-    for _, intent in ipairs(intents) do
-        if intent.enabled ~= false and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
-            local triggerSource = IntentFiresFor(intent, accessibleSources)
-            if triggerSource then
-                queue[#queue + 1] = { intent = intent, triggerSource = triggerSource }
+    for i, intent in ipairs(intents) do
+        local summary = Wild.GetIntentSummary(intent) or ("intent #" .. i)
+        if intent.enabled == false then
+            BlogMsg("  [" .. i .. "] SKIP (disabled): " .. summary)
+        else
+            local valid, reason = Wild.ValidateIntent(intent)
+            if not valid then
+                BlogMsg("  [" .. i .. "] SKIP (invalid: " .. tostring(reason) .. "): " .. summary)
+            elseif not Wild.IntentMatchesActor(intent) then
+                BlogMsg("  [" .. i .. "] SKIP (actor mismatch): " .. summary)
+            else
+                local triggerSource = IntentFiresFor(intent, accessibleSources)
+                if triggerSource then
+                    BlogMsg("  [" .. i .. "] QUEUED (trigger=" .. triggerSource .. "): " .. summary)
+                    queue[#queue + 1] = { intent = intent, triggerSource = triggerSource }
+                else
+                    BlogMsg("  [" .. i .. "] SKIP (target '" .. tostring(intent.target) .. "' not accessible): " .. summary)
+                end
             end
         end
     end
 
-    if #queue == 0 then return end
+    if #queue == 0 then
+        BlogMsg("ProcessIntents: no intents matched — queue empty.")
+        return
+    end
 
     print(string.format("|cff00ccffWild:|r Processing %d intent(s)...", #queue))
 
