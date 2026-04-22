@@ -130,6 +130,7 @@ local TARGET_BANK_TYPE = {
 -- Warband bank deposit: pass Enum.BankType.Account explicitly
 
 local function DepositFromBags(intent, charCtx, maxCount, bankType)
+    if maxCount == 0 then maxCount = math.huge end
     local deposited = 0
     local entries = {}
     for _, bag in ipairs(GetPlayerBags()) do
@@ -167,6 +168,7 @@ end
 -- ============================================================
 
 local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
+    if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
     BlogMsg("WithdrawFromCharacterBank: scanning " .. #CHARACTER_BANK_BAGS .. " bank bag(s), neededCount=" .. tostring(neededCount))
@@ -209,6 +211,7 @@ end
 -- ============================================================
 
 local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
+    if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
     BlogMsg("WithdrawFromWarbandBank: scanning " .. #ACCOUNT_BANK_TABS .. " warband tab(s), neededCount=" .. tostring(neededCount))
@@ -251,6 +254,7 @@ end
 -- ============================================================
 
 local function WithdrawFromGuildBank(intent, charCtx, neededCount)
+    if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
     local numTabs = GetNumGuildBankTabs()
@@ -940,9 +944,10 @@ local function OnBankOpened()
     end
 
     -- Event-driven: pre-load item data, then process intents once all data has arrived
+    -- Include player bags so deposit/hold intents have cached GetItemInfo data
     C_Timer.After(0.8, function()
-        PreloadBankItemData({ CHARACTER_BANK_BAGS, ACCOUNT_BANK_TABS }, function()
-            BlogMsg("All bank item data loaded — starting intent queue.")
+        PreloadBankItemData({ CHARACTER_BANK_BAGS, ACCOUNT_BANK_TABS, GetPlayerBags() }, function()
+            BlogMsg("All bank and bag item data loaded — starting intent queue.")
             ProcessIntents({ character = true, warband = true })
         end)
     end)

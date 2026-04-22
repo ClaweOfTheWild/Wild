@@ -40,6 +40,7 @@ local function BuildMailQueue()
     local bags = Wild.GetPlayerBags and Wild.GetPlayerBags() or { BACKPACK_CONTAINER }
     if not Wild.GetPlayerBags then
         for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
+        if Enum.BagIndex.ReagentBag then bags[#bags + 1] = Enum.BagIndex.ReagentBag end
     end
 
     for _, intent in ipairs(Wild.db.intents) do

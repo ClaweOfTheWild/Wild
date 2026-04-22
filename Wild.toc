@@ -1,4 +1,4 @@
-## Interface: 120001
+## Interface: 120005
 ## Title: Wild
 ## Notes: Quality of life addon that automates common interactions like repairs, banking, looting, and group applications.
 ## Author: Clawe of the Wild

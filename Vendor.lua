@@ -74,6 +74,7 @@ local function PreloadBagItems(onReady)
     local bags = Wild.GetPlayerBags and Wild.GetPlayerBags() or { BACKPACK_CONTAINER }
     if not Wild.GetPlayerBags then
         for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
+        if Enum.BagIndex.ReagentBag then bags[#bags + 1] = Enum.BagIndex.ReagentBag end
     end
     for _, bag in ipairs(bags) do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -130,6 +131,7 @@ local function BuildSellBatch()
     local bags = Wild.GetPlayerBags and Wild.GetPlayerBags() or { BACKPACK_CONTAINER }
     if not Wild.GetPlayerBags then
         for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
+        if Enum.BagIndex.ReagentBag then bags[#bags + 1] = Enum.BagIndex.ReagentBag end
     end
     for _, bag in ipairs(bags) do
         local numSlots = C_Container.GetContainerNumSlots(bag)
