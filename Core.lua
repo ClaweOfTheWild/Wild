@@ -129,6 +129,10 @@ local defaults = {
     advanced = {
         debug = false,
     },
+    log = {
+        entries = {},
+        nextIndex = 1,
+    },
 }
 
 -- Deep merge: apply default values for missing keys, recursing into tables

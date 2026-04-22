@@ -8,6 +8,7 @@
 ## Category: Miscellaneous
 
 Core.lua
+Log.lua
 Conditions.lua
 CharacterData.lua
 ScreenCenterCircle.lua

@@ -679,8 +679,7 @@ end
 -- ============================================================
 
 local function DebugMsg(msg)
-    if not Wild.db or not Wild.db.advanced or not Wild.db.advanced.debug then return end
-    print("|cff00ccffWild [Rules]:|r " .. msg)
+    Wild.Log("Rules", msg)
 end
 
 local function FormatActualValue(left, attrDef)

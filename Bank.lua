@@ -48,11 +48,7 @@ local GUILD_BANK_SLOTS_PER_TAB = 98
 -- ============================================================
 
 local function BlogMsg(msg)
-    if not Wild.db or not Wild.db.advanced or not Wild.db.advanced.debug then return end
-    local formatted = "|cff00ccffWild [Bank Debug]:|r " .. msg
-    print(formatted)
-    WildDB.bankDebug = WildDB.bankDebug or {}
-    table.insert(WildDB.bankDebug, string.format("[%.3f] %s", GetTime(), msg))
+    Wild.Log("Bank", msg)
 end
 
 -- ============================================================
