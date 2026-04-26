@@ -48,6 +48,9 @@ local FEATURE_NAMES = {
     dungeonbar       = "Dungeon Bar",
     autoaccept       = "Quest Auto-Accept",
     autohandin       = "Quest Auto-Hand-In",
+    durabilityequipped = "Durability on Equipped",
+    durabilitytotal    = "Durability Total Overlay",
+    durabilitybags     = "Durability on Bag Items",
 }
 
 -- ============================================================
@@ -87,7 +90,7 @@ subcommands.help = function()
     print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar),")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol)")
+    print("    volume (vol), durability (dur)")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -127,6 +130,12 @@ subcommands.help = function()
     print(" ")
     Print("/wild volume on|off — Toggle volume control button")
     print(" ")
+    Print("/wild durability — Show durability overlay status")
+    Print("/wild durability on|off — Toggle all durability overlays")
+    Print("/wild durability equipped on|off — Toggle per-slot equipped overlays")
+    Print("/wild durability total on|off — Toggle total durability overlay")
+    Print("/wild durability bags on|off — Toggle bag item overlays")
+    print(" ")
     Print("/wild trace start — Start recording events")
     Print("/wild trace stop — Stop recording")
     Print("/wild trace filter <text> — Filter events by name")
@@ -156,6 +165,7 @@ subcommands.status = function()
         "bank", "bankcharacter", "bankguild",
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
+        "durabilityequipped", "durabilitytotal", "durabilitybags",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -516,6 +526,50 @@ subcommands.volume = function(args)
     HandleGenericFeature("volume", args)
 end
 subcommands.vol = subcommands.volume
+
+-- /wild durability [on|off|equipped|total|bags]  (alias: dur)
+subcommands.durability = function(args)
+    if #args == 0 then
+        local db = Wild.db and Wild.db.durability
+        if not db then Print("Durability settings unavailable.") return end
+        Print("Durability on Equipped Items: " .. StatusText(db.showEquipped))
+        Print("Durability Total Overlay: " .. StatusText(db.showEquippedTotal))
+        Print("Durability on Bag Items: " .. StatusText(db.showBags))
+        return
+    end
+
+    local sub = args[1]:lower()
+
+    -- Global on/off toggles all three
+    local val = OnOff(sub)
+    if val ~= nil then
+        Wild.SetFeatureEnabled("durabilityequipped", val)
+        Wild.SetFeatureEnabled("durabilitytotal", val)
+        Wild.SetFeatureEnabled("durabilitybags", val)
+        Print("Durability overlays " .. StatusText(val))
+        return
+    end
+
+    if sub == "equipped" then
+        local v = OnOff(args[2])
+        if v == nil then Print("Usage: /wild durability equipped on|off") return end
+        Wild.SetFeatureEnabled("durabilityequipped", v)
+        Print("Durability on Equipped Items " .. StatusText(v))
+    elseif sub == "total" then
+        local v = OnOff(args[2])
+        if v == nil then Print("Usage: /wild durability total on|off") return end
+        Wild.SetFeatureEnabled("durabilitytotal", v)
+        Print("Durability Total Overlay " .. StatusText(v))
+    elseif sub == "bags" then
+        local v = OnOff(args[2])
+        if v == nil then Print("Usage: /wild durability bags on|off") return end
+        Wild.SetFeatureEnabled("durabilitybags", v)
+        Print("Durability on Bag Items " .. StatusText(v))
+    else
+        Print("Usage: /wild durability [equipped|total|bags] on|off")
+    end
+end
+subcommands.dur = subcommands.durability
 
 -- /wild datastore [status|clear|refresh] — manage cross-character datastore
 subcommands.datastore = function(args)

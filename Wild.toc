@@ -30,5 +30,6 @@ DarkmoonFaire.lua
 Loot.lua
 Tooltip.lua
 VolumeControl.lua
+Durability.lua
 SlashCommands.lua
 Settings.lua

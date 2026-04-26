@@ -5124,6 +5124,100 @@ local function CreateVolumeTab()
 end
 
 -- ============================================================
+-- Tab: Durability
+-- ============================================================
+local function CreateDurabilityTab()
+    local panel = CreateFrame("Frame")
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(800)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Durability")
+
+    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Show item durability as a rounded percentage on equipment and bag items.|r")
+
+    -- Checkbox: show on equipped items
+    local equippedCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    equippedCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    equippedCB.Text:SetText("Show on equipped items")
+    equippedCB.tooltipText = "Display durability percentage on each equipment slot in the character panel."
+
+    equippedCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.durability.showEquipped = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        Wild.UpdateDurabilityOverlays()
+    end)
+
+    local equippedHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    equippedHint:SetPoint("TOPLEFT", equippedCB, "BOTTOMLEFT", 22, -4)
+    equippedHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    equippedHint:SetJustifyH("LEFT")
+    equippedHint:SetText("|cff888888Shows a percentage at the bottom of each equipment slot on the character panel. Color changes from green to red as durability decreases.|r")
+
+    -- Checkbox: show total overlay
+    local totalCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    totalCB:SetPoint("TOPLEFT", equippedHint, "BOTTOMLEFT", -22, -16)
+    totalCB.Text:SetText("Show total durability overlay")
+    totalCB.tooltipText = "Display a draggable overlay showing total equipped durability percentage."
+
+    totalCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.durability.showEquippedTotal = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        Wild.UpdateDurabilityOverlays()
+    end)
+
+    local totalHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    totalHint:SetPoint("TOPLEFT", totalCB, "BOTTOMLEFT", 22, -4)
+    totalHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    totalHint:SetJustifyH("LEFT")
+    totalHint:SetText("|cff888888Shows a small draggable frame with your total equipment durability. Drag it to reposition — the position is saved across sessions.|r")
+
+    -- Checkbox: show on bag items
+    local bagsCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    bagsCB:SetPoint("TOPLEFT", totalHint, "BOTTOMLEFT", -22, -16)
+    bagsCB.Text:SetText("Show on bag items")
+    bagsCB.tooltipText = "Display durability percentage on items in your bags that have durability."
+
+    bagsCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.durability.showBags = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        Wild.UpdateDurabilityOverlays()
+    end)
+
+    local bagsHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    bagsHint:SetPoint("TOPLEFT", bagsCB, "BOTTOMLEFT", 22, -4)
+    bagsHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    bagsHint:SetJustifyH("LEFT")
+    bagsHint:SetText("|cff888888Shows a percentage at the bottom of bag item slots that have durability. Useful for tracking the condition of gear in your inventory.|r")
+
+    panel:SetScript("OnShow", function()
+        if Wild.db and Wild.db.durability then
+            equippedCB:SetChecked(Wild.db.durability.showEquipped)
+            totalCB:SetChecked(Wild.db.durability.showEquippedTotal)
+            bagsCB:SetChecked(Wild.db.durability.showBags)
+        end
+    end)
+
+    return panel
+end
+
+-- ============================================================
 -- Initialize
 -- ============================================================
 local loader = CreateFrame("Frame")
@@ -5155,6 +5249,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     EndCollapsibleGroup()
     AddTab("Delve", CreateDelveTab())
     AddTab("Volume", CreateVolumeTab())
+    AddTab("Durability", CreateDurabilityTab())
     LayoutSidebar()
     SelectTab("LFG")
     mainFrame:Hide()

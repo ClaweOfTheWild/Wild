@@ -109,6 +109,12 @@ local defaults = {
     darkmoonFaire = {
         showProfessionHelper = false, -- show a shopping list when entering a DMF staging area
     },
+    durability = {
+        showEquipped = false,
+        showEquippedTotal = false,
+        totalPosition = nil,
+        showBags = false,
+    },
     mail = {
         autoOpen = false,
     },
@@ -524,6 +530,10 @@ local FEATURES = {
     autoaccept       = { key = "quests.autoAccept" },
     autohandin       = { key = "quests.autoHandIn" },
     volume           = { key = "volumeControl.enabled", onToggle = function() Wild.UpdateVolumeControl() end },
+    durability       = { key = "durability.showEquipped", onToggle = function() Wild.UpdateDurabilityOverlays() end },
+    durabilityequipped = { key = "durability.showEquipped", onToggle = function() Wild.UpdateDurabilityOverlays() end },
+    durabilitytotal  = { key = "durability.showEquippedTotal", onToggle = function() Wild.UpdateDurabilityOverlays() end },
+    durabilitybags   = { key = "durability.showBags", onToggle = function() Wild.UpdateDurabilityOverlays() end },
 }
 
 Wild.FEATURES = FEATURES
