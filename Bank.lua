@@ -72,7 +72,27 @@ Wild.GetPlayerBags = GetPlayerBags
 -- Used after SplitContainerItem to drop partial stacks.
 -- ============================================================
 
-local function PlaceCursorInBags()
+local function PlaceCursorInBags(itemID)
+    -- Phase 1: try to merge into an existing partial stack of the same item
+    if itemID then
+        local maxStack = select(8, GetItemInfo(itemID)) or 1
+        if maxStack > 1 then
+            for _, bag in ipairs(GetPlayerBags()) do
+                local numSlots = C_Container.GetContainerNumSlots(bag)
+                for slot = 1, numSlots do
+                    local info = C_Container.GetContainerItemInfo(bag, slot)
+                    if info and info.itemID == itemID and (info.stackCount or 1) < maxStack then
+                        C_Container.PickupContainerItem(bag, slot)
+                        -- If the partial stack absorbed everything, we're done.
+                        -- If overflow remains on cursor, WoW keeps it there;
+                        -- fall through to find another slot.
+                        if not GetCursorInfo() then return true end
+                    end
+                end
+            end
+        end
+    end
+    -- Phase 2: fall back to first empty slot
     for _, bag in ipairs(GetPlayerBags()) do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         for slot = 1, numSlots do
@@ -92,13 +112,32 @@ end
 -- Used after SplitContainerItem to drop partial stacks into bank.
 -- ============================================================
 
-local function PlaceCursorInBank(bankType)
+local function PlaceCursorInBank(bankType, itemID)
     local bankBags
     if bankType == Enum.BankType.Account then
         bankBags = ACCOUNT_BANK_TABS
     else
         bankBags = CHARACTER_BANK_BAGS
     end
+    -- Phase 1: try to merge into an existing partial stack of the same item
+    if itemID then
+        local maxStack = select(8, GetItemInfo(itemID)) or 1
+        if maxStack > 1 then
+            for _, bag in ipairs(bankBags) do
+                local numSlots = C_Container.GetContainerNumSlots(bag)
+                if numSlots and numSlots > 0 then
+                    for slot = 1, numSlots do
+                        local info = C_Container.GetContainerItemInfo(bag, slot)
+                        if info and info.itemID == itemID and (info.stackCount or 1) < maxStack then
+                            C_Container.PickupContainerItem(bag, slot)
+                            if not GetCursorInfo() then return true end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- Phase 2: fall back to first empty slot
     for _, bag in ipairs(bankBags) do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         if numSlots and numSlots > 0 then
@@ -143,7 +182,7 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
                     moveCount = remaining
                     C_Container.SplitContainerItem(bag, slot, moveCount)
                     -- Cursor now holds the split portion; deposit it into the bank
-                    PlaceCursorInBank(bankType or Enum.BankType.Character)
+                    PlaceCursorInBank(bankType or Enum.BankType.Character, info.itemID)
                 else
                     if bankType then
                         C_Container.UseContainerItem(bag, slot, nil, bankType)
@@ -188,7 +227,7 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                         moveCount = remaining
                         C_Container.SplitContainerItem(bag, slot, moveCount)
                         -- Cursor now holds the split portion; place it into bags
-                        PlaceCursorInBags()
+                        PlaceCursorInBags(info.itemID)
                     else
                         C_Container.UseContainerItem(bag, slot)
                     end
@@ -231,7 +270,7 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                         moveCount = remaining
                         C_Container.SplitContainerItem(bankBag, slot, moveCount)
                         -- Cursor now holds the split portion; place it into bags
-                        PlaceCursorInBags()
+                        PlaceCursorInBags(info.itemID)
                     else
                         C_Container.UseContainerItem(bankBag, slot)
                     end
@@ -394,8 +433,8 @@ local function PreloadBankItemData(bankBagSets, onComplete)
         return
     end
 
-    -- Safety timeout: if items never arrive, proceed anyway after 3s
-    local safetyTimer = C_Timer.NewTimer(3.0, function()
+    -- Safety timeout: if items never arrive, proceed anyway
+    local safetyTimer = C_Timer.NewTimer(Wild.db.advanced.preloadTimeout, function()
         if pendingCount > 0 then
             BlogMsg("PreloadBankItemData: safety timeout with " .. pendingCount .. " item(s) still pending.")
             pendingCount = 0
@@ -730,6 +769,10 @@ end
 
 local MAX_PASSES_PER_INTENT = 50
 
+local function ScheduleStep(delay, fn)
+    C_Timer.After(delay, fn)
+end
+
 ProcessQueueStep = function()
     if not activeQueue or activeIndex > activeLen then
         -- Queue is done: ensure no further event handlers are active
@@ -750,7 +793,7 @@ ProcessQueueStep = function()
     if passNum >= MAX_PASSES_PER_INTENT then
         BlogMsg("Intent " .. activeIndex .. " hit safety cap (" .. MAX_PASSES_PER_INTENT .. " passes) — advancing")
         activeIndex = activeIndex + 1
-        ProcessQueueStep()
+        ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep)
         return
     end
 
@@ -770,11 +813,11 @@ ProcessQueueStep = function()
                 self:SetScript("OnEvent", function(self2, event2)
                     self2:UnregisterEvent("BAG_UPDATE_DELAYED")
                     self2:SetScript("OnEvent", nil)
-                    ProcessQueueStep()  -- retry same intent
+                    ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)  -- retry same intent
                 end)
             else
                 -- Deposit had nothing — retry same intent to check if source has more
-                ProcessQueueStep()
+                ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)
             end
         end)
     elseif movedItems then
@@ -785,7 +828,7 @@ ProcessQueueStep = function()
             self:UnregisterEvent("BAG_UPDATE_DELAYED")
             self:SetScript("OnEvent", nil)
             BlogMsg("Intent " .. activeIndex .. " bags settled (pass " .. passNum .. ") — retrying")
-            ProcessQueueStep()  -- retry same intent
+            ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)  -- retry same intent
         end)
     else
         -- No items moved: this intent is done — advance
@@ -802,7 +845,7 @@ ProcessQueueStep = function()
             queueFrame:SetScript("OnEvent", nil)
             return
         end
-        ProcessQueueStep()
+        ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep)
     end
 end
 
@@ -941,7 +984,7 @@ local function OnBankOpened()
 
     -- Event-driven: pre-load item data, then process intents once all data has arrived
     -- Include player bags so deposit/hold intents have cached GetItemInfo data
-    C_Timer.After(0.8, function()
+    C_Timer.After(Wild.db.advanced.bankStartDelay, function()
         PreloadBankItemData({ CHARACTER_BANK_BAGS, ACCOUNT_BANK_TABS, GetPlayerBags() }, function()
             BlogMsg("All bank and bag item data loaded — starting intent queue.")
             ProcessIntents({ character = true, warband = true })
@@ -957,7 +1000,7 @@ local function OnGuildBankOpened()
     if not Wild.db then return end
 
     -- Guild bank items use GetGuildBankItemLink (always available), so no pre-load needed
-    C_Timer.After(0.5, function()
+    C_Timer.After(Wild.db.advanced.guildBankStartDelay, function()
         ProcessIntents({ guild = true })
     end)
 end

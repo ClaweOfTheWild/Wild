@@ -137,6 +137,12 @@ subcommands.help = function()
     Print("/wild datastore — Show cross-character datastore status")
     Print("/wild datastore refresh — Re-scan current character's bags")
     print(" ")
+    Print("/wild delay — Show all timing settings")
+    Print("/wild delay <setting> <seconds> — Set a timing value")
+    Print("  Settings: rule, pass, bankstart, guildbankstart,")
+    Print("  sellinterval, sellstart, mailstart, mailbatch,")
+    Print("  destroystart, preloadtimeout")
+    print(" ")
     Print("/wild reset — Reset all settings to defaults")
 end
 
@@ -532,6 +538,50 @@ subcommands.datastore = function(args)
     end
 end
 subcommands.ds = subcommands.datastore
+
+-- /wild delay [setting] [seconds]
+subcommands.delay = function(args)
+    local DELAY_SETTINGS = {
+        rule            = { key = "ruleDelay",          label = "Rule delay" },
+        pass            = { key = "passDelay",          label = "Pass delay" },
+        bankstart       = { key = "bankStartDelay",     label = "Bank start delay" },
+        guildbankstart  = { key = "guildBankStartDelay",label = "Guild bank start delay" },
+        sellinterval    = { key = "sellInterval",       label = "Sell interval" },
+        sellstart       = { key = "sellStartDelay",     label = "Sell start delay" },
+        mailstart       = { key = "mailStartDelay",     label = "Mail start delay" },
+        mailbatch       = { key = "mailBatchDelay",     label = "Mail batch delay" },
+        destroystart    = { key = "destroyStartDelay",  label = "Destroy start delay" },
+        preloadtimeout  = { key = "preloadTimeout",     label = "Preload timeout" },
+    }
+
+    local sub = args[1] and args[1]:lower() or nil
+
+    if not sub then
+        -- Show all current values
+        print("|cff00ccff--- Wild Timing Settings ---|r")
+        local order = { "rule", "pass", "bankstart", "guildbankstart", "sellinterval", "sellstart", "mailstart", "mailbatch", "destroystart", "preloadtimeout" }
+        for _, name in ipairs(order) do
+            local s = DELAY_SETTINGS[name]
+            Print(s.label .. ": " .. (Wild.db.advanced[s.key] or 0.3) .. "s")
+        end
+        return
+    end
+
+    local setting = DELAY_SETTINGS[sub]
+    if not setting then
+        Print("Unknown delay setting: " .. sub .. ". Options: rule, pass, bankstart, guildbankstart, sellinterval, sellstart, mailstart, mailbatch, destroystart, preloadtimeout")
+        return
+    end
+
+    local val = tonumber(args[2])
+    if not val then
+        Print(setting.label .. ": " .. (Wild.db.advanced[setting.key] or 0.3) .. "s")
+        return
+    end
+    val = math.max(0.1, math.min(1.0, math.floor(val * 10 + 0.5) / 10))
+    Wild.db.advanced[setting.key] = val
+    Print(setting.label .. " set to " .. val .. "s.")
+end
 
 -- ============================================================
 -- Main dispatcher

@@ -32,7 +32,7 @@ local function CreateSliderEditBox(parent, slider, minVal, maxVal, isInt)
 
     slider:HookScript("OnValueChanged", function(_, value)
         if isInt then value = math.floor(value + 0.5) end
-        editBox:SetText(tostring(value))
+        editBox:SetText(isInt and tostring(value) or string.format("%.1f", value))
     end)
 
     return editBox
@@ -2453,7 +2453,10 @@ end
 -- Advanced
 -- ============================================================
 
-local function CreateAdvancedTab()
+-- ============================================================
+-- Tab: Advanced (Intent timing settings)
+-- ============================================================
+local function CreateIntentsTab()
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -2474,10 +2477,82 @@ local function CreateAdvancedTab()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Developer and troubleshooting options.|r")
+    desc:SetText("|cff888888Configure timing and developer options for intent processing. Lower values = faster.|r")
 
+    -- Helper to create a labeled slider row (0.1–1.0, step 0.1)
+    local function MakeDelaySlider(parent, anchorTo, label, hint, key)
+        local lbl = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        lbl:SetPoint("TOPLEFT", anchorTo, "BOTTOMLEFT", 0, -12)
+        lbl:SetText(label)
+
+        local slider = CreateFrame("Slider", nil, parent, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", lbl, "BOTTOMLEFT", 0, -4)
+        slider:SetMinMaxValues(0.1, 1.0)
+        slider:SetValueStep(0.1)
+        slider:SetObeyStepOnDrag(true)
+        slider:SetWidth(200)
+        slider.Low:SetText("0.1")
+        slider.High:SetText("1.0")
+
+        slider:SetScript("OnValueChanged", function(self, value)
+            value = math.floor(value * 10 + 0.5) / 10
+            Wild.db.advanced[key] = value
+        end)
+
+        local editBox = CreateSliderEditBox(parent, slider, 0.1, 1.0, false)
+
+        local hintText = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        hintText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -4)
+        hintText:SetPoint("RIGHT", parent, "RIGHT", -16, 0)
+        hintText:SetJustifyH("LEFT")
+        hintText:SetText("|cff888888" .. hint .. "|r")
+
+        return slider, hintText
+    end
+
+    local ruleDelaySlider, ruleDelayHint = MakeDelaySlider(sc, desc,
+        "Rule delay", "Seconds before advancing to the next intent rule.",
+        "ruleDelay")
+
+    local passDelaySlider, passDelayHint = MakeDelaySlider(sc, ruleDelayHint,
+        "Pass delay", "Seconds before retrying the same rule after bags settle.",
+        "passDelay")
+
+    local bankStartSlider, bankStartHint = MakeDelaySlider(sc, passDelayHint,
+        "Bank start delay", "Seconds before bank intent processing begins after the bank opens.",
+        "bankStartDelay")
+
+    local guildBankStartSlider, guildBankStartHint = MakeDelaySlider(sc, bankStartHint,
+        "Guild bank start delay", "Seconds before guild bank intent processing begins.",
+        "guildBankStartDelay")
+
+    local sellIntervalSlider, sellIntervalHint = MakeDelaySlider(sc, guildBankStartHint,
+        "Sell interval", "Seconds between selling individual items at a vendor.",
+        "sellInterval")
+
+    local sellStartSlider, sellStartHint = MakeDelaySlider(sc, sellIntervalHint,
+        "Sell start delay", "Seconds before sell processing begins after merchant opens.",
+        "sellStartDelay")
+
+    local mailStartSlider, mailStartHint = MakeDelaySlider(sc, sellStartHint,
+        "Mail start delay", "Seconds before mail send processing begins after mailbox opens.",
+        "mailStartDelay")
+
+    local mailBatchSlider, mailBatchHint = MakeDelaySlider(sc, mailStartHint,
+        "Mail batch delay", "Seconds between mail batches (groups of 12 attachments).",
+        "mailBatchDelay")
+
+    local destroyStartSlider, destroyStartHint = MakeDelaySlider(sc, mailBatchHint,
+        "Destroy start delay", "Seconds before destroy processing begins after trigger.",
+        "destroyStartDelay")
+
+    local preloadTimeoutSlider, preloadTimeoutHint = MakeDelaySlider(sc, destroyStartHint,
+        "Preload timeout", "Safety timeout for item data preloading. Increase if bank processing starts before all items load.",
+        "preloadTimeout")
+
+    -- Debug mode
     local debugCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
-    debugCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    debugCB:SetPoint("TOPLEFT", preloadTimeoutHint, "BOTTOMLEFT", -2, -20)
     debugCB.Text:SetText("Enable debug mode")
     debugCB.tooltipText = "Print diagnostic messages to chat for troubleshooting. Covers bank automation, event handling, and other subsystems."
 
@@ -2487,14 +2562,24 @@ local function CreateAdvancedTab()
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
-    local hint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    hint:SetPoint("TOPLEFT", debugCB, "BOTTOMLEFT", 22, -4)
-    hint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    hint:SetJustifyH("LEFT")
-    hint:SetText("|cff888888When enabled, Wild prints detailed debug output to chat and saves it to WildDB.bankDebug in saved variables. Disable when not actively troubleshooting.|r")
+    local debugHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    debugHint:SetPoint("TOPLEFT", debugCB, "BOTTOMLEFT", 22, -4)
+    debugHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    debugHint:SetJustifyH("LEFT")
+    debugHint:SetText("|cff888888When enabled, Wild prints detailed debug output to chat and saves it to WildDB.bankDebug in saved variables. Disable when not actively troubleshooting.|r")
 
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.advanced then
+            ruleDelaySlider:SetValue(Wild.db.advanced.ruleDelay or 0.3)
+            passDelaySlider:SetValue(Wild.db.advanced.passDelay or 0.3)
+            bankStartSlider:SetValue(Wild.db.advanced.bankStartDelay or 0.3)
+            guildBankStartSlider:SetValue(Wild.db.advanced.guildBankStartDelay or 0.3)
+            sellIntervalSlider:SetValue(Wild.db.advanced.sellInterval or 0.3)
+            sellStartSlider:SetValue(Wild.db.advanced.sellStartDelay or 0.3)
+            mailStartSlider:SetValue(Wild.db.advanced.mailStartDelay or 0.3)
+            mailBatchSlider:SetValue(Wild.db.advanced.mailBatchDelay or 0.3)
+            destroyStartSlider:SetValue(Wild.db.advanced.destroyStartDelay or 0.3)
+            preloadTimeoutSlider:SetValue(Wild.db.advanced.preloadTimeout or 0.3)
             debugCB:SetChecked(Wild.db.advanced.debug)
         end
     end)
@@ -2503,7 +2588,7 @@ local function CreateAdvancedTab()
 end
 
 -- ============================================================
--- Tab: Intents (Unified automation rules)
+-- Tab: Intent Rules (Unified automation rules)
 -- ============================================================
 local function CreateIntentRulesTab()
     local panel = CreateFrame("Frame")
@@ -5053,6 +5138,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     AddCollapsibleGroup("Intents")
     AddTab("Intent Rules", CreateIntentRulesTab(), true)
     AddTab("Actors", CreateActorsTab(), true)
+    AddTab("Advanced", CreateIntentsTab(), true)
     EndCollapsibleGroup()
     AddTab("Character", CreateCharacterTab())
     AddTab("Auction House", CreateAuctionHouseTab())
@@ -5069,7 +5155,6 @@ loader:SetScript("OnEvent", function(self, event, addon)
     EndCollapsibleGroup()
     AddTab("Delve", CreateDelveTab())
     AddTab("Volume", CreateVolumeTab())
-    AddTab("Advanced", CreateAdvancedTab())
     LayoutSidebar()
     SelectTab("LFG")
     mainFrame:Hide()

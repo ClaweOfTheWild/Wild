@@ -7,7 +7,7 @@ local ADDON_NAME, Wild = ...
 -- BAG_UPDATE_DELAYED → re-scan. Done when no matches remain.
 -- ============================================================
 
-local SELL_INTERVAL = 0.2
+local SELL_INTERVAL = 0.2 -- fallback; overridden by Wild.db.advanced.sellInterval at runtime
 local MAX_SELL_PASSES = 50
 
 -- ============================================================
@@ -28,7 +28,7 @@ sellFrame.onBatchDone = nil
 sellFrame:SetScript("OnUpdate", function(self, elapsed)
     self.timer = self.timer - elapsed
     if self.timer > 0 then return end
-    self.timer = SELL_INTERVAL
+    self.timer = (Wild.db and Wild.db.advanced and Wild.db.advanced.sellInterval) or SELL_INTERVAL
 
     if not MerchantFrame or not MerchantFrame:IsShown() then
         self:Hide()
@@ -240,7 +240,7 @@ local function RunSellPass()
             sellEventFrame:SetScript("OnEvent", function(self, event)
                 self:UnregisterEvent("BAG_UPDATE_DELAYED")
                 self:SetScript("OnEvent", nil)
-                RunSellPass()
+                C_Timer.After(Wild.db.advanced.passDelay, RunSellPass)
             end)
         else
             -- Nothing sold in this batch (items vanished?) — done
@@ -326,7 +326,7 @@ local function OnMerchantOpened()
     if now - lastMerchantOpen < 1 then return end
     lastMerchantOpen = now
     ProcessAutoRepair()
-    C_Timer.After(0.5, ProcessSellIntents)
+    C_Timer.After(Wild.db.advanced.sellStartDelay, ProcessSellIntents)
 end
 
 local frame = CreateFrame("Frame")

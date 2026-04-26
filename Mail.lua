@@ -127,7 +127,10 @@ end
 local function OnMailSendComplete()
     if #mailQueue > 0 then
         -- More batches in this pass — send next
-        C_Timer.After(0.5, ProcessNextMail)
+        local batchDelay = Wild.db.advanced.mailBatchDelay
+        local passDelay = Wild.db.advanced.passDelay
+        if passDelay and passDelay > batchDelay then batchDelay = passDelay end
+        C_Timer.After(batchDelay, ProcessNextMail)
     else
         -- This pass is done — re-scan after bags settle
         mailPassNum = mailPassNum + 1
@@ -152,7 +155,7 @@ local function OnMailSendComplete()
                 end
                 isSending = false
             else
-                ProcessNextMail()
+                C_Timer.After(Wild.db.advanced.passDelay, ProcessNextMail)
             end
         end)
     end
@@ -165,7 +168,7 @@ local function StartMailSend()
     isSending = true
     mailPassNum = 1
     mailTotalSent = 0
-    C_Timer.After(0.5, ProcessNextMail)
+    C_Timer.After(Wild.db.advanced.mailBatchDelay, ProcessNextMail)
 end
 
 -- ============================================================
@@ -180,7 +183,7 @@ frame:RegisterEvent("MAIL_FAILED")
 frame:SetScript("OnEvent", function(self, event)
     if event == "MAIL_SHOW" then
         AutoOpenMail()
-        C_Timer.After(1.0, StartMailSend)
+        C_Timer.After(Wild.db.advanced.mailStartDelay, StartMailSend)
     elseif event == "MAIL_SEND_SUCCESS" then
         if isSending then
             OnMailSendComplete()

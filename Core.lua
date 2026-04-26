@@ -128,6 +128,16 @@ local defaults = {
     },
     advanced = {
         debug = false,
+        ruleDelay = 0.3,          -- seconds to wait before processing the next intent/rule
+        passDelay = 0.3,          -- seconds to wait before retrying the same rule after bags settle
+        bankStartDelay = 0.3,     -- seconds before bank intent processing begins after bank opens
+        guildBankStartDelay = 0.3, -- seconds before guild bank intent processing begins
+        sellInterval = 0.3,       -- seconds between selling individual items at a vendor
+        sellStartDelay = 0.3,     -- seconds before sell processing begins after merchant opens
+        mailStartDelay = 0.3,     -- seconds before mail send processing begins after mailbox opens
+        mailBatchDelay = 0.3,     -- seconds between mail batches (groups of 12 attachments)
+        destroyStartDelay = 0.3,  -- seconds before destroy processing begins after trigger
+        preloadTimeout = 0.3,     -- safety timeout for item data preloading (seconds)
     },
     log = {
         entries = {},

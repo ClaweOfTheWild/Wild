@@ -256,7 +256,7 @@ local function RunDestroyPass()
                 destroyFrame:SetScript("OnEvent", function(self, event)
                     self:UnregisterEvent("BAG_UPDATE_DELAYED")
                     self:SetScript("OnEvent", nil)
-                    RunDestroyPass()
+                    C_Timer.After(Wild.db.advanced.passDelay, RunDestroyPass)
                 end)
             else
                 if destroyTotalCount > 0 then
@@ -306,7 +306,7 @@ local function OnInventoryTrigger()
     local now = GetTime()
     if lastInventoryTrigger > now - 1 then return end
     lastInventoryTrigger = now
-    C_Timer.After(0.3, function() ProcessDestroyIntents() end)
+    C_Timer.After(Wild.db.advanced.destroyStartDelay, function() ProcessDestroyIntents() end)
 end
 
 local frame = CreateFrame("Frame")
