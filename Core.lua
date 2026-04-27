@@ -9,6 +9,7 @@ local defaults = {
         autoConfirmRole = false,
         autoAcceptRoleCheck = false,
         keystoneButtons = true,
+        keystoneAnchor = "RIGHT",
     },
     screenCenterCircle = false,
     screenCenterCircleSize = 40,

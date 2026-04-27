@@ -96,6 +96,8 @@ subcommands.help = function()
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
     Print("/wild lfg autoaccept on|off — Auto-accept queue")
     Print("/wild lfg filters on|off — Toggle result filters")
+    Print("/wild lfg keys on|off — Toggle keystone panel")
+    Print("/wild lfg anchor <position> — Set keystone panel anchor (right|left|topleft|topright|bottomleft|bottomright)")
     print(" ")
     Print("/wild circle on|off — Toggle center circle")
     Print("/wild circle size <n> — Set circle size")
@@ -226,7 +228,7 @@ subcommands.circle = function(args)
     end
 end
 
--- /wild lfg [on|off|autoconfirm|autoaccept|filters]
+-- /wild lfg [on|off|autoconfirm|autoaccept|filters|keys|anchor]
 subcommands.lfg = function(args)
     if HandleGenericFeature("lfg", args) then return end
 
@@ -246,6 +248,23 @@ subcommands.lfg = function(args)
         if v == nil then Print("Usage: /wild lfg filters on|off") return end
         Wild.SetFeatureEnabled("lfgfilters", v)
         Print("LFG Result Filters " .. StatusText(v))
+    elseif sub == "keys" then
+        local v = OnOff(args[2])
+        if v == nil then Print("Usage: /wild lfg keys on|off") return end
+        Wild.db.lfg.keystoneButtons = v
+        Print("Keystone Panel " .. StatusText(v))
+        if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
+    elseif sub == "anchor" then
+        local valid = { right = "RIGHT", left = "LEFT", topleft = "TOPLEFT", topright = "TOPRIGHT", bottomleft = "BOTTOMLEFT", bottomright = "BOTTOMRIGHT" }
+        local val = args[2] and valid[args[2]:lower()]
+        if not val then
+            Print("Usage: /wild lfg anchor right|left|topleft|topright|bottomleft|bottomright")
+            Print("Current: " .. (Wild.db.lfg.keystoneAnchor or "RIGHT"))
+            return
+        end
+        Wild.db.lfg.keystoneAnchor = val
+        Print("Keystone panel anchor: " .. val)
+        if Wild.__keystonePanelApplyAnchor then Wild.__keystonePanelApplyAnchor() end
     else
         Print("Unknown lfg subcommand: " .. sub .. ". Try /wild help")
     end

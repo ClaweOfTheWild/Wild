@@ -405,12 +405,63 @@ local function CreateLFGTab()
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
+    -- ===== Keystone Panel Section =====
+    local keySectionLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    keySectionLabel:SetPoint("TOPLEFT", autoRoleCheckCB, "BOTTOMLEFT", 2, -20)
+    keySectionLabel:SetText("Keystone Panel")
+
+    local keystoneCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    keystoneCB:SetPoint("TOPLEFT", keySectionLabel, "BOTTOMLEFT", -2, -8)
+    keystoneCB.Text:SetText("Show keystone panel on LFG frame")
+    keystoneCB.tooltipText = "Displays an overview of party member keystones beside the Premade Groups frame."
+
+    keystoneCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.db.lfg.keystoneButtons = checked
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
+    end)
+
+    local anchorLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    anchorLabel:SetPoint("TOPLEFT", keystoneCB, "BOTTOMLEFT", 22, -8)
+    anchorLabel:SetText("Panel position:")
+
+    local ANCHOR_OPTIONS = { "RIGHT", "LEFT", "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
+    local anchorButtons = {}
+    local anchorPrev = anchorLabel
+    for i, key in ipairs(ANCHOR_OPTIONS) do
+        local rb = CreateFrame("CheckButton", "WildKeystoneAnchor" .. key, sc, "UIRadioButtonTemplate")
+        if i == 1 then
+            rb:SetPoint("TOPLEFT", anchorLabel, "BOTTOMLEFT", -2, -4)
+        else
+            rb:SetPoint("TOPLEFT", anchorButtons[i - 1], "BOTTOMLEFT", 0, -2)
+        end
+        rb.text = rb:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        rb.text:SetPoint("LEFT", rb, "RIGHT", 4, 0)
+        rb.text:SetText(key:sub(1,1) .. key:sub(2):lower())
+        rb.anchorKey = key
+        rb:SetScript("OnClick", function(self)
+            Wild.db.lfg.keystoneAnchor = self.anchorKey
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            for _, ab in ipairs(anchorButtons) do
+                ab:SetChecked(ab.anchorKey == self.anchorKey)
+            end
+            if Wild.__keystonePanelApplyAnchor then Wild.__keystonePanelApplyAnchor() end
+        end)
+        anchorButtons[i] = rb
+    end
+
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.lfg then
             local cfg = Wild.db.lfg
             quickApplyCB:SetChecked(cfg.quickApply)
             autoRoleCB:SetChecked(cfg.autoConfirmRole)
             autoRoleCheckCB:SetChecked(cfg.autoAcceptRoleCheck)
+            keystoneCB:SetChecked(cfg.keystoneButtons ~= false)
+            local curAnchor = cfg.keystoneAnchor or "RIGHT"
+            for _, ab in ipairs(anchorButtons) do
+                ab:SetChecked(ab.anchorKey == curAnchor)
+            end
         end
     end)
 

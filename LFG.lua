@@ -190,51 +190,23 @@ local function SetupKeystoneTracking()
 end
 
 -- ============================================================
--- Keystone -> LFG Activity Mapping
+-- Keystone Overview Panel (attached to the LFG frame)
 -- ============================================================
-local mapToActivityCache = {}
+local ANCHOR_POINTS = {
+    RIGHT      = { from = "TOPLEFT",     to = "TOPRIGHT",    x =  4, y = 0 },
+    LEFT       = { from = "TOPRIGHT",    to = "TOPLEFT",     x = -4, y = 0 },
+    TOPLEFT    = { from = "BOTTOMLEFT",  to = "TOPLEFT",     x = 0,  y = -4 },
+    TOPRIGHT   = { from = "BOTTOMRIGHT", to = "TOPRIGHT",    x = 0,  y = -4 },
+    BOTTOMLEFT = { from = "TOPLEFT",     to = "BOTTOMLEFT",  x = 0,  y =  4 },
+    BOTTOMRIGHT= { from = "TOPRIGHT",    to = "BOTTOMRIGHT",  x = 0,  y =  4 },
+}
+local PANEL_WIDTH = 200
 
-local function FindMythicPlusActivity(challengeMapID)
-    if mapToActivityCache[challengeMapID] then
-        return mapToActivityCache[challengeMapID]
-    end
-    local mapName = C_ChallengeMode.GetMapUIInfo(challengeMapID)
-    if not mapName then return nil end
+local function SetupKeystonePanel()
+    local parent = LFGListFrame
+    if not parent then return end
 
-    local activities = C_LFGList.GetAvailableActivities(2) -- 2 = Dungeons
-    if not activities then return nil end
-
-    -- Exact match first
-    for _, id in ipairs(activities) do
-        local info = C_LFGList.GetActivityInfoTable(id)
-        if info and info.isMythicPlusActivity then
-            if info.fullName == mapName or info.shortName == mapName then
-                mapToActivityCache[challengeMapID] = id
-                return id
-            end
-        end
-    end
-    -- Fuzzy substring fallback
-    for _, id in ipairs(activities) do
-        local info = C_LFGList.GetActivityInfoTable(id)
-        if info and info.isMythicPlusActivity and info.fullName then
-            if info.fullName:find(mapName, 1, true) or mapName:find(info.fullName, 1, true) then
-                mapToActivityCache[challengeMapID] = id
-                return id
-            end
-        end
-    end
-    return nil
-end
-
--- ============================================================
--- Quick-List Keystone Buttons (on SearchPanel)
--- ============================================================
-local function SetupKeystoneQuickList()
-    local searchPanel = LFGListFrame.SearchPanel
-    if not searchPanel then return end
-
-    local container = CreateFrame("Frame", "WildKeystoneQuickList", searchPanel, "BackdropTemplate")
+    local container = CreateFrame("Frame", "WildKeystonePanel", parent, "BackdropTemplate")
     container:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -242,36 +214,35 @@ local function SetupKeystoneQuickList()
     })
     container:SetBackdropColor(0.06, 0.06, 0.08, 0.95)
     container:SetBackdropBorderColor(0.20, 0.20, 0.25, 1)
+    container:SetWidth(PANEL_WIDTH)
+    container:SetFrameStrata("DIALOG")
     container:Hide()
 
     local titleLabel = container:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     titleLabel:SetPoint("TOPLEFT", 8, -6)
     titleLabel:SetText("|cff00ccffParty Keys|r")
 
-    -- Anchor above the bottom action buttons
-    container:SetPoint("BOTTOMLEFT", searchPanel, "BOTTOMLEFT", 1, 26)
-    container:SetPoint("BOTTOMRIGHT", searchPanel, "BOTTOMRIGHT", -1, 26)
+    local MAX_ROWS = 5
+    local rows = {}
 
-    local MAX_BUTTONS = 5
-    local buttons = {}
-
-    for i = 1, MAX_BUTTONS do
-        local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        btn:SetHeight(22)
-        btn:SetBackdrop({
+    for i = 1, MAX_ROWS do
+        local row = CreateFrame("Frame", nil, container, "BackdropTemplate")
+        row:SetHeight(20)
+        row:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8x8",
             edgeFile = "Interface\\Buttons\\WHITE8x8",
             edgeSize = 1,
         })
-        btn:SetBackdropColor(0.12, 0.12, 0.18, 0.9)
-        btn:SetBackdropBorderColor(0.25, 0.25, 0.35, 1)
+        row:SetBackdropColor(0.12, 0.12, 0.18, 0.9)
+        row:SetBackdropBorderColor(0.25, 0.25, 0.35, 1)
 
-        btn.label = btn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        btn.label:SetPoint("LEFT", 8, 0)
-        btn.label:SetPoint("RIGHT", -8, 0)
-        btn.label:SetJustifyH("LEFT")
+        row.label = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+        row.label:SetPoint("LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", -8, 0)
+        row.label:SetJustifyH("LEFT")
 
-        btn:SetScript("OnEnter", function(self)
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function(self)
             self:SetBackdropColor(0.20, 0.20, 0.30, 1)
             if self.tipTitle then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -282,62 +253,32 @@ local function SetupKeystoneQuickList()
                 GameTooltip:Show()
             end
         end)
-        btn:SetScript("OnLeave", function(self)
+        row:SetScript("OnLeave", function(self)
             self:SetBackdropColor(0.12, 0.12, 0.18, 0.9)
             GameTooltip:Hide()
         end)
 
         if i == 1 then
-            btn:SetPoint("TOPLEFT", container, "TOPLEFT", 4, -22)
-            btn:SetPoint("TOPRIGHT", container, "TOPRIGHT", -4, -22)
+            row:SetPoint("TOPLEFT", container, "TOPLEFT", 4, -22)
+            row:SetPoint("TOPRIGHT", container, "TOPRIGHT", -4, -22)
         else
-            btn:SetPoint("TOPLEFT", buttons[i - 1], "BOTTOMLEFT", 0, -2)
-            btn:SetPoint("TOPRIGHT", buttons[i - 1], "BOTTOMRIGHT", 0, -2)
+            row:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -2)
+            row:SetPoint("TOPRIGHT", rows[i - 1], "BOTTOMRIGHT", 0, -2)
         end
 
-        btn:Hide()
-        buttons[i] = btn
+        row:Hide()
+        rows[i] = row
     end
 
-    local function NavigateToCreateListing(challengeMapID, keystoneLevel)
-        local activityID = FindMythicPlusActivity(challengeMapID)
-        local mapName = C_ChallengeMode.GetMapUIInfo(challengeMapID) or "Unknown"
-
-        if not activityID then
-            print("|cff00ccffWild:|r No M+ activity found for " .. mapName .. ".")
-            return
-        end
-
-        local entryCreation = LFGListFrame.EntryCreation
-        if not entryCreation then return end
-
-        -- Navigate to entry creation panel
-        if LFGListEntryCreation_Show then
-            pcall(LFGListEntryCreation_Show, entryCreation, LFGListFrame.baseFilters, 2)
-        else
-            LFGListFrame_SetActivePanel(LFGListFrame, entryCreation)
-        end
-
-        -- Select activity + fill name after frame settles
-        C_Timer.After(0.05, function()
-            if LFGListEntryCreation_Select then
-                pcall(LFGListEntryCreation_Select, entryCreation, nil, nil, activityID)
-            end
-
-            C_Timer.After(0.05, function()
-                local nameBox = entryCreation.Name
-                if nameBox then
-                    if type(nameBox.SetText) == "function" then
-                        nameBox:SetText("+" .. keystoneLevel .. " " .. mapName)
-                    elseif nameBox.EditBox and type(nameBox.EditBox.SetText) == "function" then
-                        nameBox.EditBox:SetText("+" .. keystoneLevel .. " " .. mapName)
-                    end
-                end
-            end)
-        end)
+    local function ApplyAnchor()
+        container:ClearAllPoints()
+        local cfg = GetConfig()
+        local key = cfg and cfg.keystoneAnchor or "RIGHT"
+        local a = ANCHOR_POINTS[key] or ANCHOR_POINTS.RIGHT
+        container:SetPoint(a.from, parent, a.to, a.x, a.y)
     end
 
-    local function RefreshButtons()
+    local function RefreshPanel()
         local cfg = GetConfig()
         if not cfg or cfg.keystoneButtons == false then
             container:Hide()
@@ -384,43 +325,46 @@ local function SetupKeystoneQuickList()
 
         local shown = 0
         for i, kd in ipairs(allKeys) do
-            if i > MAX_BUTTONS then break end
-            local btn = buttons[i]
+            if i > MAX_ROWS then break end
+            local row = rows[i]
             local nameColor = kd.isOwn and "|cff44ff44" or "|cffaaaaaa"
-            btn.label:SetText(string.format(
+            row.label:SetText(string.format(
                 "|cffffffff+%d|r %s %s(%s)|r",
                 kd.level, kd.mapName, nameColor, kd.player
             ))
-            btn.tipTitle = string.format("+%d %s", kd.level, kd.mapName)
-            btn.tipBody = "Click to create a group listing.\nKey held by: " .. kd.player
-            btn.challengeMapID = kd.mapID
-            btn.keystoneLevel = kd.level
-            btn:SetScript("OnClick", function(self)
-                NavigateToCreateListing(self.challengeMapID, self.keystoneLevel)
-            end)
-            btn:Show()
+            row.tipTitle = string.format("+%d %s", kd.level, kd.mapName)
+            row.tipBody = "Key held by: " .. kd.player
+            row:Show()
             shown = shown + 1
         end
 
-        for i = shown + 1, MAX_BUTTONS do
-            buttons[i]:Hide()
+        for i = shown + 1, MAX_ROWS do
+            rows[i]:Hide()
         end
 
         if shown > 0 then
-            container:SetHeight(26 + shown * 24)
+            container:SetHeight(26 + shown * 22)
+            ApplyAnchor()
             container:Show()
         else
             container:Hide()
         end
     end
 
-    table.insert(keystoneRefreshCallbacks, RefreshButtons)
+    -- Expose for Settings UI
+    Wild.__keystonePanelRefresh = RefreshPanel
+    Wild.__keystonePanelApplyAnchor = ApplyAnchor
 
-    searchPanel:HookScript("OnShow", function()
-        C_Timer.After(0.2, RefreshButtons)
+    table.insert(keystoneRefreshCallbacks, RefreshPanel)
+
+    parent:HookScript("OnShow", function()
+        C_Timer.After(0.2, RefreshPanel)
+    end)
+    parent:HookScript("OnHide", function()
+        container:Hide()
     end)
 
-    C_Timer.After(0.5, RefreshButtons)
+    C_Timer.After(0.5, RefreshPanel)
 end
 
 
@@ -437,7 +381,7 @@ loader:SetScript("OnEvent", function(self, event, arg1)
             SetupQuickApplyHooks()
             SetupAutoConfirmRole()
 
-            SetupKeystoneQuickList()
+            SetupKeystonePanel()
             self:UnregisterEvent("ADDON_LOADED")
         end
     end
