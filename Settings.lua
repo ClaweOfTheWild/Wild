@@ -3161,7 +3161,7 @@ local function CreateIntentRulesTab()
                 row.typeLabel:SetText("Item")
                 -- Display item name if we have an ID
                 if group.itemID then
-                    local itemName = GetItemInfo(group.itemID)
+                    local itemName = C_Item.GetItemInfo(group.itemID)
                     if itemName then
                         row.itemInput:SetText(itemName)
                     else
@@ -3187,7 +3187,7 @@ local function CreateIntentRulesTab()
                         if editorGroups[capturedGi] then
                             editorGroups[capturedGi].itemID = id
                         end
-                        local itemName = GetItemInfo(id)
+                        local itemName = C_Item.GetItemInfo(id)
                         self:SetText(itemName or tostring(id))
                     end
                 end)

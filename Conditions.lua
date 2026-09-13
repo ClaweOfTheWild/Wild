@@ -156,7 +156,7 @@ local ATTRIBUTES = {
         key = "item.name", label = "Item Name", category = "Item",
         valueType = "string",
         resolve = function(itemID, containerInfo, charCtx)
-            return (GetItemInfo(itemID))
+            return (C_Item.GetItemInfo(itemID))
         end,
     },
     {
@@ -169,7 +169,7 @@ local ATTRIBUTES = {
         valueType = "quality",
         resolve = function(itemID, containerInfo)
             local q = containerInfo and containerInfo.quality
-            if not q then _, _, q = GetItemInfo(itemID) end
+            if not q then _, _, q = C_Item.GetItemInfo(itemID) end
             return q
         end,
     },
@@ -184,7 +184,7 @@ local ATTRIBUTES = {
                 if ilvl then return ilvl end
             end
             -- Fallback to base template ilvl
-            local _, _, _, ilvl = GetItemInfo(itemID)
+            local _, _, _, ilvl = C_Item.GetItemInfo(itemID)
             return ilvl
         end,
     },
@@ -215,7 +215,7 @@ local ATTRIBUTES = {
         key = "item.equiploc", label = "Equip Slot", category = "Item",
         valueType = "equiploc",
         resolve = function(itemID)
-            local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+            local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
             return (equipLoc and equipLoc ~= "") and equipLoc or nil
         end,
     },
@@ -223,7 +223,7 @@ local ATTRIBUTES = {
         key = "item.isReagent", label = "Is Crafting Reagent", category = "Item",
         valueType = "boolean",
         resolve = function(itemID)
-            local isCraftingReagent = select(17, GetItemInfo(itemID))
+            local isCraftingReagent = select(17, C_Item.GetItemInfo(itemID))
             return isCraftingReagent and true or false
         end,
     },
@@ -258,7 +258,7 @@ local ATTRIBUTES = {
             end
             -- 4) Appearance (equippable gear with a transmog look)
             if C_TransmogCollection then
-                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+                local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
                 if equipLoc and equipLoc ~= "" then
                     local appearanceID = C_TransmogCollection.GetItemInfo(itemID)
                     if appearanceID then
@@ -384,7 +384,7 @@ local ATTRIBUTES = {
 
             -- 4) GetItemInfo numeric fallback
             local source = (containerInfo and containerInfo.hyperlink) or itemID
-            local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = GetItemInfo(source)
+            local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(source)
 
             if not bindType then
                 -- Request data for next time
@@ -424,7 +424,7 @@ local ATTRIBUTES = {
         key = "item.expansionID", label = "Expansion", category = "Item",
         valueType = "expansion",
         resolve = function(itemID)
-            local expansionID = select(15, GetItemInfo(itemID))
+            local expansionID = select(15, C_Item.GetItemInfo(itemID))
             return expansionID ~= nil and EXPANSION_NAMES[expansionID] or nil
         end,
     },
@@ -499,7 +499,7 @@ local DYNAMIC_REFS = {
     {
         key = "char.slotilvl", label = "Equipped Slot iLvl",
         resolve = function(itemID, containerInfo, charCtx)
-            local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+            local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
             if not equipLoc or equipLoc == "" then return nil end
             local slots = EQUIP_LOC_TO_SLOTS[equipLoc]
             if not slots then return nil end
@@ -518,7 +518,7 @@ local DYNAMIC_REFS = {
     {
         key = "char.slotUpgradeTrack", label = "Equipped Slot Track",
         resolve = function(itemID, containerInfo, charCtx)
-            local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+            local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
             if not equipLoc or equipLoc == "" then return 0 end
             local slots = EQUIP_LOC_TO_SLOTS[equipLoc]
             if not slots then return 0 end
@@ -643,7 +643,7 @@ local function FormatConditionValue(cond, attrDef)
 
     local vt = attrDef and attrDef.valueType
     if vt == "id" then
-        local _, link = GetItemInfo(cond.value)
+        local _, link = C_Item.GetItemInfo(cond.value)
         return link or tostring(cond.value)
     elseif vt == "quality" then
         return QUALITY_NAMES[cond.value] or tostring(cond.value)
@@ -822,7 +822,7 @@ local function IntentMatchesItem(intent, itemID, containerInfo, charCtx)
 
     local isDebug = Wild.db and Wild.db.advanced and Wild.db.advanced.debug
     if isDebug then
-        local itemName = GetItemInfo(itemID) or ("ItemID:" .. tostring(itemID))
+        local itemName = C_Item.GetItemInfo(itemID) or ("ItemID:" .. tostring(itemID))
         DebugMsg(string.format("Evaluating |cffffffff%s|r against %d group(s)", itemName, #groups))
     end
 
@@ -1203,7 +1203,7 @@ local function FormatItemDescription(itemConds)
         elseif nameOp == "not_contains" then noun = "items without \"" .. nameVal .. "\""
         end
     elseif idVal then
-        local itemName = GetItemInfo(idVal)
+        local itemName = C_Item.GetItemInfo(idVal)
         noun = itemName or ("item #" .. idVal)
     elseif subtypeCode then
         local classID = math.floor(subtypeCode / 1000)
@@ -1361,7 +1361,7 @@ local function GetIntentSummary(intent)
                 if group.kind == "gold" and (group.gold or 0) > 0 then
                     holdParts[#holdParts + 1] = string.format("%dg", group.gold)
                 elseif group.kind == "item" and group.itemID then
-                    local itemName = GetItemInfo(group.itemID) or ("Item:" .. group.itemID)
+                    local itemName = C_Item.GetItemInfo(group.itemID) or ("Item:" .. group.itemID)
                     holdParts[#holdParts + 1] = (group.count or 0) .. " " .. itemName
                 elseif group.kind ~= "gold" and group.kind ~= "item" and (group.count or 0) > 0 then
                     local itemConds = {}

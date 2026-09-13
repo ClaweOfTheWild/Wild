@@ -75,7 +75,7 @@ Wild.GetPlayerBags = GetPlayerBags
 local function PlaceCursorInBags(itemID)
     -- Phase 1: try to merge into an existing partial stack of the same item
     if itemID then
-        local maxStack = select(8, GetItemInfo(itemID)) or 1
+        local maxStack = select(8, C_Item.GetItemInfo(itemID)) or 1
         if maxStack > 1 then
             for _, bag in ipairs(GetPlayerBags()) do
                 local numSlots = C_Container.GetContainerNumSlots(bag)
@@ -121,7 +121,7 @@ local function PlaceCursorInBank(bankType, itemID)
     end
     -- Phase 1: try to merge into an existing partial stack of the same item
     if itemID then
-        local maxStack = select(8, GetItemInfo(itemID)) or 1
+        local maxStack = select(8, C_Item.GetItemInfo(itemID)) or 1
         if maxStack > 1 then
             for _, bag in ipairs(bankBags) do
                 local numSlots = C_Container.GetContainerNumSlots(bag)
@@ -303,7 +303,7 @@ local function WithdrawFromGuildBank(intent, charCtx, neededCount)
                     local link = GetGuildBankItemLink(tab, slot)
                     if link then
                         local itemID = tonumber(link:match("item:(%d+)"))
-                        if itemID and Wild.IntentMatchesItem(intent, itemID, { quality = select(3, GetItemInfo(itemID)), hyperlink = link }, charCtx) then
+                        if itemID and Wild.IntentMatchesItem(intent, itemID, { quality = select(3, C_Item.GetItemInfo(itemID)), hyperlink = link }, charCtx) then
                             AutoStoreGuildBankItem(tab, slot)
                             withdrawn = withdrawn + itemCount
                             entries[#entries + 1] = { link = link, count = itemCount }
@@ -376,7 +376,7 @@ local function CountMatchingInGuildBank(intent, charCtx)
                     local link = GetGuildBankItemLink(tab, slot)
                     if link then
                         local itemID = tonumber(link:match("item:(%d+)"))
-                        if itemID and Wild.IntentMatchesItem(intent, itemID, { quality = select(3, GetItemInfo(itemID)), hyperlink = link }, charCtx) then
+                        if itemID and Wild.IntentMatchesItem(intent, itemID, { quality = select(3, C_Item.GetItemInfo(itemID)), hyperlink = link }, charCtx) then
                             total = total + itemCount
                         end
                     end
@@ -413,7 +413,7 @@ local function PreloadBankItemData(bankBagSets, onComplete)
             if numSlots and numSlots > 0 then
                 for slot = 1, numSlots do
                     local info = C_Container.GetContainerItemInfo(bag, slot)
-                    if info and info.itemID and not GetItemInfo(info.itemID) then
+                    if info and info.itemID and not C_Item.GetItemInfo(info.itemID) then
                         if not pending[info.itemID] then
                             pending[info.itemID] = true
                             pendingCount = pendingCount + 1
@@ -967,7 +967,7 @@ local function OnBankOpened()
                     for slot = 1, numSlots do
                         local info = C_Container.GetContainerItemInfo(bag, slot)
                         if info and info.itemID then
-                            local isCraftingReagent = select(17, GetItemInfo(info.itemID))
+                            local isCraftingReagent = select(17, C_Item.GetItemInfo(info.itemID))
                             if isCraftingReagent then
                                 C_Container.UseContainerItem(bag, slot)
                                 reagentCount = reagentCount + 1

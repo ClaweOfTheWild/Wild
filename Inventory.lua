@@ -230,7 +230,7 @@ local function RunDestroyPass()
                         end
 
                         if shouldDestroy then
-                            local itemName = GetItemInfo(info.itemID) or ("Item " .. info.itemID)
+                            local itemName = C_Item.GetItemInfo(info.itemID) or ("Item " .. info.itemID)
                             pendingItems[#pendingItems + 1] = {
                                 bag = bag,
                                 slot = slot,

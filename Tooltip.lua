@@ -45,7 +45,7 @@ local TOOLTIP_LINES = {
                 local ilvl = GetDetailedItemLevelInfo(link)
                 if ilvl then return "iLvl: " .. ilvl end
             end
-            local _, _, _, ilvl = GetItemInfo(itemID)
+            local _, _, _, ilvl = C_Item.GetItemInfo(itemID)
             if ilvl then return "Base iLvl: " .. ilvl end
         end,
     },
@@ -65,7 +65,7 @@ local TOOLTIP_LINES = {
         key = "equipSlot",
         label = "Equip Slot",
         resolve = function(itemID)
-            local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+            local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
             if equipLoc and equipLoc ~= "" then
                 local readable = _G[equipLoc] or equipLoc:gsub("INVTYPE_", "")
                 return "Equip: " .. readable .. "  |cff888888(" .. equipLoc .. ")|r"
@@ -77,7 +77,7 @@ local TOOLTIP_LINES = {
         label = "Quality",
         resolve = function(itemID, containerInfo)
             local quality = containerInfo and containerInfo.quality
-            if not quality then _, _, quality = GetItemInfo(itemID) end
+            if not quality then _, _, quality = C_Item.GetItemInfo(itemID) end
             if quality then
                 return "Quality: " .. (QUALITY_NAMES[quality] or tostring(quality)) .. " (" .. quality .. ")"
             end
@@ -87,7 +87,7 @@ local TOOLTIP_LINES = {
         key = "stackSize",
         label = "Max Stack Size",
         resolve = function(itemID)
-            local _, _, _, _, _, _, _, stackSize = GetItemInfo(itemID)
+            local _, _, _, _, _, _, _, stackSize = C_Item.GetItemInfo(itemID)
             if stackSize and stackSize > 1 then
                 return "Max Stack: " .. stackSize
             end
@@ -97,7 +97,7 @@ local TOOLTIP_LINES = {
         key = "expansionID",
         label = "Expansion ID",
         resolve = function(itemID)
-            local expacID = select(15, GetItemInfo(itemID))
+            local expacID = select(15, C_Item.GetItemInfo(itemID))
             if expacID then
                 return "Expansion: " .. (EXPANSION_NAMES[expacID] or tostring(expacID)) .. " (" .. expacID .. ")"
             end
@@ -119,7 +119,7 @@ local TOOLTIP_LINES = {
         key = "isReagent",
         label = "Is Crafting Reagent",
         resolve = function(itemID)
-            local isCraftingReagent = select(17, GetItemInfo(itemID))
+            local isCraftingReagent = select(17, C_Item.GetItemInfo(itemID))
             return "Is Reagent: " .. (isCraftingReagent and "|cff00ff00true|r" or "|cff888888false|r")
         end,
     },
@@ -160,7 +160,7 @@ local TOOLTIP_LINES = {
             end
             -- Appearance
             if C_TransmogCollection then
-                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemID)
+                local _, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(itemID)
                 if equipLoc and equipLoc ~= "" then
                     local appearanceID = C_TransmogCollection.GetItemInfo(itemID)
                     if appearanceID then

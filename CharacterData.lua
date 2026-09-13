@@ -68,7 +68,7 @@ local function ScanContainer(bagID)
         if info and info.itemID then
             local itemName, _, itemQuality, itemLevel, _, itemType, itemSubType,
                   _, itemEquipLoc, _, sellPrice, classID, subclassID, bindType, expansionID
-                  = GetItemInfo(info.hyperlink or info.itemID)
+                = C_Item.GetItemInfo(info.hyperlink or info.itemID)
             -- Use link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local effectiveIlvl = itemLevel
             if info.hyperlink then
@@ -233,7 +233,7 @@ function Wild.SnapshotGuildBank()
                         if itemID then
                             local itemName, _, itemQuality, itemLevel, _, itemType, itemSubType,
                                   _, itemEquipLoc, _, sellPrice, classID, subclassID, bindType, expansionID
-                                  = GetItemInfo(link)
+                                = C_Item.GetItemInfo(link)
                             local effectiveIlvl = itemLevel
                             local detailedIlvl = GetDetailedItemLevelInfo(link)
                             if detailedIlvl then effectiveIlvl = detailedIlvl end

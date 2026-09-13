@@ -567,7 +567,7 @@ function Wild.GetEffectiveSellPrice(itemID, containerInfo)
     end
 
     -- 3) Fallback: GetItemInfo base sell price
-    local _, _, _, _, _, _, _, _, _, _, sellPrice = GetItemInfo(itemID)
+    local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(itemID)
     return sellPrice or 0
 end
 
