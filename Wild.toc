@@ -1,4 +1,4 @@
-## Interface: 120105
+## Interface: 120100
 ## Title: Wild
 ## Notes: Quality of life addon that automates common interactions like repairs, banking, looting, and group applications.
 ## Author: Clawe of the Wild
@@ -12,6 +12,7 @@ Log.lua
 Conditions.lua
 CharacterData.lua
 ScreenCenterCircle.lua
+CastHistory.lua
 LFG.lua
 Bank.lua
 Inventory.lua

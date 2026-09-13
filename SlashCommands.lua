@@ -34,6 +34,7 @@ local FEATURE_NAMES = {
     autoacceptqueue  = "LFG Auto-Accept Queue",
     lfgfilters       = "LFG Result Filters",
     circle           = "Screen Center Circle",
+    casthistory      = "Cast History",
     repair           = "Auto-Repair",
     loot             = "Quick Loot",
     autoloot         = "Auto-Loot",
@@ -88,7 +89,7 @@ subcommands.help = function()
     print(" ")
     print("|cff00ccff  Features:|r lfg, circle, repair, loot, autoloot,")
     print("    bank, bankcharacter, bankguild, reputation,")
-    print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar),")
+    print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
     print("    volume (vol), durability (dur)")
     print(" ")
@@ -105,6 +106,16 @@ subcommands.help = function()
     Print("/wild circle opacity <0-100> — Set circle opacity")
     Print("/wild circle color <r> <g> <b> — Set circle color (0-1 floats)")
     Print("/wild circle offset <x> <y> — Set circle offset")
+    print(" ")
+    Print("/wild casts on|off — Toggle cast history")
+    Print("/wild casts size <20-100> — Set icon size")
+    Print("/wild casts text on|off — Show or hide spell names")
+    Print("/wild casts textsize <8-32> — Set spell-name size")
+    Print("/wild casts length <1-20> — Set history length per track")
+    Print("/wild casts fade <1-30> — Set seconds before fading")
+    Print("/wild casts spacing <0-100> — Set the gap between tracks")
+    Print("/wild casts direction left|right|up|down — Set slide direction")
+    Print("/wild casts move|lock|reset|clear — Configure the start point or clear history")
     print(" ")
     Print("/wild repair on|off — Toggle auto-repair")
     Print("/wild repair guild on|off — Toggle guild funds")
@@ -163,7 +174,7 @@ subcommands.status = function()
     -- Ordered list for predictable output
     local order = {
         "lfg", "autoconfirmrole", "autoacceptqueue", "lfgfilters",
-        "circle", "repair", "loot", "autoloot",
+        "circle", "casthistory", "repair", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
@@ -429,6 +440,89 @@ subcommands.dungeonbar = function(args)
     end
 end
 subcommands.bar = subcommands.dungeonbar
+
+-- /wild casts [on|off|size|text|textsize|length|fade|spacing|direction|move|lock|reset|clear]
+subcommands.casts = function(args)
+    local config = Wild.db and Wild.db.castHistory
+    if not config then
+        PrintWarn("Cast history settings are not loaded yet.")
+        return
+    end
+
+    if #args == 0 then
+        Print("Cast History: " .. StatusText(config.enabled))
+        Print(string.format(
+            "Size: %d, text: %s, length: %d/track, fade after: %.1fs, spacing: %d, direction: %s, start point: %s",
+            config.iconSize,
+            config.showText and (config.textSize .. "px") or "off",
+            config.historyLength,
+            config.fadeAfter,
+            config.trackSpacing,
+            config.direction:lower(),
+            config.locked == false and "unlocked" or "locked"
+        ))
+        return
+    end
+
+    local sub = args[1]:lower()
+    local enabled = OnOff(sub)
+    if enabled ~= nil then
+        Wild.SetCastHistoryEnabled(enabled)
+        Print("Cast History " .. StatusText(enabled))
+    elseif sub == "size" then
+        local size = tonumber(args[2])
+        if not size then Print("Usage: /wild casts size <20-100>") return end
+        Wild.SetCastHistorySize(size)
+        Print("Cast History icon size set to " .. config.iconSize .. ".")
+    elseif sub == "text" then
+        local visible = OnOff(args[2])
+        if visible == nil then Print("Usage: /wild casts text on|off") return end
+        Wild.SetCastHistoryTextVisible(visible)
+        Print("Cast History text " .. StatusText(visible))
+    elseif sub == "textsize" then
+        local size = tonumber(args[2])
+        if not size then Print("Usage: /wild casts textsize <8-32>") return end
+        Wild.SetCastHistoryTextSize(size)
+        Print("Cast History text size set to " .. config.textSize .. ".")
+    elseif sub == "length" then
+        local length = tonumber(args[2])
+        if not length then Print("Usage: /wild casts length <1-20>") return end
+        Wild.SetCastHistoryLength(length)
+        Print("Cast History length set to " .. config.historyLength .. ".")
+    elseif sub == "fade" then
+        local seconds = tonumber(args[2])
+        if not seconds then Print("Usage: /wild casts fade <1-30>") return end
+        Wild.SetCastHistoryFadeAfter(seconds)
+        Print(string.format("Cast History will fade after %.1f seconds.", config.fadeAfter))
+    elseif sub == "spacing" then
+        local spacing = tonumber(args[2])
+        if not spacing then Print("Usage: /wild casts spacing <0-100>") return end
+        Wild.SetCastHistoryTrackSpacing(spacing)
+        Print("Cast History track spacing set to " .. config.trackSpacing .. ".")
+    elseif sub == "direction" then
+        if not Wild.SetCastHistoryDirection(args[2]) then
+            Print("Usage: /wild casts direction left|right|up|down")
+            return
+        end
+        Print("Cast History direction set to " .. config.direction:lower() .. ".")
+    elseif sub == "move" or sub == "unlock" then
+        Wild.SetCastHistoryMoveMode(true)
+        Print("Cast History start point unlocked. Drag the cyan marker, then run /wild casts lock.")
+    elseif sub == "lock" then
+        Wild.SetCastHistoryMoveMode(false)
+        Print("Cast History start point locked.")
+    elseif sub == "reset" then
+        Wild.ResetCastHistoryPosition()
+        Print("Cast History start point reset.")
+    elseif sub == "clear" then
+        Wild.ClearCastHistory()
+        Print("Cast History cleared.")
+    else
+        Print("Usage: /wild casts on|off|size <20-100>|text on|off|textsize <8-32>|length <1-20>|fade <1-30>|spacing <0-100>|direction left|right|up|down|move|lock|reset|clear")
+    end
+end
+subcommands.cast = subcommands.casts
+subcommands.casthistory = subcommands.casts
 
 -- /wild quests [on|off|accept|handin]  (alias: quest)
 subcommands.quests = function(args)

@@ -17,6 +17,18 @@ local defaults = {
     screenCenterCircleThickness = 2,
     screenCenterCircleOffsetX = 0,
     screenCenterCircleOffsetY = 0,
+    castHistory = {
+        enabled = false,
+        iconSize = 48,
+        showText = true,
+        textSize = 12,
+        historyLength = 8,
+        fadeAfter = 5,
+        trackSpacing = 8,
+        direction = "RIGHT",
+        position = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -180 },
+        locked = true,
+    },
     bankCharacter = {
         enabled = false,
     },
@@ -515,6 +527,7 @@ local FEATURES = {
     autorolecheck    = { key = "lfg.autoAcceptRoleCheck" },
 
     circle           = { key = "screenCenterCircle",    onToggle = function() Wild.UpdateScreenCenterCircle() end },
+    casthistory      = { key = "castHistory.enabled",   onToggle = function() Wild.UpdateCastHistory() end },
     repair           = { key = "vendorAutoRepair" },
     loot             = { key = "lootQuickLoot",         onToggle = function(v) Wild.SetQuickLoot(v) end },
     autoloot         = { key = "lootAutoLoot",          onToggle = function(v) Wild.SetAutoLoot(v) end },
@@ -612,6 +625,7 @@ function Wild.ResetSettings()
     wipe(Wild.db)
     ApplyDefaults(Wild.db, defaults)
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
+    if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
     print("|cff00ccffWild:|r All settings reset to defaults.")
 end

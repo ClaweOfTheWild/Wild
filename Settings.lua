@@ -711,6 +711,254 @@ local function CreateCircleTab()
 end
 
 -- ============================================================
+-- Tab: Cast History
+-- ============================================================
+local function CreateCastHistoryTab()
+    local panel = CreateFrame("Frame")
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(720)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Cast History")
+
+    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Shows GCD casts on the main track and non-GCD casts on a parallel track.|r")
+
+    local enableCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    enableCB.Text:SetText("Enable Cast History")
+    enableCB.tooltipText = "Record successful player spell casts and item uses."
+
+    local sizeLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    sizeLabel:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 2, -16)
+    sizeLabel:SetText("Icon Size")
+
+    local sizeSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
+    sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -4)
+    sizeSlider:SetMinMaxValues(20, 100)
+    sizeSlider:SetValueStep(1)
+    sizeSlider:SetObeyStepOnDrag(true)
+    sizeSlider:SetWidth(200)
+    sizeSlider.Low:SetText("20")
+    sizeSlider.High:SetText("100")
+    sizeSlider:SetScript("OnValueChanged", function(_, value)
+        if Wild.SetCastHistorySize then Wild.SetCastHistorySize(value) end
+    end)
+    local sizeEditBox = CreateSliderEditBox(sc, sizeSlider, 20, 100, true)
+
+    local showTextCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    showTextCB:SetPoint("TOPLEFT", sizeSlider, "BOTTOMLEFT", -2, -16)
+    showTextCB.Text:SetText("Show Spell Names")
+    showTextCB.tooltipText = "Show the spell or item name below each icon."
+    showTextCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.SetCastHistoryTextVisible(checked)
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    local textSizeLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    textSizeLabel:SetPoint("TOPLEFT", showTextCB, "BOTTOMLEFT", 2, -12)
+    textSizeLabel:SetText("Text Size")
+
+    local textSizeSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
+    textSizeSlider:SetPoint("TOPLEFT", textSizeLabel, "BOTTOMLEFT", 0, -4)
+    textSizeSlider:SetMinMaxValues(8, 32)
+    textSizeSlider:SetValueStep(1)
+    textSizeSlider:SetObeyStepOnDrag(true)
+    textSizeSlider:SetWidth(200)
+    textSizeSlider.Low:SetText("8")
+    textSizeSlider.High:SetText("32")
+    textSizeSlider:SetScript("OnValueChanged", function(_, value)
+        if Wild.SetCastHistoryTextSize then Wild.SetCastHistoryTextSize(value) end
+    end)
+    local textSizeEditBox = CreateSliderEditBox(sc, textSizeSlider, 8, 32, true)
+
+    local lengthLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    lengthLabel:SetPoint("TOPLEFT", textSizeSlider, "BOTTOMLEFT", 0, -24)
+    lengthLabel:SetText("History Length (per track)")
+
+    local lengthSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
+    lengthSlider:SetPoint("TOPLEFT", lengthLabel, "BOTTOMLEFT", 0, -4)
+    lengthSlider:SetMinMaxValues(1, 20)
+    lengthSlider:SetValueStep(1)
+    lengthSlider:SetObeyStepOnDrag(true)
+    lengthSlider:SetWidth(200)
+    lengthSlider.Low:SetText("1")
+    lengthSlider.High:SetText("20")
+    lengthSlider:SetScript("OnValueChanged", function(_, value)
+        if Wild.SetCastHistoryLength then Wild.SetCastHistoryLength(value) end
+    end)
+    local lengthEditBox = CreateSliderEditBox(sc, lengthSlider, 1, 20, true)
+
+    local fadeLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    fadeLabel:SetPoint("TOPLEFT", lengthSlider, "BOTTOMLEFT", 0, -24)
+    fadeLabel:SetText("Fade After (seconds)")
+
+    local fadeSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
+    fadeSlider:SetPoint("TOPLEFT", fadeLabel, "BOTTOMLEFT", 0, -4)
+    fadeSlider:SetMinMaxValues(1, 30)
+    fadeSlider:SetValueStep(0.5)
+    fadeSlider:SetObeyStepOnDrag(true)
+    fadeSlider:SetWidth(200)
+    fadeSlider.Low:SetText("1")
+    fadeSlider.High:SetText("30")
+    fadeSlider:SetScript("OnValueChanged", function(_, value)
+        if Wild.SetCastHistoryFadeAfter then Wild.SetCastHistoryFadeAfter(value) end
+    end)
+    local fadeEditBox = CreateSliderEditBox(sc, fadeSlider, 1, 30, false)
+
+    local directionLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    directionLabel:SetPoint("TOPLEFT", fadeSlider, "BOTTOMLEFT", 0, -24)
+    directionLabel:SetText("Slide Direction")
+
+    local directionDropdown = CreateFrame("Frame", nil, sc, "UIDropDownMenuTemplate")
+    directionDropdown:SetPoint("TOPLEFT", directionLabel, "BOTTOMLEFT", -16, -4)
+    UIDropDownMenu_SetWidth(directionDropdown, 140)
+
+    local directionOptions = {
+        { text = "Left", value = "LEFT" },
+        { text = "Right", value = "RIGHT" },
+        { text = "Up", value = "UP" },
+        { text = "Down", value = "DOWN" },
+    }
+    local directionLabels = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
+
+    UIDropDownMenu_Initialize(directionDropdown, function()
+        for _, option in ipairs(directionOptions) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = option.text
+            info.value = option.value
+            info.func = function(button)
+                Wild.SetCastHistoryDirection(button.value)
+                UIDropDownMenu_SetText(directionDropdown, directionLabels[button.value])
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+
+    local spacingLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    spacingLabel:SetPoint("TOPLEFT", directionDropdown, "BOTTOMLEFT", 16, -16)
+    spacingLabel:SetText("Track Spacing")
+
+    local spacingSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
+    spacingSlider:SetPoint("TOPLEFT", spacingLabel, "BOTTOMLEFT", 0, -4)
+    spacingSlider:SetMinMaxValues(0, 100)
+    spacingSlider:SetValueStep(1)
+    spacingSlider:SetObeyStepOnDrag(true)
+    spacingSlider:SetWidth(200)
+    spacingSlider.Low:SetText("0")
+    spacingSlider.High:SetText("100")
+    spacingSlider:SetScript("OnValueChanged", function(_, value)
+        if Wild.SetCastHistoryTrackSpacing then Wild.SetCastHistoryTrackSpacing(value) end
+    end)
+    local spacingEditBox = CreateSliderEditBox(sc, spacingSlider, 0, 100, true)
+
+    local separator = sc:CreateTexture(nil, "ARTWORK")
+    separator:SetHeight(1)
+    separator:SetPoint("TOPLEFT", spacingSlider, "BOTTOMLEFT", 0, -24)
+    separator:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    separator:SetColorTexture(0.4, 0.4, 0.4, 0.6)
+
+    local positionHeader = sc:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    positionHeader:SetPoint("TOPLEFT", separator, "BOTTOMLEFT", 0, -12)
+    positionHeader:SetText("Start Point")
+
+    local positionHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    positionHint:SetPoint("TOPLEFT", positionHeader, "BOTTOMLEFT", 0, -4)
+    positionHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    positionHint:SetJustifyH("LEFT")
+    positionHint:SetText("|cff888888Unlock the cyan marker, then drag it to the point where new casts should appear.|r")
+
+    local moveButton = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    moveButton:SetSize(130, 24)
+    moveButton:SetPoint("TOPLEFT", positionHint, "BOTTOMLEFT", 0, -12)
+
+    local resetButton = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    resetButton:SetSize(110, 24)
+    resetButton:SetPoint("LEFT", moveButton, "RIGHT", 8, 0)
+    resetButton:SetText("Reset Position")
+    resetButton:SetScript("OnClick", function()
+        Wild.ResetCastHistoryPosition()
+    end)
+
+    local clearButton = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    clearButton:SetSize(100, 24)
+    clearButton:SetPoint("TOPLEFT", moveButton, "BOTTOMLEFT", 0, -10)
+    clearButton:SetText("Clear History")
+    clearButton:SetScript("OnClick", function()
+        Wild.ClearCastHistory()
+    end)
+
+    local testButton = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    testButton:SetSize(100, 24)
+    testButton:SetPoint("LEFT", clearButton, "RIGHT", 8, 0)
+    testButton:SetText("Test Tracks")
+    testButton:SetScript("OnClick", function()
+        Wild.AddCastHistorySpell(6603, true)
+        Wild.AddCastHistorySpell(6603, false)
+    end)
+
+    local function UpdateButtons()
+        local config = Wild.db and Wild.db.castHistory
+        local moving = config and config.locked == false
+        moveButton:SetText(moving and "Lock Start Point" or "Unlock Start Point")
+        if config and config.enabled then
+            testButton:Enable()
+        else
+            testButton:Disable()
+        end
+    end
+
+    moveButton:SetScript("OnClick", function()
+        local config = Wild.db and Wild.db.castHistory
+        if not config then return end
+        Wild.SetCastHistoryMoveMode(config.locked ~= false)
+        UpdateButtons()
+    end)
+
+    enableCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.SetCastHistoryEnabled(checked)
+        UpdateButtons()
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    panel:SetScript("OnShow", function()
+        local config = Wild.db and Wild.db.castHistory
+        if not config then return end
+        enableCB:SetChecked(config.enabled)
+        sizeSlider:SetValue(config.iconSize or 48)
+        sizeEditBox:SetText(tostring(config.iconSize or 48))
+        showTextCB:SetChecked(config.showText ~= false)
+        textSizeSlider:SetValue(config.textSize or 12)
+        textSizeEditBox:SetText(tostring(config.textSize or 12))
+        lengthSlider:SetValue(config.historyLength or 8)
+        lengthEditBox:SetText(tostring(config.historyLength or 8))
+        fadeSlider:SetValue(config.fadeAfter or 5)
+        fadeEditBox:SetText(string.format("%.1f", config.fadeAfter or 5))
+        UIDropDownMenu_SetText(directionDropdown, directionLabels[config.direction] or "Right")
+        spacingSlider:SetValue(config.trackSpacing or 8)
+        spacingEditBox:SetText(tostring(config.trackSpacing or 8))
+        UpdateButtons()
+    end)
+
+    return panel
+end
+
+-- ============================================================
 -- Bank Tabs (Character, Warband, Guild) - shared rule editor
 -- ============================================================
 
@@ -5280,6 +5528,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     CreateMainFrame()
     AddTab("LFG", CreateLFGTab())
     AddTab("Center Circle", CreateCircleTab())
+    AddTab("Cast History", CreateCastHistoryTab())
     AddCollapsibleGroup("Intents")
     AddTab("Intent Rules", CreateIntentRulesTab(), true)
     AddTab("Actors", CreateActorsTab(), true)
