@@ -734,7 +734,7 @@ local function CreateCastHistoryTab()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Shows GCD casts on the main track and non-GCD casts on a parallel track.|r")
+    desc:SetText("|cff888888Shows GCD casts on the main track and non-GCD casts on available parallel tracks.|r")
 
     local enableCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
     enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
@@ -787,7 +787,7 @@ local function CreateCastHistoryTab()
 
     local lengthLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     lengthLabel:SetPoint("TOPLEFT", textSizeSlider, "BOTTOMLEFT", 0, -24)
-    lengthLabel:SetText("History Length (per track)")
+    lengthLabel:SetText("History Length (GCD / non-GCD)")
 
     local lengthSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
     lengthSlider:SetPoint("TOPLEFT", lengthLabel, "BOTTOMLEFT", 0, -4)

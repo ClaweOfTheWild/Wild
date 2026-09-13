@@ -67,14 +67,32 @@ local function GetMovementSpeed(config, direction)
     return spacing / lastGCDDuration
 end
 
-local function GetSecondaryTrackOffset(config)
+local function GetSecondaryTrackOffset(config, track)
     local _, entryWidth, entryHeight = GetEntryDimensions(config)
     local spacing = config.trackSpacing or 8
     local direction = DIRECTION_VECTORS[config.direction] or DIRECTION_VECTORS.RIGHT
+    track = track or 1
     if direction.x ~= 0 then
-        return 0, -(entryHeight + spacing)
+        return 0, -(entryHeight + spacing) * track
     end
-    return entryWidth + spacing, 0
+    return (entryWidth + spacing) * track, 0
+end
+
+local function GetAvailableNonGCDTrack(config)
+    local _, entryWidth, entryHeight = GetEntryDimensions(config)
+    local occupied = {}
+    for _, entry in ipairs(entries) do
+        if not entry.isGCD and math.abs(entry.travelX) < entryWidth + 2
+            and math.abs(entry.travelY) < entryHeight + 2 then
+            occupied[entry.track] = true
+        end
+    end
+
+    local track = 1
+    while occupied[track] do
+        track = track + 1
+    end
+    return track
 end
 
 local function UsesGlobalCooldown(spellID)
@@ -143,7 +161,7 @@ local function CreateOrigin()
     origin.secondaryMarker:SetBackdropBorderColor(1, 0.55, 0, 1)
     origin.secondaryMarker.moveLabel = origin.secondaryMarker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     origin.secondaryMarker.moveLabel:SetPoint("BOTTOM", origin.secondaryMarker, "TOP", 0, 5)
-    origin.secondaryMarker.moveLabel:SetText("Non-GCD track")
+    origin.secondaryMarker.moveLabel:SetText("Non-GCD tracks")
     origin.secondaryMarker:Hide()
 
     origin:SetScript("OnDragStart", function(self)
@@ -164,7 +182,7 @@ end
 local function PositionEntry(entry, config)
     local trackX, trackY = 0, 0
     if not entry.isGCD then
-        trackX, trackY = GetSecondaryTrackOffset(config)
+        trackX, trackY = GetSecondaryTrackOffset(config, entry.track)
     end
     entry:ClearAllPoints()
     entry:SetPoint("CENTER", origin, "CENTER", entry.travelX + trackX, entry.travelY + trackY)
@@ -428,6 +446,7 @@ local function AddEntry(data, isGCD)
         isGCD = UsesGlobalCooldown(data.spellID or data.id)
     end
     entry.isGCD = isGCD
+    entry.track = isGCD and 0 or GetAvailableNonGCDTrack(config)
     entry.displayName = data.name
     entry.icon:SetTexture(data.icon or 134400)
     entry.label:SetText(data.name)
