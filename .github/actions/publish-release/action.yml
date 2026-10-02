@@ -1,0 +1,16 @@
+---
+name: Publish merged PR release
+description: Publish one numeric version for a merged Wild pull request.
+outputs:
+  version:
+    description: The published or previously published numeric version.
+    value: ${{ steps.publish.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Publish the merged PR
+      id: publish
+      shell: pwsh
+      env:
+        RELEASE_ACTION_PATH: ${{ github.action_path }}
+      run: '& (Join-Path $env:RELEASE_ACTION_PATH Publish-Release.ps1)'
