@@ -6,7 +6,10 @@ end
 
 local function NewEnvironment(saved)
     local frames, messages = {}, {}
-    local state = { speed = 0, gliding = false, glideSpeed = 0, reads = 0 }
+    local state = {
+        speed = 0, gliding = false, glideSpeed = 0, reads = 0,
+        equipment = { [1] = { 100, 100 } }, fontHeight = 12, timers = {},
+    }
     local env = setmetatable({
         WildDB = saved,
         UIParent = {},
@@ -15,6 +18,9 @@ local function NewEnvironment(saved)
         tremove = table.remove,
         SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 1, IG_MAINMENU_OPTION_CHECKBOX_OFF = 2 },
         PlaySound = function(sound) state.sound = sound end,
+        C_Timer = { After = function(delay, callback)
+            state.timers[#state.timers + 1] = { delay = delay, callback = callback }
+        end },
         print = function(message) messages[#messages + 1] = message end,
         wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
     }, { __index = _G })
@@ -50,11 +56,19 @@ local function NewEnvironment(saved)
     end
     function methods:CreateFontString()
         local text = {}
-        function text:SetPoint() end
-        function text:SetTextColor() end
+        function text:SetPoint(...) self.point = { ... } end
+        function text:SetTextColor(...) self.color = { ... } end
         function text:SetJustifyH() end
         function text:SetText(value) self.value = value end
+        function text:GetStringWidth() return #self.value * 6 + 0.25 end
+        function text:GetStringHeight() return state.fontHeight end
         return text
+    end
+    function methods:CreateTexture()
+        local texture = setmetatable({}, { __index = methods })
+        function texture:SetTexture(path) self.path = path end
+        function texture:SetTexCoord(...) self.coords = { ... } end
+        return texture
     end
     env.CreateFrame = function(kind, name, parent, template)
         local frame = setmetatable({
@@ -75,6 +89,10 @@ local function NewEnvironment(saved)
             return state.gliding, true, state.glideSpeed
         end,
     }
+    env.GetInventoryItemDurability = function(slot)
+        local durability = state.equipment[slot]
+        if durability then return unpack(durability) end
+    end
     local secret = setmetatable({}, {
         __div = function() error("Arithmetic on a secret speed") end,
         __tostring = function() error("Formatting a secret speed") end,
@@ -93,6 +111,7 @@ local function NewEnvironment(saved)
         end
     end
     Load("Speed.lua")
+    Load("Durability.lua")
     Load("SlashCommands.lua")
 
     local function Fire(event)
@@ -107,9 +126,9 @@ local function NewEnvironment(saved)
             end
         end
     end
-    local function Overlay()
+    local function Overlay(name)
         for _, frame in ipairs(frames) do
-            if frame.text then return frame end
+            if frame.text and frame.name == name then return frame end
         end
     end
     local function SpeedPanel()
@@ -143,14 +162,14 @@ local tests = {
     { "current movement speed is a rounded percentage", function()
         local Wild, state, _, Tick, Overlay = NewEnvironment()
         Wild.SetFeatureEnabled("speed", true)
-        Equal(Overlay().text.value, "Speed: 0%")
+        Equal(Overlay().text.value, "0%")
         for _, case in ipairs({
-            { 7, "Speed: 100%" },
-            { 14, "Speed: 200%" },
-            { 4.72, "Speed: 67%" },
-            { 28.7, "Speed: 410%" },
-            { 7.04, "Speed: 101%" },
-            { 0, "Speed: 0%" },
+            { 7, "100%" },
+            { 14, "200%" },
+            { 4.72, "67%" },
+            { 28.7, "410%" },
+            { 7.04, "101%" },
+            { 0, "0%" },
         }) do
             state.speed = case[1]
             Tick(0.1)
@@ -162,23 +181,23 @@ local tests = {
         Wild.SetFeatureEnabled("speed", true)
         state.gliding, state.glideSpeed = true, 65
         Tick(0.1)
-        Equal(Overlay().text.value, "Speed: 929%")
+        Equal(Overlay().text.value, "929%")
         state.glideSpeed = 100
         Tick(0.1)
-        Equal(Overlay().text.value, "Speed: 1429%")
+        Equal(Overlay().text.value, "1429%")
         state.gliding, state.speed = false, 7
         Tick(0.1)
-        Equal(Overlay().text.value, "Speed: 100%")
+        Equal(Overlay().text.value, "100%")
     end },
     { "restricted speed is explicit and recovers without arithmetic errors", function()
         local Wild, state, _, Tick, Overlay = NewEnvironment()
         Wild.SetFeatureEnabled("speed", true)
         state.speed = state.secret
         Tick(0.1)
-        Equal(Overlay().text.value, "Speed: --")
+        Equal(Overlay().text.value, "--")
         state.speed = 7
         Tick(0.1)
-        Equal(Overlay().text.value, "Speed: 100%")
+        Equal(Overlay().text.value, "100%")
     end },
     { "polling is throttled and stops while disabled", function()
         local Wild, state, _, Tick, Overlay = NewEnvironment()
@@ -197,7 +216,7 @@ local tests = {
         state.speed = 14
         Wild.SetFeatureEnabled("speed", true)
         Equal(Overlay().shown, true)
-        Equal(Overlay().text.value, "Speed: 200%")
+        Equal(Overlay().text.value, "200%")
     end },
     { "dragged position persists across updates and reloads", function()
         local Wild, state, _, Tick, Overlay = NewEnvironment()
@@ -271,6 +290,77 @@ local tests = {
         Equal(Overlay().shown, false)
         Equal(state.sound, 2)
     end },
+    { "speed fits its icon and value, growing and shrinking without clipping", function()
+        local Wild, state, _, Tick, Overlay = NewEnvironment()
+        Wild.SetFeatureEnabled("speed", true)
+        local frame = Overlay()
+        Equal(frame.icon.path, "Interface\\PetBattles\\PetBattle-StatIcons")
+        Equal(table.concat(frame.icon.coords, ","), "0,0.5,0.5,1")
+        Equal(frame.icon.width, 16)
+        Equal(frame.icon.height, 16)
+        Equal(frame.icon.point[1], "LEFT")
+        Equal(frame.icon.point[4], 4)
+        Equal(frame.text.point[2], frame.icon)
+        Equal(frame.text.point[3], "RIGHT")
+        Equal(frame.text.point[4], 3)
+        for _, speed in ipairs({ 7, 100, 0, state.secret, 7 }) do
+            state.speed = speed
+            Tick(0.1)
+            Equal(frame.width, 27 + math.ceil(frame.text:GetStringWidth()))
+            Equal(frame.height, 20)
+            assert(frame.width < 110, "Speed overlay should be narrower than the old frame")
+        end
+        state.fontHeight = 18.25
+        Tick(0.1)
+        Equal(frame.height, 23, "Height must also fit taller text")
+    end },
+    { "durability fits its anvil and percentage while retaining colors and position", function()
+        local Wild, state, Fire, _, Overlay = NewEnvironment()
+        Fire("PLAYER_LOGIN")
+        Equal(Overlay("WildDurabilityTotal"), nil)
+        Wild.SetFeatureEnabled("durabilitytotal", true)
+        local frame = Overlay("WildDurabilityTotal")
+        Equal(frame.icon.path, "Interface\\Minimap\\Tracking\\Repair")
+        Equal(frame.icon.width, 16)
+        Equal(frame.icon.height, 16)
+        Equal(frame.icon.point[1], "LEFT")
+        Equal(frame.icon.point[4], 4)
+        Equal(frame.text.point[2], frame.icon)
+        Equal(frame.text.point[3], "RIGHT")
+        Equal(frame.text.point[4], 3)
+        Equal(frame.point[5], -40)
+        frame.scripts.OnDragStart(frame)
+        frame:SetPoint("CENTER", nil, "CENTER", 120, -150)
+        frame.scripts.OnDragStop(frame)
+        Equal(frame.moving, false)
+        for _, case in ipairs({
+            { 100, "100%", 0.2, 1, 0.2 },
+            { 50, "50%", 1, 0.6, 0 },
+            { 9, "9%", 1, 0.2, 0.2 },
+            { 0, "0%", 1, 0.2, 0.2 },
+        }) do
+            state.equipment[1][1] = case[1]
+            Fire("UPDATE_INVENTORY_DURABILITY")
+            Equal(frame.text.value, case[2])
+            for index = 1, 3 do Equal(frame.text.color[index], case[index + 2]) end
+            Equal(frame.width, 27 + math.ceil(frame.text:GetStringWidth()))
+            Equal(frame.height, 20)
+            assert(frame.width < 70, "Durability overlay should be narrower than the old frame")
+            Equal(frame.point[4], 120)
+            Equal(frame.point[5], -150)
+        end
+        local ReloadedWild, _, _, _, ReloadedOverlay = NewEnvironment(Wild.db)
+        ReloadedWild.UpdateDurabilityOverlays()
+        Equal(ReloadedOverlay("WildDurabilityTotal").point[4], 120)
+        state.equipment = {}
+        Fire("PLAYER_EQUIPMENT_CHANGED")
+        Equal(frame.shown, false)
+        state.equipment[1] = { 100, 100 }
+        Fire("PLAYER_EQUIPMENT_CHANGED")
+        Equal(frame.shown, true)
+        Wild.SetFeatureEnabled("durabilitytotal", false)
+        Equal(frame.shown, false)
+    end },
 }
 
 local failures = 0
@@ -283,5 +373,5 @@ for _, test in ipairs(tests) do
         print("FAIL: " .. test[1] .. ": " .. tostring(message))
     end
 end
-assert(failures == 0, failures .. " of " .. #tests .. " speed indicator tests failed")
-print(#tests .. " speed indicator tests passed")
+assert(failures == 0, failures .. " of " .. #tests .. " status indicator tests failed")
+print(#tests .. " status indicator tests passed")

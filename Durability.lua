@@ -1,6 +1,11 @@
 -- Wild: Durability percentage overlay on equipped and bag items
 local ADDON_NAME, Wild = ...
 
+local ICON_SIZE = 16
+local ICON_GAP = 3
+local PADDING_X = 4
+local PADDING_Y = 2
+
 local EQUIPPED_SLOTS = {
     1,  -- Head
     3,  -- Shoulder
@@ -114,7 +119,6 @@ local function CreateTotalFrame()
     if totalFrame then return totalFrame end
 
     local f = CreateFrame("Frame", "WildDurabilityTotal", UIParent, "BackdropTemplate")
-    f:SetSize(70, 24)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:SetMovable(true)
@@ -137,8 +141,13 @@ local function CreateTotalFrame()
         end
     end)
 
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    f.icon:SetPoint("LEFT", f, "LEFT", PADDING_X, 0)
+    f.icon:SetTexture("Interface\\Minimap\\Tracking\\Repair")
+
     f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.text:SetPoint("CENTER")
+    f.text:SetPoint("LEFT", f.icon, "RIGHT", ICON_GAP, 0)
 
     totalFrame = f
     return f
@@ -176,6 +185,10 @@ local function UpdateTotal()
     local r, g, b = ColorForPercent(pct)
     f.text:SetTextColor(r, g, b)
     f.text:SetText(pct .. "%")
+    f:SetSize(
+        PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(f.text:GetStringWidth()),
+        PADDING_Y * 2 + math.max(ICON_SIZE, math.ceil(f.text:GetStringHeight()))
+    )
 
     -- Restore saved position
     f:ClearAllPoints()
