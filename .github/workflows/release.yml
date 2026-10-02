@@ -1,0 +1,38 @@
+---
+name: Publish release
+
+'on':
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: wild-github-release
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish merged PR
+    if: >-
+      github.repository == 'ClaweOfTheWild/Wild' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.base.repo.full_name == 'ClaweOfTheWild/Wild'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out trusted base code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/actions/publish-release
+      - name: Publish release
+        uses: ./.github/actions/publish-release
+        env:
+          GH_TOKEN: ${{ github.token }}
