@@ -1,0 +1,7 @@
+---
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # GitHub supports queue:max; actionlint 1.7.12 does not yet.
+      # tests/test_release_workflow.py validates this exact mapping instead.
+      - '^unexpected key "queue" for "concurrency" section\.'
