@@ -5484,7 +5484,7 @@ local function CreateDurabilityTab()
     totalHint:SetPoint("TOPLEFT", totalCB, "BOTTOMLEFT", 22, -4)
     totalHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     totalHint:SetJustifyH("LEFT")
-    totalHint:SetText("|cff888888Shows a small draggable frame with your total equipment durability. Drag it to reposition — the position is saved across sessions.|r")
+    totalHint:SetText("|cff888888Shows an anvil icon and your total equipment durability in a compact frame that fits its content. Drag it to reposition — the position is saved across sessions.|r")
 
     -- Checkbox: show on bag items
     local bagsCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
@@ -5556,7 +5556,7 @@ local function CreateSpeedTab()
     hint:SetPoint("TOPLEFT", enabledCB, "BOTTOMLEFT", 22, -4)
     hint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText("|cff888888Drag the indicator to reposition it. The position is saved across sessions. Shows Speed: -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
+    hint:SetText("|cff888888Shows a yellow double-chevron speed icon and percentage in a compact frame that fits its content. Drag it to reposition it. The position is saved across sessions. Shows -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
 
     panel:SetScript("OnShow", function()
         enabledCB:SetChecked(Wild.IsFeatureEnabled("speed"))

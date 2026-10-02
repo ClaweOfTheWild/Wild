@@ -3,24 +3,31 @@ local ADDON_NAME, Wild = ...
 
 local BASE_RUN_SPEED = 7 -- Yards per second at 100% running speed.
 local UPDATE_INTERVAL = 0.1
+local ICON_SIZE = 16
+local ICON_GAP = 3
+local PADDING_X = 4
+local PADDING_Y = 2
 local speedFrame
 
 local function UpdateText()
     local isGliding, _, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
     local speed = isGliding and forwardSpeed or GetUnitSpeed("player")
     if issecretvalue and issecretvalue(speed) then
-        speedFrame.text:SetText("Speed: --")
-        return
+        speedFrame.text:SetText("--")
+    else
+        local percent = math.floor(speed / BASE_RUN_SPEED * 100 + 0.5)
+        speedFrame.text:SetText(percent .. "%")
     end
-    local percent = math.floor(speed / BASE_RUN_SPEED * 100 + 0.5)
-    speedFrame.text:SetText("Speed: " .. percent .. "%")
+    speedFrame:SetSize(
+        PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(speedFrame.text:GetStringWidth()),
+        PADDING_Y * 2 + math.max(ICON_SIZE, math.ceil(speedFrame.text:GetStringHeight()))
+    )
 end
 
 local function CreateSpeedFrame()
     if speedFrame then return speedFrame end
 
     local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    f:SetSize(110, 24)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:SetMovable(true)
@@ -45,8 +52,14 @@ local function CreateSpeedFrame()
         self.elapsed = 0
     end)
 
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    f.icon:SetPoint("LEFT", f, "LEFT", PADDING_X, 0)
+    f.icon:SetTexture("Interface\\PetBattles\\PetBattle-StatIcons")
+    f.icon:SetTexCoord(0, 0.5, 0.5, 1)
+
     f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.text:SetPoint("CENTER")
+    f.text:SetPoint("LEFT", f.icon, "RIGHT", ICON_GAP, 0)
     f.text:SetTextColor(1, 1, 1)
 
     -- Skyriding speed changes continuously without a matching event.
