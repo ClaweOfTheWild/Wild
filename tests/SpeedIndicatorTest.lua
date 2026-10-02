@@ -13,6 +13,8 @@ local function NewEnvironment(saved)
         SlashCmdList = {},
         strtrim = function(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end,
         tremove = table.remove,
+        SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 1, IG_MAINMENU_OPTION_CHECKBOX_OFF = 2 },
+        PlaySound = function(sound) state.sound = sound end,
         print = function(message) messages[#messages + 1] = message end,
         wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
     }, { __index = _G })
@@ -21,6 +23,12 @@ local function NewEnvironment(saved)
     function methods:UnregisterEvent(event) self.events[event] = nil end
     function methods:SetScript(event, callback) self.scripts[event] = callback end
     function methods:SetSize(width, height) self.width, self.height = width, height end
+    function methods:SetWidth(width) self.width = width end
+    function methods:SetHeight(height) self.height = height end
+    function methods:SetScrollChild(child) self.scrollChild = child end
+    function methods:HookScript(event, callback) self.scripts[event] = callback end
+    function methods:SetChecked(checked) self.checked = checked end
+    function methods:GetChecked() return self.checked end
     function methods:SetFrameStrata(strata) self.strata = strata end
     function methods:SetClampedToScreen(clamped) self.clamped = clamped end
     function methods:SetMovable(movable) self.movable = movable end
@@ -44,6 +52,7 @@ local function NewEnvironment(saved)
         local text = {}
         function text:SetPoint() end
         function text:SetTextColor() end
+        function text:SetJustifyH() end
         function text:SetText(value) self.value = value end
         return text
     end
@@ -53,6 +62,7 @@ local function NewEnvironment(saved)
             events = {}, scripts = {}, shown = true,
         }, { __index = methods })
         frames[#frames + 1] = frame
+        if kind == "CheckButton" then frame.Text = frame:CreateFontString() end
         return frame
     end
     env.GetUnitSpeed = function(unit)
@@ -102,7 +112,22 @@ local function NewEnvironment(saved)
             if frame.text then return frame end
         end
     end
-    return Wild, state, Fire, Tick, Overlay, messages
+    local function SpeedPanel()
+        Load("Settings.lua")
+        local loader = frames[#frames]
+        local factory
+        for index = 1, 100 do
+            local name, value = debug.getupvalue(loader.scripts.OnEvent, index)
+            if not name then break end
+            if name == "CreateSpeedTab" then factory = value end
+        end
+        assert(factory, "Settings loader must register the Speed tab")
+        local panel = factory()
+        local checkbox = frames[#frames]
+        Equal(checkbox.kind, "CheckButton")
+        return panel, checkbox
+    end
+    return Wild, state, Fire, Tick, Overlay, messages, SpeedPanel
 end
 
 local tests = {
@@ -228,6 +253,23 @@ local tests = {
         assert(status:find("Speed Indicator", 1, true))
         Wild.HandleSlashCommand("help")
         assert(table.concat(messages, "\n"):find("/wild speed on|off", 1, true))
+    end },
+    { "settings checkbox uses saved state and the shared feature toggle", function()
+        local Wild, state, _, _, Overlay, _, SpeedPanel = NewEnvironment()
+        local panel, checkbox = SpeedPanel()
+        panel.scripts.OnShow(panel)
+        Equal(checkbox:GetChecked(), false)
+        checkbox:SetChecked(true)
+        checkbox.scripts.OnClick(checkbox)
+        Equal(Wild.db.speed.enabled, true)
+        Equal(Overlay().shown, true)
+        Equal(state.sound, 1)
+        Wild.HandleSlashCommand("speed off")
+        panel.scripts.OnShow(panel)
+        Equal(checkbox:GetChecked(), false)
+        checkbox.scripts.OnClick(checkbox)
+        Equal(Overlay().shown, false)
+        Equal(state.sound, 2)
     end },
 }
 
