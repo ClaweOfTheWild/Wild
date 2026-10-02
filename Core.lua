@@ -128,6 +128,10 @@ local defaults = {
         totalPosition = nil,
         showBags = false,
     },
+    speed = {
+        enabled = false,
+        position = nil,
+    },
     mail = {
         autoOpen = false,
     },
@@ -548,6 +552,7 @@ local FEATURES = {
     durabilityequipped = { key = "durability.showEquipped", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     durabilitytotal  = { key = "durability.showEquippedTotal", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     durabilitybags   = { key = "durability.showBags", onToggle = function() Wild.UpdateDurabilityOverlays() end },
+    speed            = { key = "speed.enabled", onToggle = function() Wild.UpdateSpeedIndicator() end },
 }
 
 Wild.FEATURES = FEATURES
@@ -626,6 +631,7 @@ function Wild.ResetSettings()
     ApplyDefaults(Wild.db, defaults)
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
+    if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
     print("|cff00ccffWild:|r All settings reset to defaults.")
 end
