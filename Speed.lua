@@ -18,8 +18,7 @@ local function UpdateText()
         local percent = math.floor(speed / BASE_RUN_SPEED * 100 + 0.5)
         speedFrame.text:SetText(percent .. "%")
     end
-    speedFrame:SetSize(
-        PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(speedFrame.text:GetStringWidth()),
+    speedFrame:SetHeight(
         PADDING_Y * 2 + math.max(ICON_SIZE, math.ceil(speedFrame.text:GetStringHeight()))
     )
 end
@@ -59,8 +58,11 @@ local function CreateSpeedFrame()
     f.icon:SetTexCoord(0, 0.5, 0.5, 1)
 
     f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.text:SetPoint("LEFT", f.icon, "RIGHT", ICON_GAP, 0)
+    f.text:SetPoint("RIGHT", f, "RIGHT", -PADDING_X, 0)
+    f.text:SetJustifyH("RIGHT")
     f.text:SetTextColor(1, 1, 1)
+    f.text:SetText("8888%")
+    f:SetWidth(PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(f.text:GetStringWidth()))
 
     -- Skyriding speed changes continuously without a matching event.
     f.elapsed = 0

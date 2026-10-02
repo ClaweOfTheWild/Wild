@@ -58,7 +58,7 @@ local function NewEnvironment(saved)
         local text = {}
         function text:SetPoint(...) self.point = { ... } end
         function text:SetTextColor(...) self.color = { ... } end
-        function text:SetJustifyH() end
+        function text:SetJustifyH(value) self.justifyH = value end
         function text:SetText(value) self.value = value end
         function text:GetStringWidth() return #self.value * 6 + 0.25 end
         function text:GetStringHeight() return state.fontHeight end
@@ -290,7 +290,7 @@ local tests = {
         Equal(Overlay().shown, false)
         Equal(state.sound, 2)
     end },
-    { "speed fits its icon and value, growing and shrinking without clipping", function()
+    { "speed keeps a fixed width fitting its icon and four digits plus percent", function()
         local Wild, state, _, Tick, Overlay = NewEnvironment()
         Wild.SetFeatureEnabled("speed", true)
         local frame = Overlay()
@@ -300,34 +300,49 @@ local tests = {
         Equal(frame.icon.height, 16)
         Equal(frame.icon.point[1], "LEFT")
         Equal(frame.icon.point[4], 4)
-        Equal(frame.text.point[2], frame.icon)
+        Equal(frame.text.point[1], "RIGHT")
+        Equal(frame.text.point[2], frame)
         Equal(frame.text.point[3], "RIGHT")
-        Equal(frame.text.point[4], 3)
-        for _, speed in ipairs({ 7, 100, 0, state.secret, 7 }) do
+        Equal(frame.text.point[4], -4)
+        Equal(frame.text.justifyH, "RIGHT")
+        local width = frame.width
+        Equal(width, 27 + math.ceil(5 * 6 + 0.25))
+        for _, speed in ipairs({ 7, 100, 699.93, 0, state.secret, 7 }) do
             state.speed = speed
             Tick(0.1)
-            Equal(frame.width, 27 + math.ceil(frame.text:GetStringWidth()))
+            Equal(frame.width, width, "Speed changes must not resize the frame")
+            assert(frame.width >= 27 + math.ceil(frame.text:GetStringWidth()),
+                "Four digits plus percent must fit without clipping")
             Equal(frame.height, 20)
             assert(frame.width < 110, "Speed overlay should be narrower than the old frame")
         end
         state.fontHeight = 18.25
         Tick(0.1)
+        Equal(frame.width, width)
         Equal(frame.height, 23, "Height must also fit taller text")
+        Wild.SetFeatureEnabled("speed", false)
+        Wild.SetFeatureEnabled("speed", true)
+        Equal(frame.width, width, "Re-enabling must retain the fixed width")
     end },
-    { "durability fits its anvil and percentage while retaining colors and position", function()
+    { "durability matches speed width and alignment while retaining colors and position", function()
         local Wild, state, Fire, _, Overlay = NewEnvironment()
         Fire("PLAYER_LOGIN")
         Equal(Overlay("WildDurabilityTotal"), nil)
         Wild.SetFeatureEnabled("durabilitytotal", true)
         local frame = Overlay("WildDurabilityTotal")
+        Wild.SetFeatureEnabled("speed", true)
+        local width = Overlay().width
+        Equal(frame.width, width, "Durability must match the speed indicator width")
         Equal(frame.icon.path, "Interface\\Minimap\\Tracking\\Repair")
         Equal(frame.icon.width, 16)
         Equal(frame.icon.height, 16)
         Equal(frame.icon.point[1], "LEFT")
         Equal(frame.icon.point[4], 4)
-        Equal(frame.text.point[2], frame.icon)
+        Equal(frame.text.point[1], "RIGHT")
+        Equal(frame.text.point[2], frame)
         Equal(frame.text.point[3], "RIGHT")
-        Equal(frame.text.point[4], 3)
+        Equal(frame.text.point[4], -4)
+        Equal(frame.text.justifyH, "RIGHT")
         Equal(frame.point[5], -40)
         frame.scripts.OnDragStart(frame)
         frame:SetPoint("CENTER", nil, "CENTER", 120, -150)
@@ -343,7 +358,7 @@ local tests = {
             Fire("UPDATE_INVENTORY_DURABILITY")
             Equal(frame.text.value, case[2])
             for index = 1, 3 do Equal(frame.text.color[index], case[index + 2]) end
-            Equal(frame.width, 27 + math.ceil(frame.text:GetStringWidth()))
+            Equal(frame.width, width, "Durability changes must not resize the frame")
             Equal(frame.height, 20)
             assert(frame.width < 70, "Durability overlay should be narrower than the old frame")
             Equal(frame.point[4], 120)
@@ -352,6 +367,11 @@ local tests = {
         local ReloadedWild, _, _, _, ReloadedOverlay = NewEnvironment(Wild.db)
         ReloadedWild.UpdateDurabilityOverlays()
         Equal(ReloadedOverlay("WildDurabilityTotal").point[4], 120)
+        Equal(ReloadedOverlay("WildDurabilityTotal").width, width)
+        state.fontHeight = 18.25
+        Fire("UPDATE_INVENTORY_DURABILITY")
+        Equal(frame.height, 23, "Height must also fit taller text")
+        Equal(frame.width, width)
         state.equipment = {}
         Fire("PLAYER_EQUIPMENT_CHANGED")
         Equal(frame.shown, false)
@@ -360,6 +380,8 @@ local tests = {
         Equal(frame.shown, true)
         Wild.SetFeatureEnabled("durabilitytotal", false)
         Equal(frame.shown, false)
+        Wild.SetFeatureEnabled("durabilitytotal", true)
+        Equal(frame.width, width, "Re-enabling must retain the fixed width")
     end },
 }
 

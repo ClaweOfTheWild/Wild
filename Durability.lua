@@ -147,7 +147,10 @@ local function CreateTotalFrame()
     f.icon:SetTexture("Interface\\Minimap\\Tracking\\Repair")
 
     f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.text:SetPoint("LEFT", f.icon, "RIGHT", ICON_GAP, 0)
+    f.text:SetPoint("RIGHT", f, "RIGHT", -PADDING_X, 0)
+    f.text:SetJustifyH("RIGHT")
+    f.text:SetText("8888%")
+    f:SetWidth(PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(f.text:GetStringWidth()))
 
     totalFrame = f
     return f
@@ -185,8 +188,7 @@ local function UpdateTotal()
     local r, g, b = ColorForPercent(pct)
     f.text:SetTextColor(r, g, b)
     f.text:SetText(pct .. "%")
-    f:SetSize(
-        PADDING_X * 2 + ICON_SIZE + ICON_GAP + math.ceil(f.text:GetStringWidth()),
+    f:SetHeight(
         PADDING_Y * 2 + math.max(ICON_SIZE, math.ceil(f.text:GetStringHeight()))
     )
 

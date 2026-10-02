@@ -5556,7 +5556,7 @@ local function CreateSpeedTab()
     hint:SetPoint("TOPLEFT", enabledCB, "BOTTOMLEFT", 22, -4)
     hint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText("|cff888888Shows a yellow double-chevron speed icon and percentage in a compact frame that fits its content. Drag it to reposition it. The position is saved across sessions. Shows -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
+    hint:SetText("|cff888888Shows a yellow double-chevron speed icon and percentage in a fixed-width frame sized for four digits plus %. Drag it to reposition it. The position is saved across sessions. Shows -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
 
     panel:SetScript("OnShow", function()
         enabledCB:SetChecked(Wild.IsFeatureEnabled("speed"))
