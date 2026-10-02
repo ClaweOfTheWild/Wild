@@ -5517,6 +5517,55 @@ local function CreateDurabilityTab()
 end
 
 -- ============================================================
+-- Tab: Speed
+-- ============================================================
+local function CreateSpeedTab()
+    local panel = CreateFrame("Frame")
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(300)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Speed")
+
+    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Show current movement speed as a rounded percentage. Normal running is 100%; standing still is 0%. Includes swimming, flying, and Skyriding.|r")
+
+    local enabledCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    enabledCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    enabledCB.Text:SetText("Show speed indicator")
+    enabledCB.tooltipText = "Display a draggable overlay showing current movement speed."
+    enabledCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        Wild.SetFeatureEnabled("speed", checked)
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    local hint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", enabledCB, "BOTTOMLEFT", 22, -4)
+    hint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("|cff888888Drag the indicator to reposition it. The position is saved across sessions. Shows Speed: -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
+
+    panel:SetScript("OnShow", function()
+        enabledCB:SetChecked(Wild.IsFeatureEnabled("speed"))
+    end)
+
+    return panel
+end
+
+-- ============================================================
 -- Initialize
 -- ============================================================
 local loader = CreateFrame("Frame")
@@ -5528,6 +5577,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     CreateMainFrame()
     AddTab("LFG", CreateLFGTab())
     AddTab("Center Circle", CreateCircleTab())
+    AddTab("Speed", CreateSpeedTab())
     AddTab("Cast History", CreateCastHistoryTab())
     AddCollapsibleGroup("Intents")
     AddTab("Intent Rules", CreateIntentRulesTab(), true)

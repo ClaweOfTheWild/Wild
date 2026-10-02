@@ -52,6 +52,7 @@ local FEATURE_NAMES = {
     durabilityequipped = "Durability on Equipped",
     durabilitytotal    = "Durability Total Overlay",
     durabilitybags     = "Durability on Bag Items",
+    speed              = "Speed Indicator",
 }
 
 -- ============================================================
@@ -91,7 +92,7 @@ subcommands.help = function()
     print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol), durability (dur)")
+    print("    volume (vol), durability (dur), speed")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -149,6 +150,9 @@ subcommands.help = function()
     Print("/wild durability total on|off — Toggle total durability overlay")
     Print("/wild durability bags on|off — Toggle bag item overlays")
     print(" ")
+    Print("/wild speed on|off — Toggle the draggable movement speed indicator")
+    Print("  Shows current speed as a percentage of normal running speed (100%).")
+    print(" ")
     Print("/wild trace start — Start recording events")
     Print("/wild trace stop — Stop recording")
     Print("/wild trace filter <text> — Filter events by name")
@@ -179,6 +183,7 @@ subcommands.status = function()
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
+        "speed",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -189,6 +194,12 @@ end
 -- /wild reset
 subcommands.reset = function()
     Wild.ResetSettings()
+end
+
+-- /wild speed [on|off]
+subcommands.speed = function(args)
+    if HandleGenericFeature("speed", args) then return end
+    PrintWarn("Usage: /wild speed [on|off]")
 end
 
 -- /wild circle [on|off|size|thickness|opacity|color|offset]

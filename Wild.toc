@@ -32,5 +32,6 @@ Loot.lua
 Tooltip.lua
 VolumeControl.lua
 Durability.lua
+Speed.lua
 SlashCommands.lua
 Settings.lua
