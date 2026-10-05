@@ -19,10 +19,11 @@ local function IsAllowed(cfg)
 end
 
 -- ============================================================
--- NPC ID helper (extract from GUID)
+-- NPC ID helper (extract only from non-secret GUIDs)
 -- ============================================================
 local function GetTargetNpcID()
     local guid = UnitGUID("npc")
+    if issecretvalue and issecretvalue(guid) then return nil end
     if not guid then return nil end
     local _, _, _, _, _, npcID = strsplit("-", guid)
     return tonumber(npcID)
