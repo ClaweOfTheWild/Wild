@@ -112,6 +112,11 @@ local defaults = {
         darkmoonTeleport = false,  -- always accept the Darkmoon Faire teleport dialog
         toggleKey = 4,             -- 1 = none, 2 = ALT, 3 = CTRL, 4 = SHIFT — hold to bypass automation
     },
+    dialogKey = {
+        enabled = false,
+        key = "SPACE",
+        destroy = false,
+    },
     autoReply = {
         enabled = false,
         message = "I'm currently in a Mythic+ dungeon and can't respond right now. I'll get back to you after the key!",
@@ -567,6 +572,7 @@ local FEATURES = {
     durabilitytotal  = { key = "durability.showEquippedTotal", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     durabilitybags   = { key = "durability.showBags", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     speed            = { key = "speed.enabled", onToggle = function() Wild.UpdateSpeedIndicator() end },
+    dialog           = { key = "dialogKey.enabled", onToggle = function() Wild.UpdateDialogKey() end },
 }
 
 Wild.FEATURES = FEATURES
@@ -644,7 +650,11 @@ end
 
 function Wild.SetSetting(key, value)
     if not Wild.db then return end
+    if key == "dialogKey.key" and Wild.SetDialogKey then
+        return Wild.SetDialogKey(value)
+    end
     SetNestedValue(Wild.db, key, value)
+    if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
 end
 
 function Wild.ResetSettings()
@@ -654,6 +664,7 @@ function Wild.ResetSettings()
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
+    if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
     print("|cff00ccffWild:|r All settings reset to defaults.")
 end

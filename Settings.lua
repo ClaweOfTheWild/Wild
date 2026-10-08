@@ -2339,6 +2339,123 @@ local function CreateQuestsTab()
 end
 
 -- ============================================================
+-- Tab: Dialog Key
+-- ============================================================
+local function CreateDialogKeyTab()
+    local panel = CreateFrame("Frame")
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(450)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Dialog Key")
+
+    local desc = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("|cff888888Press a key to click Yes, Accept, or OK on the topmost standard confirmation popup. Nothing is accepted automatically. NPC gossip and quest windows are not changed.|r")
+
+    local enabledCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    enabledCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
+    enabledCB.Text:SetText("Enable dialog key")
+    enabledCB.tooltipText = "Use your configured key to confirm standard popups outside combat."
+    enabledCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        Wild.SetFeatureEnabled("dialog", checked)
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    local keyLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    keyLabel:SetPoint("TOPLEFT", enabledCB, "BOTTOMLEFT", 2, -20)
+    keyLabel:SetText("Confirmation key:")
+
+    local keyButton = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    keyButton:SetSize(180, 24)
+    keyButton:SetPoint("LEFT", keyLabel, "RIGHT", 12, 0)
+
+    local keyHint = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    keyHint:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -14)
+    keyHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    keyHint:SetJustifyH("LEFT")
+    keyHint:SetText("|cff888888Click the key button, then press a keyboard key or modifier combination. Escape cancels. Your normal key binding is unchanged when there is no eligible popup or you are typing.|r")
+
+    local destroyCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+    destroyCB:SetPoint("TOPLEFT", keyHint, "BOTTOMLEFT", -2, -20)
+    destroyCB.Text:SetText("Allow item destruction with the dialog key")
+    destroyCB.tooltipText = "Permanently destroy the item on your cursor by pressing the confirmation key, without typing DELETE."
+    destroyCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        Wild.SetSetting("dialogKey.destroy", checked)
+        PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+    end)
+
+    local warning = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    warning:SetPoint("TOPLEFT", destroyCB, "BOTTOMLEFT", 22, -4)
+    warning:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    warning:SetJustifyH("LEFT")
+    warning:SetText("|cffff6600Warning: With this option enabled, the key permanently destroys the item shown in the destroy popup, including valuable and quest items. The popup stays open until you press the key or cancel it. Other typed confirmations are never bypassed.|r")
+
+    local commands = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    commands:SetPoint("TOPLEFT", warning, "BOTTOMLEFT", -22, -20)
+    commands:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    commands:SetJustifyH("LEFT")
+    commands:SetText("|cff888888/wild dialog on|off\n/wild dialog key SPACE\n/wild dialog destroy on|off|r")
+
+    local capture = CreateFrame("Frame", nil, panel)
+    capture:SetFrameStrata("TOOLTIP")
+    capture:SetFrameLevel(1000)
+    capture:EnableKeyboard(true)
+    capture:SetPropagateKeyboardInput(true)
+    capture:Hide()
+
+    local function StopCapture()
+        capture:Hide()
+        keyButton:SetText(Wild.GetSetting("dialogKey.key") or "SPACE")
+    end
+    keyButton:SetScript("OnClick", function()
+        if InCombatLockdown() then
+            print("|cffff6600Wild:|r Configure the dialog key outside combat.")
+            return
+        end
+        if capture:IsShown() then
+            StopCapture()
+            return
+        end
+        capture:SetPropagateKeyboardInput(true)
+        capture:Show()
+        keyButton:SetText("Press a key (Esc cancels)")
+    end)
+    capture:SetScript("OnKeyDown", function(self, key)
+        if InCombatLockdown() then StopCapture(); return end
+        self:SetPropagateKeyboardInput(false)
+        if key == "ESCAPE" then StopCapture(); return end
+        if key == "LCTRL" or key == "RCTRL" or key == "LALT" or key == "RALT" or
+            key == "LSHIFT" or key == "RSHIFT" then return end
+        local binding = (IsControlKeyDown() and "CTRL-" or "") ..
+            (IsAltKeyDown() and "ALT-" or "") ..
+            (IsShiftKeyDown() and "SHIFT-" or "") .. key
+        Wild.SetDialogKey(binding)
+        StopCapture()
+    end)
+    capture:RegisterEvent("PLAYER_REGEN_DISABLED")
+    capture:SetScript("OnEvent", StopCapture)
+    panel:SetScript("OnHide", StopCapture)
+    panel:SetScript("OnShow", function()
+        enabledCB:SetChecked(Wild.IsFeatureEnabled("dialog"))
+        destroyCB:SetChecked(Wild.GetSetting("dialogKey.destroy"))
+        StopCapture()
+    end)
+    return panel
+end
+
+-- ============================================================
 -- Tab: Gossip
 -- ============================================================
 local function CreateGossipTab()
@@ -5590,6 +5707,7 @@ loader:SetScript("OnEvent", function(self, event, addon)
     AddTab("Mail", CreateMailTab())
     AddTab("Loot", CreateLootTab())
     AddTab("Quests", CreateQuestsTab())
+    AddTab("Dialog Key", CreateDialogKeyTab())
     AddTab("Gossip", CreateGossipTab())
     AddTab("Darkmoon Faire", CreateDarkmoonFaireTab())
     AddTab("Tooltips", CreateTooltipTab())

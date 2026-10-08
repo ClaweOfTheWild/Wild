@@ -96,6 +96,9 @@ Primary command: `/wild`
 /wild repair guild on|off   — Toggle guild funds
 /wild loot on|off           — Toggle quick loot
 /wild lfg on|off            — Toggle LFG quick apply
+/wild dialog on|off         — Toggle manual keyboard confirmation of popups
+/wild dialog key SPACE      — Set a keyboard key (modifier chords such as CTRL-F2 also work)
+/wild dialog destroy on|off — Allow item destruction without typing DELETE
 /wild circle on|off         — Toggle center circle
 /wild circle size <n>       — Set circle size
 /wild circle opacity <n>    — Set circle opacity (0-100)
@@ -124,6 +127,11 @@ Wild.UpdateScreenCenterCircle()
 
 -- Loot
 Wild.SetQuickLoot(enabled)
+
+-- Dialog Key (standard confirmation popups only, not NPC gossip or quest windows)
+Wild.SetDialogKey("SPACE")   -- Validates and saves the key; returns true/false
+Wild.ConfirmDialog()        -- Requires a hardware event; returns true if a button was clicked
+Wild.UpdateDialogKey()
 
 -- Bank
 Wild.GetFilterRuleSummary(rule)
@@ -163,6 +171,8 @@ Wild.FormatGold(copper)
 - Use `Wild.Print(message)` for chat output containing item links, including rule summaries and debug messages. It inserts a native item texture immediately before every item hyperlink without changing the link or its quality atlas. Keep saved debug messages unformatted. Use readable action labels instead of Unicode bank arrows or mail symbols, which may be missing from the chat font.
 - `PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON/OFF)` on checkbox toggles.
 - Format money amounts with `Wild.FormatGold(copper)`, which delegates to WoW's `GetMoneyString` with thousands separators. Native coin icons are used when colorblind mode is off; localized denomination text is used when it is on. Do not cache the formatted result or add a separate addon setting. Rule inputs still use their documented units (gold for hold targets, copper for sell-price conditions).
+- **Dialog Key** is opt-in (`dialogKey.enabled = false`, key `SPACE`). Configure it in its settings tab or via `/wild dialog`. Only a physical key press prepares the topmost eligible standard popup and temporarily binds its native primary button; no popup is auto-accepted. Normal bindings and text entry are preserved. Wild does not prepare new confirmations in combat or while its settings window is open.
+- Item destruction is a separate opt-in (`dialogKey.destroy = false`). It covers `DELETE_ITEM`, `DELETE_QUEST_ITEM`, `DELETE_GOOD_ITEM`, and `DELETE_GOOD_QUEST_ITEM` only. On explicit confirmation, fill the edit box with localized `DELETE_ITEM_CONFIRM_STRING`, then use the normal Yes button. Never modify popup definitions or bypass other typed confirmations, disabled buttons, or confirmation delays.
 
 ## Code Style
 

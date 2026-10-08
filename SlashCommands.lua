@@ -53,6 +53,7 @@ local FEATURE_NAMES = {
     durabilitytotal    = "Durability Total Overlay",
     durabilitybags     = "Durability on Bag Items",
     speed              = "Speed Indicator",
+    dialog             = "Dialog Key",
 }
 
 -- ============================================================
@@ -92,7 +93,7 @@ subcommands.help = function()
     print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol), durability (dur), speed")
+    print("    volume (vol), durability (dur), speed, dialog")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -139,6 +140,10 @@ subcommands.help = function()
     Print("/wild gossip delve on|off — Toggle auto-select delve options")
     Print("/wild gossip skip on|off — Toggle auto-select skip options")
     print(" ")
+    Print("/wild dialog on|off - Toggle keyboard confirmation of popups")
+    Print("/wild dialog key <key> - Set the confirmation key (SPACE, ENTER, CTRL-F2)")
+    Print("/wild dialog destroy on|off - Allow item destruction without typing DELETE")
+    print(" ")
     Print("/wild dungeonbar on|off — Toggle dungeon bar")
     Print("/wild dungeonbar show|hide|toggle — Control visibility")
     print(" ")
@@ -183,7 +188,7 @@ subcommands.status = function()
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
-        "speed",
+        "speed", "dialog",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -200,6 +205,34 @@ end
 subcommands.speed = function(args)
     if HandleGenericFeature("speed", args) then return end
     PrintWarn("Usage: /wild speed [on|off]")
+end
+
+-- /wild dialog [on|off|key <key>|destroy on|off]
+subcommands.dialog = function(args)
+    if #args == 0 then
+        Print("Dialog Key: " .. StatusText(Wild.IsFeatureEnabled("dialog")))
+        Print("Item destruction: " .. StatusText(Wild.GetSetting("dialogKey.destroy")))
+        Print("Confirmation key: " .. tostring(Wild.GetSetting("dialogKey.key")))
+        return
+    end
+    if HandleGenericFeature("dialog", args) then return end
+    local sub = args[1]:lower()
+    if sub == "key" and #args == 2 then
+        if Wild.SetDialogKey(args[2]) then
+            Print("Dialog key set to " .. Wild.GetSetting("dialogKey.key"))
+        end
+    elseif sub == "destroy" and #args == 2 then
+        local enabled = OnOff(args[2])
+        if enabled == nil then
+            PrintWarn("Usage: /wild dialog destroy on|off")
+            return
+        end
+        Wild.SetSetting("dialogKey.destroy", enabled)
+        Print("Dialog item destruction " .. StatusText(enabled))
+        if enabled then PrintWarn("The confirmation key can permanently destroy the item on your cursor.") end
+    else
+        PrintWarn("Usage: /wild dialog [on|off|key <key>|destroy on|off]")
+    end
 end
 
 -- /wild circle [on|off|size|thickness|opacity|color|offset]

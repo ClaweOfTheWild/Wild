@@ -33,5 +33,6 @@ Tooltip.lua
 VolumeControl.lua
 Durability.lua
 Speed.lua
+DialogKey.lua
 SlashCommands.lua
 Settings.lua
