@@ -40,6 +40,7 @@ local function NewEnvironment()
         items = {}, bags = { [0] = {}, [5] = {} }, frames = {}, timers = {},
         professions = { [1] = 165, [2] = 393 }, professionIndices = { 1, 2 },
         sold = {}, destroyed = {}, logs = {}, merchantOpen = true, time = 10,
+        loadRequests = {},
     }
     local function ItemID(source)
         if type(source) == "number" then return source end
@@ -86,10 +87,19 @@ local function NewEnvironment()
             GetItemInfo = function(source)
                 local id = ItemID(source)
                 local item = state.items[id]
+                if item.noItemInfo then return nil end
                 return item.name or "Recipe", "item:" .. id, 3, 1, 1, nil, nil, 1, "",
                     nil, item.price or 100, item.classID, item.subclassID, item.bindType or 1
             end,
-            RequestLoadItemDataByID = function() end,
+            IsItemBindToAccount = function(source)
+                return state.items[ItemID(source)].accountBound == true
+            end,
+            IsItemBindToAccountUntilEquip = function(source)
+                return state.items[ItemID(source)].accountBoundUntilEquipped == true
+            end,
+            RequestLoadItemDataByID = function(itemID)
+                state.loadRequests[#state.loadRequests + 1] = itemID
+            end,
         },
         C_TooltipInfo = {
             GetBagItem = function(bag, slot) return Tooltip(state.bags[bag][slot].itemID) end,
@@ -143,6 +153,7 @@ local function NewEnvironment()
         local slot = #state.bags[bag] + 1
         local info = { itemID = itemID, hyperlink = "item:" .. itemID, stackCount = 1,
             isBound = item.bindType == nil or item.bindType == 1, bag = bag, slot = slot }
+        if item.isBound ~= nil then info.isBound = item.isBound end
         state.bags[bag][slot] = info
         return info
     end
@@ -341,12 +352,107 @@ local tests = {
             Equal(Wild.IntentMatchesItem(Wild.db.intents[1], 1, info, Wild.BuildCharContext()), false)
         end
     end },
-    { "warbound tooltip overrides misleading bind-on-pickup item data", function()
+    { "account binding overrides misleading bind-on-pickup recipe data", function()
         local Wild, _, AddItem = NewEnvironment()
-        local info = AddItem(1, { classID = 9, subclassID = 4, tooltipBind = "Warbound" })
+        local info = AddItem(1, {
+            classID = 9, subclassID = 4, tooltipBind = "Warbound", accountBound = true,
+        })
         AddRecipeSellIntent(Wild)
         local matched = Wild.IntentMatchesItem(Wild.db.intents[1], 1, info, Wild.BuildCharContext())
         Equal(matched, false)
+    end },
+    { "recipe binding ignores crafted-item preview text in every item context", function()
+        for _, previewBind in ipairs({
+            "Binds when picked up", "Binds when equipped", "Binds when used", "Soulbound", "Warbound",
+        }) do
+            local Wild, _, AddItem, _, _, _, env = NewEnvironment()
+            local info = AddItem(256625, {
+                classID = 9, subclassID = 1, known = true, bindType = 0, tooltipBind = previewBind,
+            })
+            local resolve = Wild.ATTR_BY_KEY["item.bind"].resolve
+            for _, context in ipairs({
+                info,
+                { hyperlink = info.hyperlink, isBound = false },
+                { tooltipLines = env.C_TooltipInfo.GetBagItem(info.bag, info.slot).lines, isBound = false },
+                {},
+            }) do
+                Equal(resolve(256625, context), "none", previewBind)
+            end
+            Equal(resolve(256625), "none")
+        end
+    end },
+    { "recipe binding uses recipe metadata and the actual bag binding state", function()
+        local Wild, _, AddItem = NewEnvironment()
+        local resolve = Wild.ATTR_BY_KEY["item.bind"].resolve
+        local cases = {
+            { 0, false, "none" }, { 0, true, "soulbound" },
+            { 1, true, "soulbound" }, { 4, true, "soulbound" },
+            { 2, false, "boe" }, { 2, true, "soulbound" },
+            { 3, false, "none" }, { 3, true, "soulbound" },
+            { 7, true, "warbound" }, { 8, true, "warbound" }, { 9, true, "warbound" },
+        }
+        for itemID, case in ipairs(cases) do
+            local info = AddItem(itemID, {
+                classID = 9, subclassID = 4, bindType = case[1], isBound = case[2],
+                tooltipBind = "Binds when picked up",
+            })
+            Equal(resolve(itemID, info), case[3], "Binding type " .. case[1])
+        end
+    end },
+    { "unbound recipe previews cannot match soulbound rules for any intent action", function()
+        local Wild, _, AddItem = NewEnvironment()
+        local info = AddItem(1, {
+            classID = 9, subclassID = 4, known = true, bindType = 0,
+            tooltipBind = "Binds when picked up",
+        })
+        local intent = AddRecipeSellIntent(Wild)
+        intent.target = "warband"
+        intent.source = "character"
+        intent.recipient = "Alt"
+        for _, action in ipairs({ "sell", "destroy", "deposit", "withdraw", "transfer", "mail" }) do
+            intent.action = action
+            Equal(Wild.ValidateIntent(intent), true)
+            Equal(Wild.IntentMatchesItem(intent, 1, info, Wild.BuildCharContext()), false, action)
+        end
+    end },
+    { "recipe account-binding APIs take precedence over soulbound metadata and preview text", function()
+        for _, accountFlag in ipairs({ "accountBound", "accountBoundUntilEquipped" }) do
+            local Wild, _, AddItem = NewEnvironment()
+            local item = {
+                classID = 9, subclassID = 4, known = true, bindType = 1, isBound = true,
+                tooltipBind = "Binds when picked up",
+            }
+            item[accountFlag] = true
+            local info = AddItem(1, item)
+            local intent = AddRecipeSellIntent(Wild)
+            Equal(Wild.ATTR_BY_KEY["item.bind"].resolve(1, info), "warbound", accountFlag)
+            Equal(Wild.IntentMatchesItem(intent, 1, info, Wild.BuildCharContext()), false)
+        end
+    end },
+    { "missing recipe binding data requests a load and matches no binding condition", function()
+        local Wild, state, AddItem = NewEnvironment()
+        local info = AddItem(1, {
+            classID = 9, subclassID = 4, noItemInfo = true, tooltipBind = "Binds when picked up",
+        })
+        Equal(Wild.ATTR_BY_KEY["item.bind"].resolve(1, info), nil)
+        Equal(#state.loadRequests, 1)
+        Equal(state.loadRequests[1], 1)
+        for _, value in ipairs({ "none", "boe", "soulbound", "warbound" }) do
+            for _, op in ipairs({ "is", "is_not" }) do
+                Equal(Wild.EvaluateCondition({ attr = "item.bind", op = op, value = value },
+                    1, info, Wild.BuildCharContext()), false)
+            end
+        end
+    end },
+    { "non-recipe binding keeps its existing tooltip overrides", function()
+        local Wild, _, AddItem = NewEnvironment()
+        local resolve = Wild.ATTR_BY_KEY["item.bind"].resolve
+        local warbound = AddItem(1, { classID = 4, subclassID = 4, tooltipBind = "Warbound" })
+        Equal(resolve(1, warbound), "warbound")
+        local bop = AddItem(2, {
+            classID = 4, subclassID = 4, bindType = 0, tooltipBind = "Binds when picked up",
+        })
+        Equal(resolve(2, bop), "soulbound")
     end },
     { "cooking and fishing are recognized even when primary profession slots are empty", function()
         local Wild, state, AddItem = NewEnvironment()
@@ -472,6 +578,41 @@ local tests = {
         RunTimers()
         Tick()
         Equal(#state.sold, 0)
+    end },
+    { "merchant keeps unbound and warbound recipes with soulbound crafted-item previews", function()
+        local Wild, state, AddItem, Fire, RunTimers, Tick = NewEnvironment()
+        AddItem(256625, {
+            name = "Pattern: Hexwoven Strand", classID = 9, subclassID = 1,
+            known = true, bindType = 0, tooltipBind = "Binds when picked up",
+        })
+        AddItem(258518, {
+            name = "Plans: Murder Row Fishhook", classID = 9, subclassID = 4,
+            bindType = 0, tooltipBind = "Binds when picked up",
+        })
+        AddItem(3, {
+            classID = 9, subclassID = 4, accountBound = true,
+            tooltipBind = "Binds when picked up",
+        })
+        AddItem(4, {
+            classID = 9, subclassID = 4, bindType = 0, price = 0,
+            tooltipBind = "Binds when picked up",
+        })
+        AddItem(5, { classID = 9, subclassID = 1, known = true })
+        AddItem(6, { classID = 9, subclassID = 4 })
+        local intent = AddRecipeSellIntent(Wild)
+        intent.destroyUnsellable = true
+        Fire("MERCHANT_SHOW")
+        RunTimers()
+        for _ = 1, 7 do Tick() end
+        Fire("BAG_UPDATE_DELAYED")
+        RunTimers()
+        Equal(#state.sold, 2)
+        Equal(state.sold[1], 5)
+        Equal(state.sold[2], 6)
+        Equal(#state.destroyed, 0)
+        for slot = 1, 4 do
+            assert(state.bags[0][slot], "Protected recipe must remain in the bag")
+        end
     end },
 }
 

@@ -377,6 +377,17 @@ local ATTRIBUTES = {
         key = "item.bind", label = "Bind Type", category = "Item",
         valueType = "bind",
         resolve = function(itemID, containerInfo)
+            local source = (containerInfo and containerInfo.hyperlink) or itemID
+            local _, _, _, _, _, _, _, _, _, _, _, classID, _, bindType = C_Item.GetItemInfo(source)
+            if not classID then
+                classID = select(6, GetItemInfoInstant(itemID))
+            end
+            local isRecipe = classID == 9
+            -- Recipe tooltips also describe the crafted item, including its binding.
+            if isRecipe and (C_Item.IsItemBindToAccount(source) or C_Item.IsItemBindToAccountUntilEquip(source)) then
+                return "warbound"
+            end
+
             -- Scan a list of tooltip lines for bind-type text; returns bind key or nil
             local function ScanLinesForBind(lines, ci)
                 for _, line in ipairs(lines) do
@@ -405,12 +416,11 @@ local ATTRIBUTES = {
             end
 
             -- Enum.ItemBind: 0=None,1=BoP,2=BoE,3=BoU,4=Quest,7=ToWoWAccount,8=ToBnetAccount,9=WarboundUntilEquipped
-            -- GetItemInfo returns bindType=1 (BoP) for many warbound items whose DB entry
-            -- predates the warbound system.  Tooltip text is always authoritative, so scan
-            -- the tooltip FIRST when we have a bag+slot, then fall back to GetItemInfo.
+            -- Non-recipe warbound items can report bindType=1, so their tooltip
+            -- still takes precedence over the numeric binding type.
 
             -- 1) Tooltip scanning – works for items in bags/bank where bag+slot are known
-            if containerInfo and containerInfo.bag and containerInfo.slot
+            if not isRecipe and containerInfo and containerInfo.bag and containerInfo.slot
                and C_TooltipInfo and C_TooltipInfo.GetBagItem then
                 local data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
                 if data then
@@ -423,14 +433,14 @@ local ATTRIBUTES = {
             end
 
             -- 2) Pre-parsed tooltip lines (from TooltipDataProcessor when bag/slot unavailable)
-            if containerInfo and containerInfo.tooltipLines then
+            if not isRecipe and containerInfo and containerInfo.tooltipLines then
                 local result = ScanLinesForBind(containerInfo.tooltipLines, containerInfo)
                 if result then return result end
             end
 
             -- 3) Hyperlink tooltip scan – works when bag/slot missing (bank UI, links)
             local link = containerInfo and containerInfo.hyperlink
-            if link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
+            if not isRecipe and link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
                 local data = C_TooltipInfo.GetHyperlink(link)
                 if data then
                     if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
@@ -442,14 +452,12 @@ local ATTRIBUTES = {
             end
 
             -- 4) GetItemInfo numeric fallback
-            local source = (containerInfo and containerInfo.hyperlink) or itemID
-            local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(source)
-
             if not bindType then
                 -- Request data for next time
                 if C_Item and C_Item.RequestLoadItemDataByID then
                     C_Item.RequestLoadItemDataByID(itemID)
                 end
+                if isRecipe then return nil end
                 if containerInfo and containerInfo.isBound then
                     return "soulbound"
                 end
