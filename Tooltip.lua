@@ -123,7 +123,7 @@ local TOOLTIP_LINES = {
     {
         key = "collectionStatus",
         label = "Collection Status",
-        resolve = function(itemID)
+        resolve = function(itemID, containerInfo)
             local parts = {}
             -- Toy
             if C_ToyBox and C_ToyBox.GetToyInfo then
@@ -174,9 +174,8 @@ local TOOLTIP_LINES = {
             end
             -- Recipe
             if classID == 9 then
-                local _, spellID = GetItemSpell(itemID)
-                if spellID then
-                    local known = IsSpellKnown(spellID) or IsPlayerSpell(spellID)
+                local known = Wild.IsRecipeKnown(itemID, containerInfo)
+                if known ~= nil then
                     parts[#parts + 1] = "Recipe: " .. (known and "|cff00ff00known|r" or "|cffffff00unknown|r")
                 end
             end

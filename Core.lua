@@ -209,6 +209,8 @@ frame:SetScript("OnEvent", function(self, event, addon)
         ["item.isRecipe"] = true,
     }
     for _, intent in ipairs(WildDB.intents) do
+        -- Retire the recipe shortcut marker without changing its saved rule.
+        intent.recipeSelling = nil
         -- Migrate flat conditions to groups
         if intent.conditions and not intent.groups then
             for _, cond in ipairs(intent.conditions) do

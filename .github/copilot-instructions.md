@@ -65,6 +65,11 @@ To match soulbound items with no upgrade track, put **Bind Type is Soulbound** a
 - After each sell batch completes, `BAG_UPDATE_DELAYED` triggers a re-scan.
 - Item data is pre-loaded via `Item:ContinueOnItemLoad` before the first scan.
 - Vendor sale amounts use `Wild.GetEffectiveSellPrice(itemID, containerInfo)`, shared with price conditions and tooltips. It reads `Enum.TooltipDataLineType.SellPrice` lines and their `price` field, converts bag-stack totals to per-item copper, and preserves the full item hyperlink in fallbacks. Multiply this unit price by the sold stack count exactly once.
+- Recipe automation is configured only in **Intent Rules**, with no dedicated checkbox or slash toggle. The condition picker groups **Item Type**, **Item Subtype**, and **Recipes** under **Item types and subtypes**.
+- Under **Recipes**, **Recipe Knowledge** offers **Already known / Not yet known**, and **Recipe Profession** offers **Known profession / Unknown profession**. Both conditions implicitly require a recipe item and work with any intent action. They store booleans internally, but their editor, summaries, and debug output show the readable state labels.
+- To sell unneeded soulbound recipes, create a **Sell** intent with two include groups: **Bind Type is Soulbound + Recipe Knowledge is Already known**, and **Bind Type is Soulbound + Recipe Profession is Unknown profession**. Include groups are OR; conditions within a group are AND. Leave **Destroy items with no sell price** unchecked. Tradeable/warbound recipes and unlearned recipes for current professions are then kept, even when skill requirements are unmet.
+- Recipe knowledge uses the localized `ITEM_SPELL_KNOWN` tooltip line, not the item's use/learning spell. Missing tooltip data does not match either known or unknown conditions. Missing-profession detection uses recipe subclasses and the character's primary and secondary profession skill lines; unrecognized subclasses are not assumed unusable.
+- Existing intents created by the former recipe shortcut remain ordinary editable intents; only the obsolete `recipeSelling` marker is removed on load.
 
 ### Mail-Specific Behaviour
 
@@ -134,6 +139,9 @@ Wild.SetQuickLoot(enabled)
 Wild.SetDialogKey("SPACE")   -- Validates and saves the key; returns true/false
 Wild.ConfirmDialog()        -- Requires a hardware event; returns true if a button was clicked
 Wild.UpdateDialogKey()
+
+-- Recipe knowledge (used by normal intent conditions and tooltip collection status)
+Wild.IsRecipeKnown(itemID, containerInfo) -- true/false, or nil if tooltip data is unavailable
 
 -- Bank
 Wild.GetFilterRuleSummary(rule)

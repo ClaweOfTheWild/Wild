@@ -29,7 +29,50 @@ local PROFESSION_SKILL_LINES = {
     [186] = "Mining",
     [393] = "Skinning",
     [197] = "Tailoring",
+    [185] = "Cooking",
+    [356] = "Fishing",
+    [794] = "Archaeology",
 }
+
+-- ItemRecipeSubclass -> base profession skill line. Books and obsolete First Aid
+-- recipes have no reliable current profession mapping, so leave them unmatched.
+local RECIPE_PROFESSION_SKILL_LINES = {
+    [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185,
+    [6] = 171, [8] = 333, [9] = 356, [10] = 755, [11] = 773,
+}
+
+local function IsRecipeKnown(itemID, containerInfo)
+    local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
+    if classID ~= 9 then return nil end
+
+    local lines = containerInfo and containerInfo.tooltipLines
+    if not lines and C_TooltipInfo then
+        local data
+        if containerInfo and containerInfo.bag and containerInfo.slot and C_TooltipInfo.GetBagItem then
+            data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
+        elseif containerInfo and containerInfo.hyperlink and C_TooltipInfo.GetHyperlink then
+            data = C_TooltipInfo.GetHyperlink(containerInfo.hyperlink)
+        elseif C_TooltipInfo.GetItemByID then
+            data = C_TooltipInfo.GetItemByID(itemID)
+        end
+        if data and TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
+        lines = data and data.lines
+    end
+    if not lines or #lines == 0 or not ITEM_SPELL_KNOWN then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+
+    -- GetItemSpell can return the use/learning spell rather than the crafted
+    -- recipe. The localized tooltip is authoritative for "already known".
+    for _, line in ipairs(lines) do
+        for _, text in pairs({ line.leftText, line.rightText }) do
+            local clean = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):match("^%s*(.-)%s*$")
+            if clean == ITEM_SPELL_KNOWN then return true end
+        end
+    end
+    return false
+end
 
 -- ============================================================
 -- Class constants
@@ -189,7 +232,7 @@ local ATTRIBUTES = {
         end,
     },
     {
-        key = "item.type", label = "Item Type", category = "Item",
+        key = "item.type", label = "Item Type", category = "Item types and subtypes",
         valueType = "itemtype",
         resolve = function(itemID)
             local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
@@ -197,7 +240,7 @@ local ATTRIBUTES = {
         end,
     },
     {
-        key = "item.subtype", label = "Item Subtype", category = "Item",
+        key = "item.subtype", label = "Item Subtype", category = "Item types and subtypes",
         valueType = "itemsubtype",
         resolve = function(itemID)
             local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
@@ -230,7 +273,7 @@ local ATTRIBUTES = {
     {
         key = "item.isKnown", label = "Is Known", category = "Collection",
         valueType = "boolean",
-        resolve = function(itemID)
+        resolve = function(itemID, containerInfo)
             -- 1) Toy
             if C_ToyBox and C_ToyBox.GetToyInfo then
                 local _, toyID = C_ToyBox.GetToyInfo(itemID)
@@ -274,11 +317,7 @@ local ATTRIBUTES = {
             end
             -- 5) Recipe (classID 9)
             if classID == 9 then
-                local _, spellID = GetItemSpell(itemID)
-                if spellID then
-                    return (IsSpellKnown(spellID) or IsPlayerSpell(spellID)) and true or false
-                end
-                return false
+                return IsRecipeKnown(itemID, containerInfo)
             end
             -- 6) Anything else that teaches a spell (covers decor, etc.)
             local _, spellID = GetItemSpell(itemID)
@@ -286,6 +325,26 @@ local ATTRIBUTES = {
                 return (IsSpellKnown(spellID) or IsPlayerSpell(spellID)) and true or false
             end
             return false
+        end,
+    },
+    {
+        key = "item.isRecipeKnown", label = "Recipe Knowledge", category = "Item types and subtypes",
+        subcategory = "Recipes",
+        valueType = "boolean",
+        valueLabels = { [true] = "Already known", [false] = "Not yet known" },
+        resolve = IsRecipeKnown,
+    },
+    {
+        key = "item.isRecipeForMissingProfession", label = "Recipe Profession", category = "Item types and subtypes",
+        subcategory = "Recipes",
+        valueType = "boolean",
+        valueLabels = { [true] = "Unknown profession", [false] = "Known profession" },
+        resolve = function(itemID, containerInfo, charCtx)
+            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            if classID ~= 9 then return nil end
+            local skillLine = RECIPE_PROFESSION_SKILL_LINES[subclassID]
+            if not skillLine then return nil end
+            return not charCtx.professions[skillLine]
         end,
     },
     {
@@ -565,8 +624,7 @@ for _, ref in ipairs(DYNAMIC_REFS) do REF_BY_KEY[ref.key] = ref end
 
 local function GetPlayerProfessionSkillLines()
     local result = {}
-    local prof1, prof2 = GetProfessions()
-    for _, idx in ipairs({ prof1, prof2 }) do
+    for _, idx in pairs({ GetProfessions() }) do
         if idx then
             local _, _, _, _, _, _, skillLine = GetProfessionInfo(idx)
             if skillLine then
@@ -670,6 +728,7 @@ local function FormatConditionValue(cond, attrDef)
     elseif vt == "expansion" then
         return tostring(cond.value or "?")
     elseif vt == "boolean" then
+        if attrDef.valueLabels then return attrDef.valueLabels[cond.value] or "?" end
         if cond.value == true then return "Yes" end
         return "No"
     end
@@ -694,7 +753,7 @@ local function FormatActualValue(left, attrDef)
     elseif vt == "upgradetrack" then
         return (UPGRADE_TRACK_NAMES[left] or tostring(left)) .. " (" .. tostring(left) .. ")"
     elseif vt == "boolean" then
-        return left and "Yes" or "No"
+        return FormatConditionValue({ value = left }, attrDef)
     elseif vt == "bind" then
         return BIND_LABELS[left] or tostring(left)
     elseif vt == "itemtype" then
@@ -1062,6 +1121,7 @@ local PROFESSION_PRACTITIONER = {
     [202] = "Engineer", [182] = "Herbalist", [773] = "Scribe",
     [755] = "Jewelcrafter", [165] = "Leatherworker", [186] = "Miner",
     [393] = "Skinner", [197] = "Tailor",
+    [185] = "Cook", [356] = "Fisher", [794] = "Archaeologist",
 }
 
 local ACTION_LABELS = {
@@ -1138,6 +1198,7 @@ local function FormatItemDescription(itemConds)
     local reagentVal
     local isKnownVal
     local isToyVal, isMountVal, isPetVal
+    local hasRecipeCondition = false
     local ilvlRefParts = {}
     local ilvlStatParts = {}
     local extras = {}
@@ -1188,6 +1249,7 @@ local function FormatItemDescription(itemConds)
             end
         else
             local attrDef = ATTR_BY_KEY[cond.attr]
+            if attrDef and attrDef.subcategory == "Recipes" then hasRecipeCondition = true end
             local attrLabel = attrDef and attrDef.label or cond.attr
             local opLabel = OP_DISPLAY[cond.op] or cond.op
             local valStr = FormatConditionValue(cond, attrDef)
@@ -1215,6 +1277,8 @@ local function FormatItemDescription(itemConds)
         noun = GetItemSubClassInfo(classID, subclassID) or "items"
     elseif typeID then
         noun = GetItemClassInfo(typeID) or "items"
+    elseif hasRecipeCondition then
+        noun = "Recipes"
     elseif isKnownVal == true then
         noun = "already-known Collectibles"
         consumedCollection = true
@@ -1563,6 +1627,7 @@ Wild.OP_DISPLAY = OP_DISPLAY
 
 -- Functions
 Wild.BuildCharContext = BuildCharContext
+Wild.IsRecipeKnown = IsRecipeKnown
 Wild.EvaluateCondition = EvaluateCondition
 Wild.IntentMatchesItem = IntentMatchesItem
 Wild.IntentMatchesActor = IntentMatchesActor

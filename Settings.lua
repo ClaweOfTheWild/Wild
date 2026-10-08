@@ -47,6 +47,70 @@ local function HookScrollChildWidth(scrollFrame, sc)
     end)
 end
 
+local function InitializeConditionAttributeDropdown(dropdown, onSelect)
+    UIDropDownMenu_Initialize(dropdown, function(_, level, menuList)
+        level = level or 1
+        local function AddAttribute(attr)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = attr.label
+            info.value = attr.key
+            info.func = function()
+                CloseDropDownMenus()
+                onSelect(attr)
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+
+        if level == 2 and menuList == "itemTypes" then
+            for _, attr in ipairs(Wild.ATTRIBUTES) do
+                if attr.category == "Item types and subtypes" and not attr.subcategory then
+                    AddAttribute(attr)
+                end
+            end
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = "Recipes"
+            info.hasArrow = true
+            info.notCheckable = true
+            info.menuList = "recipes"
+            UIDropDownMenu_AddButton(info, level)
+        elseif level == 3 and menuList == "recipes" then
+            for _, attr in ipairs(Wild.ATTRIBUTES) do
+                if attr.subcategory == "Recipes" then AddAttribute(attr) end
+            end
+        elseif level == 1 then
+            local lastCat
+            local addedItemTypes = false
+            for _, attr in ipairs(Wild.ATTRIBUTES) do
+                if attr.category == "Item types and subtypes" then
+                    if not addedItemTypes then
+                        local info = UIDropDownMenu_CreateInfo()
+                        info.text = "Item types and subtypes"
+                        info.hasArrow = true
+                        info.notCheckable = true
+                        info.menuList = "itemTypes"
+                        UIDropDownMenu_AddButton(info, level)
+                        addedItemTypes = true
+                    end
+                else
+                    if attr.category ~= lastCat then
+                        if lastCat then
+                            local sep = UIDropDownMenu_CreateInfo()
+                            sep.text = ""; sep.isTitle = true; sep.notCheckable = true
+                            UIDropDownMenu_AddButton(sep, level)
+                        end
+                        local header = UIDropDownMenu_CreateInfo()
+                        header.text = "|cff888888-- " .. attr.category .. " --|r"
+                        header.isTitle = true; header.notCheckable = true
+                        UIDropDownMenu_AddButton(header, level)
+                        lastCat = attr.category
+                    end
+                    AddAttribute(attr)
+                end
+            end
+        end
+    end)
+end
+
 -- ============================================================
 -- Main window creation
 -- ============================================================
@@ -3823,10 +3887,11 @@ local function CreateIntentRulesTab()
     UIDropDownMenu_SetWidth(ceBoolDD, 100)
 
     UIDropDownMenu_Initialize(ceBoolDD, function()
-        for _, opt in ipairs({{text = "Yes", value = true}, {text = "No", value = false}}) do
+        local attrDef = condEditorState.attr and Wild.ATTR_BY_KEY[condEditorState.attr]
+        for _, value in ipairs({ true, false }) do
             local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text
-            info.value = opt.value
+            info.text = Wild.FormatConditionValue({ value = value }, attrDef)
+            info.value = value
             info.func = function(btn)
                 condEditorState.value = btn.value
                 UIDropDownMenu_SetText(ceBoolDD, btn:GetText())
@@ -3974,7 +4039,9 @@ local function CreateIntentRulesTab()
             elseif vt == "profession" then ceProfDD:Show()
             elseif vt == "class" then ceClassDD:Show()
             elseif vt == "bind" then ceBindDD:Show()
-            elseif vt == "boolean" then ceBoolDD:Show()
+            elseif vt == "boolean" then
+                UIDropDownMenu_SetWidth(ceBoolDD, attrDef.valueLabels and 170 or 100)
+                ceBoolDD:Show()
             elseif vt == "expansion" then ceExpanDD:Show()
             end
         end
@@ -4019,46 +4086,23 @@ local function CreateIntentRulesTab()
         end
     end)
 
-    UIDropDownMenu_Initialize(ceAttrDD, function()
-        local lastCat = nil
-        for _, attr in ipairs(Wild.ATTRIBUTES) do
-            if attr.category ~= lastCat then
-                if lastCat then
-                    local sep = UIDropDownMenu_CreateInfo()
-                    sep.text = ""; sep.isTitle = true; sep.notCheckable = true
-                    UIDropDownMenu_AddButton(sep)
-                end
-                local catHeader = UIDropDownMenu_CreateInfo()
-                catHeader.text = "|cff888888-- " .. attr.category .. " --|r"
-                catHeader.isTitle = true; catHeader.notCheckable = true
-                UIDropDownMenu_AddButton(catHeader)
-                lastCat = attr.category
+    InitializeConditionAttributeDropdown(ceAttrDD, function(attr)
+        condEditorState.attr = attr.key
+        condEditorState.op = nil
+        condEditorState.value = nil
+        condEditorState.ref = nil
+        condEditorState.offset = nil
+        condEditorState.subtypeParent = nil
+        UIDropDownMenu_SetText(ceAttrDD, attr.label)
+        if attr.valueType == "boolean" then UIDropDownMenu_SetText(ceBoolDD, "Select...") end
+        for _, op in ipairs(Wild.OPERATORS) do
+            if op.forTypes[attr.valueType] then
+                condEditorState.op = op.key
+                UIDropDownMenu_SetText(ceOpDD, op.label)
+                break
             end
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = attr.label
-            info.value = attr.key
-            info.func = function(btn)
-                condEditorState.attr = btn.value
-                condEditorState.op = nil
-                condEditorState.value = nil
-                condEditorState.ref = nil
-                condEditorState.offset = nil
-                condEditorState.subtypeParent = nil
-                UIDropDownMenu_SetText(ceAttrDD, btn:GetText())
-                local newAttrDef = Wild.ATTR_BY_KEY[btn.value]
-                local newVt = newAttrDef and newAttrDef.valueType or "string"
-                for _, op in ipairs(Wild.OPERATORS) do
-                    if op.forTypes[newVt] then
-                        condEditorState.op = op.key
-                        UIDropDownMenu_SetText(ceOpDD, op.label)
-                        break
-                    end
-                end
-                CloseDropDownMenus()
-                UpdateCondEditorLayout()
-            end
-            UIDropDownMenu_AddButton(info)
         end
+        UpdateCondEditorLayout()
     end)
 
     UIDropDownMenu_Initialize(ceOpDD, function()
@@ -4148,7 +4192,8 @@ local function CreateIntentRulesTab()
             elseif vt == "expansion" then
                 UIDropDownMenu_SetText(ceExpanDD, condEditorState.value or "Select...")
             elseif vt == "boolean" then
-                UIDropDownMenu_SetText(ceBoolDD, condEditorState.value == true and "Yes" or (condEditorState.value == false and "No" or "Select..."))
+                UIDropDownMenu_SetText(ceBoolDD, condEditorState.value ~= nil
+                    and Wild.FormatConditionValue(condEditorState, attrDef) or "Select...")
             end
         end
         UpdateCondEditorLayout()
