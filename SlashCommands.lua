@@ -4,8 +4,8 @@ local ADDON_NAME, Wild = ...
 local INFO = "|cff00ccffWild:|r "
 local WARN = "|cffff6600Wild:|r "
 
-local function Print(msg) print(INFO .. msg) end
-local function PrintWarn(msg) print(WARN .. msg) end
+local function Print(msg) Wild.Print(INFO .. msg) end
+local function PrintWarn(msg) Wild.Print(WARN .. msg) end
 
 local function ParseArgs(msg)
     local args = {}
@@ -377,7 +377,7 @@ subcommands.bank = function(args)
                     any = true
                     local state = (intent.enabled ~= false) and "|cff44ff44ON|r" or "|cffff4444OFF|r"
                     local summary = Wild.GetIntentSummary and Wild.GetIntentSummary(intent) or "?"
-                    print(string.format("  %d. [%s] %s", i, state, summary))
+                    Wild.Print(string.format("  %d. [%s] %s", i, state, summary))
                 end
             end
         end
@@ -640,7 +640,7 @@ subcommands.find = function(args)
     for _, r in ipairs(results) do
         local display = r.link or r.name or tostring(r.itemID)
         local detail = Wild.FormatItemBreakdown(r.breakdown)
-        print(string.format("  %s — %dx total (%s)", display, r.total, detail))
+        Wild.Print(string.format("  %s — %dx total (%s)", display, r.total, detail))
     end
 end
 subcommands.search = subcommands.find
@@ -705,7 +705,7 @@ subcommands.datastore = function(args)
             Print(lines)
         else
             for _, line in ipairs(lines) do
-                print(line)
+                Wild.Print(line)
             end
         end
     elseif sub == "refresh" then
@@ -861,7 +861,7 @@ do
             local start = math.max(1, count - 49)
             Print("Last " .. (count - start + 1) .. " of " .. count .. " entries:")
             for i = start, count do
-                print("  " .. Wild.db.eventTrace[i])
+                Wild.Print("  " .. Wild.db.eventTrace[i])
             end
 
         else

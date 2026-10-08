@@ -160,6 +160,7 @@ Wild.FormatGold(copper)
 - No global frame names on child widgets except where required by templates.
 - Dark backdrop with subtle borders. Refer to existing panels for colour values.
 - Addon chat prefix: `|cff00ccffWild:|r` (info), `|cffff6600Wild:|r` (warning/error).
+- Use `Wild.Print(message)` for chat output containing item links, including rule summaries and debug messages. It inserts a native item texture immediately before every item hyperlink without changing the link or its quality atlas. Keep saved debug messages unformatted. Use readable action labels instead of Unicode bank arrows or mail symbols, which may be missing from the chat font.
 - `PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON/OFF)` on checkbox toggles.
 - Format money amounts with `Wild.FormatGold(copper)`, which delegates to WoW's `GetMoneyString` with thousands separators. Native coin icons are used when colorblind mode is off; localized denomination text is used when it is on. Do not cache the formatted result or add a separate addon setting. Rule inputs still use their documented units (gold for hold targets, copper for sell-price conditions).
 

@@ -114,7 +114,7 @@ local function ProcessNextMail()
 
     if attached > 0 then
         for _, item in ipairs(items) do
-            print(string.format("|cff00ccffWild:|r  \226\156\137 %s \195\151%d", item.link or "?", item.count))
+            Wild.Print(string.format("|cff00ccffWild:|r  Mailing %s \195\151%d", item.link or "?", item.count))
         end
         local subject = "Wild: " .. attached .. " item(s)"
         SendMail(recipient, subject, "")

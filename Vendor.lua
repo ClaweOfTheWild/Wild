@@ -205,7 +205,7 @@ local function RunSellPass()
         -- Print final summary
         if sellFrame.soldCount > 0 then
             for _, entry in ipairs(sellFrame.soldEntries) do
-                print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
+                Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
             end
             print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
         end
@@ -222,7 +222,7 @@ local function RunSellPass()
         end
         if sellFrame.soldCount > 0 then
             for _, entry in ipairs(sellFrame.soldEntries) do
-                print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
+                Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
             end
             print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
         end
@@ -246,7 +246,7 @@ local function RunSellPass()
             -- Nothing sold in this batch (items vanished?) — done
             if sellFrame.soldCount > 0 then
                 for _, entry in ipairs(sellFrame.soldEntries) do
-                    print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
+                    Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
                 end
                 print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
             end

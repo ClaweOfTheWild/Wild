@@ -495,6 +495,20 @@ Wild.name = ADDON_NAME
 Wild.defaults = defaults
 
 -- ============================================================
+-- Public API — Chat output with item icons
+-- ============================================================
+
+local ITEM_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+function Wild.Print(message)
+    local formatted = message:gsub("(|Hitem:(%d+)[^|]*|h.-|h)", function(link, itemID)
+        local icon = C_Item.GetItemIconByID(tonumber(itemID)) or ITEM_ICON_FALLBACK
+        return "|T" .. icon .. ":0:0|t " .. link
+    end)
+    print(formatted)
+end
+
+-- ============================================================
 -- Dotted-key navigation helpers
 -- ============================================================
 

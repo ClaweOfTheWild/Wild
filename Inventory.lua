@@ -147,7 +147,7 @@ destroyBtn:SetScript("OnClick", function()
         C_Container.PickupContainerItem(item.bag, item.slot)
         DeleteCursorItem()
         destroyQueueDoneCount = destroyQueueDoneCount + 1
-        print(string.format("|cff00ccffWild:|r Destroyed %s \195\151%d.", item.link or "?", item.count or 1))
+        Wild.Print(string.format("|cff00ccffWild:|r Destroyed %s \195\151%d.", item.link or "?", item.count or 1))
     end
     UpdateDestroyButton()
 end)

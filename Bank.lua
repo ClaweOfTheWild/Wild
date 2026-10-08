@@ -517,31 +517,31 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                 elseif reservoir == "guild" then
                     DepositGuildBankMoney(depositCopper)
                 end
-                print(prefix .. "Deposited " .. Wild.FormatGold(depositCopper) .. ".")
+                Wild.Print(prefix .. "Deposited " .. Wild.FormatGold(depositCopper) .. ".")
             elseif currentCopper < keepCopper then
                 local withdrawCopper = keepCopper - currentCopper
                 if reservoir == "warband" and triggerSource == "warband" then
                     local bankCopper = C_Bank.FetchDepositedMoney(Enum.BankType.Account) or 0
                     BlogMsg("Warband bank gold: " .. Wild.FormatGold(bankCopper) .. " — need to withdraw: " .. Wild.FormatGold(withdrawCopper))
                     if bankCopper <= 0 then
-                        print(prefix .. "|cff888888Warband bank has no gold to withdraw.|r [" .. summary .. "]")
+                        Wild.Print(prefix .. "|cff888888Warband bank has no gold to withdraw.|r [" .. summary .. "]")
                     else
                         if withdrawCopper > bankCopper then
                             withdrawCopper = bankCopper
                         end
                         C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
-                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                        Wild.Print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
                     end
                 elseif reservoir == "guild" and triggerSource == "guild" then
                     local bankCopper = GetGuildBankMoney and GetGuildBankMoney() or 0
                     if bankCopper <= 0 then
-                        print(prefix .. "|cff888888Guild bank has no gold to withdraw.|r [" .. summary .. "]")
+                        Wild.Print(prefix .. "|cff888888Guild bank has no gold to withdraw.|r [" .. summary .. "]")
                     else
                         if withdrawCopper > bankCopper then
                             withdrawCopper = bankCopper
                         end
                         WithdrawGuildBankMoney(withdrawCopper)
-                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
+                        Wild.Print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
                     end
                 else
                     BlogMsg("Gold deficit but trigger source (" .. tostring(triggerSource) .. ") != reservoir (" .. reservoir .. ") — skipping withdraw.")
@@ -564,19 +564,19 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                         local count, entries = withdrawFunc(subIntent, charCtx, deficit)
                         if count > 0 then
                             for _, entry in ipairs(entries) do
-                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                                Wild.Print(string.format("|cff00ccffWild:|r  Withdrew %s \195\151%d", entry.link or "?", entry.count))
                             end
                             if passNum == 1 then
-                                print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                                Wild.Print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
                             end
                             movedItems = true
                         else
                             if passNum == 1 then
-                                print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
+                                Wild.Print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
                             end
                         end
                     else
-                        print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
+                        Wild.Print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
                     end
                 elseif current > keep then
                     local excess = current - keep
@@ -584,15 +584,15 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                     local count, entries = DepositFromBags(subIntent, charCtx, excess, bankType)
                     if count > 0 then
                         for _, entry in ipairs(entries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
+                            Wild.Print(string.format("|cff00ccffWild:|r  Deposited %s \195\151%d", entry.link or "?", entry.count))
                         end
                         if passNum == 1 then
-                            print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
+                            Wild.Print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
                         end
                         movedItems = true
                     else
                         if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
+                            Wild.Print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
                         end
                     end
                 else
@@ -622,20 +622,20 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                 local count, entries = DepositFromBags(subIntent, charCtx, maxDeposit, bankType)
                 if count > 0 then
                     for _, entry in ipairs(entries) do
-                        print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
+                        Wild.Print(string.format("|cff00ccffWild:|r  Deposited %s \195\151%d", entry.link or "?", entry.count))
                     end
                     if passNum == 1 then
-                        print(prefix .. string.format("Deposited %d item(s). [%s]", count, summary))
+                        Wild.Print(prefix .. string.format("Deposited %d item(s). [%s]", count, summary))
                     end
                     movedItems = true
                 else
                     if passNum == 1 then
-                        print(prefix .. "|cff888888No matching items in bags.|r [" .. summary .. "]")
+                        Wild.Print(prefix .. "|cff888888No matching items in bags.|r [" .. summary .. "]")
                     end
                 end
             else
                 if passNum == 1 then
-                    print(prefix .. "|cff888888Keeping all (have " .. Wild.CountMatchingInBags(subIntent, charCtx) .. ", keep " .. keep .. ").|r [" .. summary .. "]")
+                    Wild.Print(prefix .. "|cff888888Keeping all (have " .. Wild.CountMatchingInBags(subIntent, charCtx) .. ", keep " .. keep .. ").|r [" .. summary .. "]")
                 end
             end
         end
@@ -651,15 +651,15 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                     local count, entries = withdrawFunc(subIntent, charCtx, 0)
                     if count > 0 then
                         for _, entry in ipairs(entries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                            Wild.Print(string.format("|cff00ccffWild:|r  Withdrew %s \195\151%d", entry.link or "?", entry.count))
                         end
                         if passNum == 1 then
-                            print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
+                            Wild.Print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
                         end
                         movedItems = true
                     else
                         if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
+                            Wild.Print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
                         end
                     end
                 else
@@ -670,26 +670,26 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                         local count, entries = withdrawFunc(subIntent, charCtx, excess)
                         if count > 0 then
                             for _, entry in ipairs(entries) do
-                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                                Wild.Print(string.format("|cff00ccffWild:|r  Withdrew %s \195\151%d", entry.link or "?", entry.count))
                             end
                             if passNum == 1 then
-                                print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
+                                Wild.Print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
                             end
                             movedItems = true
                         else
                             if passNum == 1 then
-                                print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
+                                Wild.Print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
                             end
                         end
                     else
                         if passNum == 1 then
-                            print(prefix .. "|cff888888Keeping all (" .. bankCount .. " in bank, keep " .. keep .. ").|r [" .. summary .. "]")
+                            Wild.Print(prefix .. "|cff888888Keeping all (" .. bankCount .. " in bank, keep " .. keep .. ").|r [" .. summary .. "]")
                         end
                     end
                 end
             end
         else
-            print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(bankTarget) .. "|r")
+            Wild.Print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(bankTarget) .. "|r")
         end
 
     elseif intent.action == "transfer" then
@@ -716,23 +716,23 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
                     local wCount, wEntries = withdrawFunc(subIntent, charCtx, neededCount)
                     if wCount > 0 then
                         for _, entry in ipairs(wEntries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
+                            Wild.Print(string.format("|cff00ccffWild:|r  Withdrew %s \195\151%d", entry.link or "?", entry.count))
                         end
                         movedItems = true
                         intent._transferPending = { count = wCount, bankType = bankType, summary = summary, prefix = prefix }
                     else
                         if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in source bank.|r [" .. summary .. "]")
+                            Wild.Print(prefix .. "|cff888888No matching items in source bank.|r [" .. summary .. "]")
                         end
                     end
                 else
                     if passNum == 1 then
-                        print(prefix .. "|cff888888Keeping all in source bank.|r [" .. summary .. "]")
+                        Wild.Print(prefix .. "|cff888888Keeping all in source bank.|r [" .. summary .. "]")
                     end
                 end
             end
         else
-            print(prefix .. "|cffff6600No withdraw function for source: " .. tostring(source) .. "|r")
+            Wild.Print(prefix .. "|cffff6600No withdraw function for source: " .. tostring(source) .. "|r")
         end
     end
 
@@ -751,10 +751,10 @@ local function ExecuteTransferDeposit(intent, charCtx)
     local dCount, dEntries = DepositFromBags(intent, charCtx, tp.count, tp.bankType)
     if dCount > 0 then
         for _, entry in ipairs(dEntries) do
-            print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
+            Wild.Print(string.format("|cff00ccffWild:|r  Deposited %s \195\151%d", entry.link or "?", entry.count))
         end
     end
-    print(tp.prefix .. string.format("Transferred %d item(s). [%s]", tp.count, tp.summary))
+    Wild.Print(tp.prefix .. string.format("Transferred %d item(s). [%s]", tp.count, tp.summary))
     return dCount > 0
 end
 
@@ -923,7 +923,7 @@ local function ProcessIntents(accessibleSources)
         return
     end
 
-    print(string.format("|cff00ccffWild:|r Processing %d intent(s)...", #queue))
+    Wild.Print(string.format("|cff00ccffWild:|r Processing %d intent(s)...", #queue))
 
     activeQueue = queue
     activeIndex = 1
@@ -976,7 +976,7 @@ local function OnBankOpened()
                     end
                 end
                 if reagentCount > 0 then
-                    print(string.format("|cff00ccffWild:|r [Warband] Depositing %d reagent(s).", reagentCount))
+                    Wild.Print(string.format("|cff00ccffWild:|r [Warband] Depositing %d reagent(s).", reagentCount))
                 end
             end)
         end
