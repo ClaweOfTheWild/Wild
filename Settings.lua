@@ -3867,8 +3867,8 @@ local function CreateIntentRulesTab()
     UIDropDownMenu_SetWidth(ceTrackDD, 140)
 
     UIDropDownMenu_Initialize(ceTrackDD, function()
-        -- Build sorted list by track rank (ascending), skip 0=None
-        for rank = 1, 6 do
+        -- Build sorted list by track rank (ascending), including 0=None.
+        for rank = 0, 6 do
             local name = Wild.UPGRADE_TRACK_NAMES[rank]
             if name then
                 local info = UIDropDownMenu_CreateInfo()
