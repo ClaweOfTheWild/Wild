@@ -150,7 +150,7 @@ local function BuildSellBatch()
                             end
                         end
                         if shouldSell then
-                            local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(info.itemID)
+                            local sellPrice = Wild.GetEffectiveSellPrice(info.itemID, info)
                             if sellPrice and sellPrice > 0 then
                                 pending[#pending + 1] = {
                                     bag = bag,

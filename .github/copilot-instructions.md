@@ -62,6 +62,7 @@ Condition evaluation lives in `Conditions.lua` and is shared across all processo
 - Items are sold one-per-tick via an `OnUpdate` frame (0.2s interval) to avoid server throttling.
 - After each sell batch completes, `BAG_UPDATE_DELAYED` triggers a re-scan.
 - Item data is pre-loaded via `Item:ContinueOnItemLoad` before the first scan.
+- Vendor sale amounts use `Wild.GetEffectiveSellPrice(itemID, containerInfo)`, shared with price conditions and tooltips. It reads `Enum.TooltipDataLineType.SellPrice` lines and their `price` field, converts bag-stack totals to per-item copper, and preserves the full item hyperlink in fallbacks. Multiply this unit price by the sold stack count exactly once.
 
 ### Mail-Specific Behaviour
 

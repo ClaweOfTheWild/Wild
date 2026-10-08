@@ -15,9 +15,13 @@ local function NewEnvironment()
         frames = {}, messages = {}, logs = {}, timers = {}, calls = {},
         colorblind = false, symbols = { "g", "s", "c" },
         price = 225839, money = 500000, bankMoney = 500000, items = {},
+        slotPrices = {}, hyperlinkPrices = {}, linkPrices = {}, sold = {}, destroyed = {},
     }
     local env = setmetatable({
-        Enum = { BagIndex = {}, BankType = { Account = 2 }, PlayerInteractionType = {} },
+        Enum = {
+            BagIndex = {}, BankType = { Account = 2 }, PlayerInteractionType = {},
+            TooltipDataLineType = { SellPrice = 11 },
+        },
         BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
         tremove = table.remove,
         print = function(message) state.messages[#state.messages + 1] = message end,
@@ -38,13 +42,32 @@ local function NewEnvironment()
         CanGuildBankRepair = function() return true end,
         MerchantFrame = { IsShown = function() return true end },
         C_Timer = { After = function(_, callback) state.timers[#state.timers + 1] = callback end },
-        C_Item = { GetItemInfo = function()
-            return "Item", "item:1", 3, 1, 1, nil, nil, 1, "", nil, state.price
+        C_Item = { GetItemInfo = function(source)
+            local price = state.linkPrices[source]
+            if price == nil then price = state.price end
+            return "Item", "item:1", 3, 1, 1, nil, nil, 1, "", nil, price
         end },
+        C_TooltipInfo = {
+            GetBagItem = function(_, slot)
+                local price = state.slotPrices[slot]
+                if price ~= nil then return { lines = { { type = 11, price = price } } } end
+            end,
+            GetHyperlink = function(link)
+                local price = state.hyperlinkPrices[link]
+                if price ~= nil then return { lines = { { type = 11, price = price } } } end
+            end,
+        },
         C_Container = {
             GetContainerNumSlots = function() return #state.items end,
             GetContainerItemInfo = function(_, slot) return state.items[slot] end,
-            UseContainerItem = function(_, slot) state.items[slot] = false end,
+            UseContainerItem = function(_, slot)
+                local info = state.items[slot]
+                local amount = state.slotPrices[slot]
+                if amount == nil then amount = state.price * (info.stackCount or 1) end
+                state.money = state.money + amount
+                state.sold[#state.sold + 1] = info.itemID
+                state.items[slot] = false
+            end,
         },
         Item = { CreateFromItemID = function()
             return { IsItemDataCached = function() return true end }
@@ -92,7 +115,8 @@ local function NewEnvironment()
         return table.concat(parts, " ")
     end
     Wild.Log = function(_, message) state.logs[#state.logs + 1] = message end
-    Wild.GetEffectiveSellPrice = function() return state.price end
+    Wild.QueueDestroyItems = function(items) state.destroyed = items end
+    setfenv(assert(loadfile("Core.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Bank.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Vendor.lua")), env)("Wild", Wild)
@@ -218,6 +242,102 @@ local tests = {
             HasMessage("Sold item:1 \195\1512 for " .. money)
             HasMessage("Auto-sold 2 item(s) for " .. money .. ".")
         end
+    end },
+    { "the screenshot item uses its 86 silver 97 copper tooltip price instead of 33 copper", function()
+        for _, colorblind in ipairs({ false, true }) do
+            local Wild, state, env, Fire, RunTimers, Tick, HasMessage = NewEnvironment()
+            state.colorblind, state.price = colorblind, 33
+            state.items = { { itemID = 1, hyperlink = "item:1", stackCount = 1 } }
+            state.slotPrices[1] = 8697
+            Wild.db.intents = { { action = "sell", groups = {
+                { kind = "items", conditions = { { attr = "item.id", op = "=", value = 1 } } },
+            } } }
+            Equal(Wild.GetEffectiveSellPrice(1, { bag = 0, slot = 1, stackCount = 1 }), 8697)
+            Fire("MERCHANT_SHOW")
+            RunTimers()
+            Tick(); Tick()
+            Fire("BAG_UPDATE_DELAYED")
+            RunTimers()
+            local money = env.GetMoneyString(8697, true)
+            Equal(state.money - 500000, 8697)
+            HasMessage("Sold item:1 \195\1511 for " .. money)
+            HasMessage("Auto-sold 1 item(s) for " .. money .. ".")
+        end
+    end },
+    { "stack tooltip prices are divided once and sale totals match the gold received", function()
+        local Wild, state, env, Fire, RunTimers, Tick, HasMessage = NewEnvironment()
+        state.price = 33
+        state.items = {
+            { itemID = 1, hyperlink = "item:1", stackCount = 2 },
+            { itemID = 1, hyperlink = "item:1", stackCount = 3 },
+        }
+        state.slotPrices[1], state.slotPrices[2] = 8697 * 2, 12345 * 3
+        Equal(Wild.GetEffectiveSellPrice(1, { bag = 0, slot = 1, stackCount = 2 }), 8697)
+        Equal(Wild.GetEffectiveSellPrice(1, { bag = 0, slot = 2 }), 12345)
+        Wild.db.intents = { { action = "sell", groups = {
+            { kind = "items", conditions = { { attr = "item.id", op = "=", value = 1 } } },
+        } } }
+        Fire("MERCHANT_SHOW")
+        RunTimers()
+        Tick(); Tick(); Tick()
+        Fire("BAG_UPDATE_DELAYED")
+        RunTimers()
+        Equal(state.money - 500000, 8697 * 2 + 12345 * 3)
+        HasMessage("Sold item:1 \195\1512 for " .. env.GetMoneyString(8697 * 2, true))
+        HasMessage("Sold item:1 \195\1513 for " .. env.GetMoneyString(12345 * 3, true))
+        HasMessage("Auto-sold 5 item(s) for " .. env.GetMoneyString(state.money - 500000, true) .. ".")
+    end },
+    { "effective vendor prices also drive sell-price rules and tooltips", function()
+        local Wild, state, env = NewEnvironment()
+        state.price = 33
+        state.items = { { itemID = 1, hyperlink = "item:1", stackCount = 2, bag = 0, slot = 1 } }
+        state.slotPrices[1] = 8697 * 2
+        local info = state.items[1]
+        Equal(Wild.EvaluateCondition({ attr = "item.sellprice", op = ">=", value = 8000 }, 1, info, {}), true)
+        Equal(Wild.EvaluateCondition({ attr = "item.sellprice", op = ">", value = 9000 }, 1, info, {}), false)
+        for _, line in ipairs(Wild.TOOLTIP_LINES) do
+            if line.key == "sellPrice" then
+                Equal(line.resolve(1, info), "Sell Price: " .. env.GetMoneyString(8697, true))
+            end
+        end
+    end },
+    { "hyperlink tooltip and item-info fallbacks preserve item variants", function()
+        local Wild, state, env = NewEnvironment()
+        state.price = 33
+        local info = { hyperlink = "item:1:variant", stackCount = 5 }
+        state.hyperlinkPrices[info.hyperlink] = 8697
+        Equal(Wild.GetEffectiveSellPrice(1, info), 8697)
+        state.hyperlinkPrices[info.hyperlink] = nil
+        state.linkPrices[info.hyperlink] = 8697
+        Equal(Wild.GetEffectiveSellPrice(1, info), 8697)
+        env.C_TooltipInfo = nil
+        Equal(Wild.GetEffectiveSellPrice(1, info), 8697)
+        Equal(Wild.GetEffectiveSellPrice(1), 33)
+    end },
+    { "a tooltip price of zero is authoritative rather than falling back to the base price", function()
+        local Wild, state = NewEnvironment()
+        state.items = { { itemID = 1, hyperlink = "item:1", stackCount = 2 } }
+        state.slotPrices[1] = 0
+        Equal(Wild.GetEffectiveSellPrice(1, { bag = 0, slot = 1, stackCount = 2 }), 0)
+        state.hyperlinkPrices["item:1"] = 0
+        Equal(Wild.GetEffectiveSellPrice(1, { hyperlink = "item:1" }), 0)
+    end },
+    { "a sellable tooltip price is not sent for destruction when the base price is zero", function()
+        local Wild, state, env, Fire, RunTimers, Tick, HasMessage = NewEnvironment()
+        state.price = 0
+        state.items = { { itemID = 1, hyperlink = "item:1", stackCount = 1 } }
+        state.slotPrices[1] = 8697
+        Wild.db.intents = { { action = "sell", destroyUnsellable = true, groups = {
+            { kind = "items", conditions = { { attr = "item.id", op = "=", value = 1 } } },
+        } } }
+        Fire("MERCHANT_SHOW")
+        RunTimers()
+        Tick(); Tick()
+        Fire("BAG_UPDATE_DELAYED")
+        RunTimers()
+        Equal(#state.sold, 1)
+        Equal(#state.destroyed, 0)
+        HasMessage("Auto-sold 1 item(s) for " .. env.GetMoneyString(8697, true) .. ".")
     end },
     { "personal and guild repair messages use the shared money formatter", function()
         for _, colorblind in ipairs({ false, true }) do

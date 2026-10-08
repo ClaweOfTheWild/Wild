@@ -559,33 +559,41 @@ Wild.FEATURES = FEATURES
 
 -- ============================================================
 -- Public API — Effective sell price
--- Uses C_TooltipInfo to get the real vendor price (accounts for
--- upgrades / bonus IDs) and falls back to GetItemInfo base price.
+-- Returns per-item copper using the native tooltip sell-price line.
 -- ============================================================
 
+local function GetTooltipSellPrice(data)
+    if not data then return nil end
+    if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
+    for _, line in ipairs(data.lines or {}) do
+        if line.type == Enum.TooltipDataLineType.SellPrice and line.price ~= nil then
+            return line.price
+        end
+    end
+end
+
 function Wild.GetEffectiveSellPrice(itemID, containerInfo)
-    -- 1) Tooltip money from bag item (most accurate, includes upgrade scaling)
     if containerInfo and containerInfo.bag and containerInfo.slot
        and C_TooltipInfo and C_TooltipInfo.GetBagItem then
-        local data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
-        if data then
-            if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
-            if data.money then return data.money end
+        local price = GetTooltipSellPrice(C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot))
+        if price ~= nil then
+            -- Bag tooltips price the whole stack; callers expect a unit price.
+            local count = containerInfo.stackCount
+            if not count then
+                local info = C_Container.GetContainerItemInfo(containerInfo.bag, containerInfo.slot)
+                count = info and info.stackCount
+            end
+            if count and count > 0 then return price / count end
         end
     end
 
-    -- 2) Tooltip money from hyperlink (works outside bags)
     local link = containerInfo and containerInfo.hyperlink
     if link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
-        local data = C_TooltipInfo.GetHyperlink(link)
-        if data then
-            if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
-            if data.money then return data.money end
-        end
+        local price = GetTooltipSellPrice(C_TooltipInfo.GetHyperlink(link))
+        if price ~= nil then return price end
     end
 
-    -- 3) Fallback: GetItemInfo base sell price
-    local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(itemID)
+    local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(link or itemID)
     return sellPrice or 0
 end
 
