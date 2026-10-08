@@ -135,6 +135,9 @@ Wild.GetFilterRules()        -- Returns the rules table
 Wild.GetSetting(key)
 Wild.SetSetting(key, value)
 Wild.ResetSettings()
+
+-- Money display (amount in copper; follows WoW's colorblind setting)
+Wild.FormatGold(copper)
 ```
 
 ## Adding a New Feature
@@ -157,6 +160,7 @@ Wild.ResetSettings()
 - Dark backdrop with subtle borders. Refer to existing panels for colour values.
 - Addon chat prefix: `|cff00ccffWild:|r` (info), `|cffff6600Wild:|r` (warning/error).
 - `PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON/OFF)` on checkbox toggles.
+- Format money amounts with `Wild.FormatGold(copper)`, which delegates to WoW's `GetMoneyString` with thousands separators. Native coin icons are used when colorblind mode is off; localized denomination text is used when it is on. Do not cache the formatted result or add a separate addon setting. Rule inputs still use their documented units (gold for hold targets, copper for sell-price conditions).
 
 ## Code Style
 

@@ -55,10 +55,7 @@ local TOOLTIP_LINES = {
         resolve = function(itemID, containerInfo)
             local sellPrice = Wild.GetEffectiveSellPrice(itemID, containerInfo)
             if not sellPrice or sellPrice == 0 then return "Sell Price: None" end
-            local gold = math.floor(sellPrice / 10000)
-            local silver = math.floor((sellPrice % 10000) / 100)
-            local copper = sellPrice % 100
-            return string.format("Sell Price: %dg %ds %dc  |cff888888(%d copper)|r", gold, silver, copper, sellPrice)
+            return "Sell Price: " .. Wild.FormatGold(sellPrice)
         end,
     },
     {

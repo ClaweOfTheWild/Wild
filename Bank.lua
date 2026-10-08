@@ -503,12 +503,12 @@ local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queue
         -- Phase 1: Gold sync (atomic, one pass) from gold-kind groups
         local goldTarget = Wild.GetIntentGoldTarget(intent)
         BlogMsg(string.format("Hold phase 1: goldTarget=%s reservoir=%s trigger=%s groups=%d",
-            tostring(goldTarget), tostring(reservoir), tostring(triggerSource), #(intent.groups or {})))
+            Wild.FormatGold(goldTarget * Wild.COPPER_PER_GOLD), tostring(reservoir), tostring(triggerSource), #(intent.groups or {})))
         if goldTarget > 0 and reservoir ~= "character" then
             local currentCopper = GetMoney()
             local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
-            BlogMsg(string.format("Gold sync: target=%dg current=%s keep=%s reservoir=%s trigger=%s",
-                goldTarget, Wild.FormatGold(currentCopper), Wild.FormatGold(keepCopper), tostring(reservoir), tostring(triggerSource)))
+            BlogMsg(string.format("Gold sync: target=%s current=%s keep=%s reservoir=%s trigger=%s",
+                Wild.FormatGold(keepCopper), Wild.FormatGold(currentCopper), Wild.FormatGold(keepCopper), tostring(reservoir), tostring(triggerSource)))
 
             if currentCopper > keepCopper then
                 local depositCopper = currentCopper - keepCopper

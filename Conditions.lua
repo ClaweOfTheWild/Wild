@@ -642,7 +642,9 @@ local function FormatConditionValue(cond, attrDef)
     end
 
     local vt = attrDef and attrDef.valueType
-    if vt == "id" then
+    if attrDef and attrDef.key == "item.sellprice" and type(cond.value) == "number" and cond.value >= 0 then
+        return Wild.FormatGold(cond.value)
+    elseif vt == "id" then
         local _, link = C_Item.GetItemInfo(cond.value)
         return link or tostring(cond.value)
     elseif vt == "quality" then
@@ -685,7 +687,9 @@ end
 local function FormatActualValue(left, attrDef)
     if left == nil then return "|cff888888nil|r" end
     local vt = attrDef and attrDef.valueType
-    if vt == "quality" then
+    if attrDef and attrDef.key == "item.sellprice" and type(left) == "number" and left >= 0 then
+        return Wild.FormatGold(left)
+    elseif vt == "quality" then
         return (QUALITY_NAMES[left] or tostring(left)) .. " (" .. tostring(left) .. ")"
     elseif vt == "upgradetrack" then
         return (UPGRADE_TRACK_NAMES[left] or tostring(left)) .. " (" .. tostring(left) .. ")"
@@ -1359,7 +1363,7 @@ local function GetIntentSummary(intent)
         for _, group in ipairs(groups) do
             if group.mode ~= "exclude" then
                 if group.kind == "gold" and (group.gold or 0) > 0 then
-                    holdParts[#holdParts + 1] = string.format("%dg", group.gold)
+                    holdParts[#holdParts + 1] = Wild.FormatGold(group.gold * COPPER_PER_GOLD)
                 elseif group.kind == "item" and group.itemID then
                     local itemName = C_Item.GetItemInfo(group.itemID) or ("Item:" .. group.itemID)
                     holdParts[#holdParts + 1] = (group.count or 0) .. " " .. itemName
@@ -1528,10 +1532,7 @@ end
 -- ============================================================
 
 local function FormatGold(copper)
-    local gold = math.floor(copper / COPPER_PER_GOLD)
-    local silver = math.floor((copper % COPPER_PER_GOLD) / 100)
-    local copperRem = copper % 100
-    return string.format("%dg %ds %dc", gold, silver, copperRem)
+    return GetMoneyString(copper, true)
 end
 
 -- ============================================================
