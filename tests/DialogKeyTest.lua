@@ -27,10 +27,11 @@ local function NewEnvironment(saved)
     function methods:Hide() self.shown = false; self:RunScript("OnHide") end
     function methods:IsVisible()
         assert(not self.forbidden, "Cannot inspect a forbidden frame")
-        return self.shown
+        return self.shown and (not self.parent or not self.parent.IsVisible or self.parent:IsVisible())
     end
     function methods:IsShown() return self.shown end
     function methods:IsForbidden() return self.forbidden or false end
+    function methods:IsProtected() return self.protected or false end
     function methods:IsEnabled() return self.enabled ~= false end
     function methods:GetName() return self.name end
     function methods:SetFrameStrata(value) self.strata = value end
@@ -69,6 +70,8 @@ local function NewEnvironment(saved)
         assert(state.hardware, "Popup click must originate from a hardware event in this test")
         if not self:IsEnabled() then return end
         state.clicks = state.clicks + 1
+        state.lastButton = self
+        state.lastClickNative = state.bindingDispatch or false
         if self.parent.requiresDelete then state.deletes = state.deletes + 1 end
         if self.onClick then self.onClick() else self.parent:Hide() end
         self:RunScript("OnClick")
@@ -181,10 +184,48 @@ local function NewEnvironment(saved)
             (state.modifiers.SHIFT and "SHIFT-" or "") .. key
         if not state.focus then
             for _, binding in pairs(state.bindings) do
-                if binding.key == fullKey then env[binding.name]:Click() end
+                if binding.key == fullKey then
+                    state.bindingDispatch = true
+                    env[binding.name]:Click()
+                    state.bindingDispatch = false
+                end
             end
         end
         state.hardware = false
+    end
+    local function NativePopup(name, options)
+        options = options or {}
+        local popup = env.CreateFrame("Frame", name)
+        popup.top = options.top or 500
+        popup.forbidden = options.forbidden
+        local dialog, buttonName = popup
+        if name == "LFGDungeonReadyPopup" then
+            popup.special = true
+            dialog = env.CreateFrame("Frame", "LFGDungeonReadyDialog", popup)
+            buttonName = "LFGDungeonReadyDialogEnterDungeonButton"
+        elseif name == "LFGInvitePopup" then
+            popup.special = true
+            buttonName = "LFGInvitePopupAcceptButton"
+        else
+            Equal(name, "DelvesDifficultyPickerFrame")
+            dialog.selectedTier = options.tier or 8
+            if options.named then buttonName = "TestNamedDelveButton" end
+        end
+        local button = env.CreateFrame("Button", buttonName, dialog)
+        button.enabled = options.enabled ~= false
+        button.protected = options.protected
+        if name == "LFGDungeonReadyPopup" then
+            dialog.enterButton = button
+        elseif name == "DelvesDifficultyPickerFrame" then
+            popup.EnterDelveButton = button
+        end
+        button.onClick = function()
+            state.confirmedPopup = name
+            if name == "DelvesDifficultyPickerFrame" then state.enteredTier = dialog.selectedTier end
+            popup:Hide()
+        end
+        if popup.special then popups[#popups + 1] = popup end
+        return popup, button, dialog
     end
     local function Panel()
         Load("Settings.lua")
@@ -208,7 +249,7 @@ local function NewEnvironment(saved)
         end
         return panel, controls
     end
-    return Wild, state, Popup, Key, Fire, env, messages, Panel
+    return Wild, state, Popup, Key, Fire, env, messages, Panel, NativePopup
 end
 
 local tests = {
@@ -548,6 +589,219 @@ local tests = {
             Equal(state.clicks, 0)
             Equal(popup.editBox.text, "")
         end
+    end },
+    { "queue proposals and role checks use their native accept button", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup" }) do
+            local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+            Wild.SetFeatureEnabled("dialog", true)
+            local popup, button = NativePopup(name)
+            Equal(state.clicks, 0)
+            Equal(next(state.bindings), nil)
+            Key("SPACE")
+            Equal(state.clicks, 1)
+            Equal(state.lastButton, button)
+            Equal(state.lastClickNative, true)
+            Equal(state.confirmedPopup, name)
+            Equal(popup.shown, false)
+            Equal(next(state.bindings), nil)
+            Key("SPACE")
+            Equal(state.clicks, 1)
+        end
+    end },
+    { "delve entry clicks the unnamed Blizzard button with the selected tier", function()
+        local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        local popup, button = NativePopup("DelvesDifficultyPickerFrame", { tier = 5 })
+        Equal(button:GetName(), nil)
+        Equal(state.clicks, 0)
+        Key("SPACE")
+        Equal(state.clicks, 1)
+        Equal(state.lastButton, button)
+        Equal(state.lastClickNative, false)
+        Equal(state.enteredTier, 5)
+        Equal(popup.selectedTier, 5)
+        Equal(state.receiver.propagate, false)
+        Equal(next(state.bindings), nil)
+        Key("SPACE")
+        Equal(state.clicks, 1)
+        Equal(state.receiver.propagate, true)
+    end },
+    { "native dialogs respect enablement and configured modifier chords", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+            NativePopup(name)
+            Key("SPACE")
+            Equal(state.clicks, 0)
+            Wild.SetDialogKey("ALT-F2")
+            Wild.SetFeatureEnabled("dialog", true)
+            Key("SPACE")
+            Key("F2")
+            Equal(state.clicks, 0)
+            Equal(state.receiver.propagate, true)
+            state.modifiers.ALT = true
+            Key("F2")
+            Equal(state.clicks, 1)
+        end
+    end },
+    { "native dialogs stay blocked during text entry, settings, and combat", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            local Wild, state, _, Key, Fire, env, _, _, NativePopup = NewEnvironment()
+            Wild.SetFeatureEnabled("dialog", true)
+            NativePopup(name)
+            state.focus = env.CreateFrame("EditBox")
+            Key("SPACE")
+            Equal(state.clicks, 0)
+            state.focus = nil
+            env.WildSettingsFrame = env.CreateFrame("Frame")
+            Key("SPACE")
+            Equal(state.clicks, 0)
+            env.WildSettingsFrame:Hide()
+            state.combat = true
+            Fire("PLAYER_REGEN_DISABLED")
+            Key("SPACE")
+            Equal(state.clicks, 0)
+            state.combat = false
+            Fire("PLAYER_REGEN_ENABLED")
+            Key("SPACE")
+            Equal(state.clicks, 1)
+        end
+    end },
+    { "disabled, hidden, and forbidden native dialogs are not confirmed", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            for _, field in ipairs({ "disabled", "hidden", "hiddenButton", "forbiddenPopup", "forbiddenButton" }) do
+                local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+                Wild.SetFeatureEnabled("dialog", true)
+                local popup, button = NativePopup(name)
+                if field == "disabled" then button.enabled = false
+                elseif field == "hidden" then popup:Hide()
+                elseif field == "hiddenButton" then button:Hide()
+                elseif field == "forbiddenPopup" then popup.forbidden = true
+                else button.forbidden = true end
+                Key("SPACE")
+                Equal(state.clicks, 0)
+                Equal(next(state.bindings), nil)
+                Equal(state.receiver.propagate, true)
+            end
+        end
+    end },
+    { "queue status does not accept a hidden or forbidden ready dialog", function()
+        for _, field in ipairs({ "hidden", "forbidden" }) do
+            local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+            Wild.SetFeatureEnabled("dialog", true)
+            local _, _, dialog = NativePopup("LFGDungeonReadyPopup")
+            if field == "hidden" then dialog:Hide() else dialog.forbidden = true end
+            Key("SPACE")
+            Equal(state.clicks, 0)
+            Equal(next(state.bindings), nil)
+        end
+    end },
+    { "native dialogs work when the popup enumerator is unavailable", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            local Wild, state, _, Key, _, env, _, _, NativePopup = NewEnvironment()
+            env.StaticPopup_ForEachShownDialog = false
+            Wild.SetFeatureEnabled("dialog", true)
+            NativePopup(name)
+            Key("SPACE")
+            Equal(state.clicks, 1)
+        end
+    end },
+    { "frontmost standard popups keep priority over native dialogs", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            for _, options in ipairs({ {}, { enabled = false }, { special = true }, { forbidden = true } }) do
+                local Wild, state, Popup, Key, _, _, _, _, NativePopup = NewEnvironment()
+                Wild.SetFeatureEnabled("dialog", true)
+                local native = NativePopup(name, { top = 400 })
+                options.top = 600
+                local standard = Popup("FRONT_CONFIRM", options)
+                Key("SPACE")
+                Equal(native.shown, true)
+                Equal(state.clicks, not options.special and not options.forbidden and
+                    options.enabled ~= false and 1 or 0)
+                if not options.special and not options.forbidden and options.enabled ~= false then
+                    Equal(state.lastButton, standard.button)
+                end
+            end
+        end
+    end },
+    { "disabled frontmost native dialogs never confirm a dialog behind them", function()
+        local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        local delve = NativePopup("DelvesDifficultyPickerFrame", { top = 400 })
+        NativePopup("LFGDungeonReadyPopup", { top = 600, enabled = false })
+        Key("SPACE")
+        Equal(state.clicks, 0)
+        Equal(delve.shown, true)
+    end },
+    { "unnamed protected delve buttons are never clicked directly", function()
+        local Wild, state, _, Key, _, _, messages, _, NativePopup = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        NativePopup("DelvesDifficultyPickerFrame", { protected = true })
+        Key("SPACE")
+        Equal(state.clicks, 0)
+        Equal(state.receiver.propagate, true)
+        Equal(#messages, 1)
+    end },
+    { "the public confirmation API supports queue and delve entry buttons", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup", "DelvesDifficultyPickerFrame" }) do
+            local Wild, state, _, _, _, _, _, _, NativePopup = NewEnvironment()
+            local _, button = NativePopup(name)
+            Equal(Wild.ConfirmDialog(), false)
+            Wild.SetFeatureEnabled("dialog", true)
+            state.hardware = true
+            Equal(Wild.ConfirmDialog(), true)
+            Equal(state.lastButton, button)
+            Equal(state.confirmedPopup, name)
+            Equal(state.clicks, 1)
+            state.hardware = false
+        end
+    end },
+    { "key release restores propagation after direct delve confirmation", function()
+        for _, key in ipairs({ "SPACE", "W" }) do
+            local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+            Wild.SetFeatureEnabled("dialog", true)
+            NativePopup("DelvesDifficultyPickerFrame")
+            Key("SPACE")
+            Equal(state.receiver.propagate, false)
+            state.receiver:RunScript("OnKeyUp", key)
+            Equal(state.receiver.propagate, true)
+            Equal(state.clicks, 1)
+        end
+    end },
+    { "updating the dialog key resets propagation without changing it in combat", function()
+        local Wild, state, _, Key, Fire, _, _, _, NativePopup = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        NativePopup("DelvesDifficultyPickerFrame")
+        Key("SPACE")
+        Equal(state.receiver.propagate, false)
+        state.combat = true
+        Fire("PLAYER_REGEN_DISABLED")
+        state.receiver:RunScript("OnKeyUp", "SPACE")
+        Equal(state.receiver.shown, false)
+        state.combat = false
+        Fire("PLAYER_REGEN_ENABLED")
+        Equal(state.receiver.propagate, true)
+    end },
+    { "hiding a queue confirmation clears a pending native binding", function()
+        for _, name in ipairs({ "LFGDungeonReadyPopup", "LFGInvitePopup" }) do
+            local Wild, state, _, _, _, _, _, _, NativePopup = NewEnvironment()
+            Wild.SetFeatureEnabled("dialog", true)
+            local _, _, dialog = NativePopup(name)
+            state.receiver:RunScript("OnKeyDown", "SPACE")
+            assert(next(state.bindings))
+            dialog:Hide()
+            Equal(next(state.bindings), nil)
+            Equal(state.clicks, 0)
+        end
+    end },
+    { "named delve buttons use native bindings instead of direct clicks", function()
+        local Wild, state, _, Key, _, _, _, _, NativePopup = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        local _, button = NativePopup("DelvesDifficultyPickerFrame", { named = true, protected = true })
+        Key("SPACE")
+        Equal(state.lastButton, button)
+        Equal(state.lastClickNative, true)
+        Equal(state.clicks, 1)
+        Equal(state.receiver.propagate, true)
     end },
 }
 

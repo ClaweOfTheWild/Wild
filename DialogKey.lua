@@ -1,4 +1,4 @@
--- Wild: Player-triggered keyboard confirmation for standard popups
+-- Wild: Player-triggered keyboard confirmation for popups, queues, and delves
 local ADDON_NAME, Wild = ...
 
 local DELETE_POPUPS = {
@@ -11,6 +11,11 @@ local EXCLUDED_POPUPS = {
     ADDON_ACTION_FORBIDDEN = true,
     ADDON_ACTION_BLOCKED = true,
     TOO_MANY_LUA_ERRORS = true,
+}
+local CUSTOM_POPUPS = {
+    "LFGDungeonReadyPopup",
+    "LFGInvitePopup",
+    "DelvesDifficultyPickerFrame",
 }
 local MODIFIER_KEYS = {
     LCTRL = true, RCTRL = true, LALT = true, RALT = true,
@@ -95,6 +100,7 @@ function Wild.UpdateDialogKey()
     ClearBinding()
     local cfg = GetConfig()
     if cfg and cfg.enabled and not InCombatLockdown() then
+        receiver:SetPropagateKeyboardInput(true)
         receiver:Show()
     else
         receiver:Hide()
@@ -118,7 +124,31 @@ local function GetFrontPopup()
             if popup then Consider(popup) end
         end
     end
+    for _, name in ipairs(CUSTOM_POPUPS) do
+        local popup = _G[name]
+        if popup then Consider(popup) end
+    end
     if not forbidden then return front end
+end
+
+local function GetCustomTarget(popup)
+    local button
+    if popup == LFGDungeonReadyPopup then
+        popup = LFGDungeonReadyDialog
+        if not popup or popup:IsForbidden() or not popup:IsVisible() then return nil end
+        button = popup.enterButton or LFGDungeonReadyDialogEnterDungeonButton
+    elseif popup == LFGInvitePopup then
+        button = LFGInvitePopupAcceptButton
+    elseif popup == DelvesDifficultyPickerFrame then
+        button = popup.EnterDelveButton
+    end
+    if not button or button:IsForbidden() or not button:IsVisible() or not button:IsEnabled() then return nil end
+    local directClick = popup == DelvesDifficultyPickerFrame and not button:GetName()
+    if directClick and button:IsProtected() then
+        Warn("This popup has no named confirmation button; click it manually.")
+        return nil
+    end
+    return popup, button, nil, directClick
 end
 
 local function GetTarget()
@@ -126,7 +156,12 @@ local function GetTarget()
     if not cfg or not cfg.enabled or InCombatLockdown() then return nil end
     if WildSettingsFrame and WildSettingsFrame:IsShown() then return nil end
     local popup = GetFrontPopup()
-    if not popup or popup:IsForbidden() or popup.special then return nil end
+    if not popup or popup:IsForbidden() then return nil end
+    if popup == LFGDungeonReadyPopup or popup == LFGInvitePopup or popup == DelvesDifficultyPickerFrame then
+        if GetCurrentKeyBoardFocus() then return nil end
+        return GetCustomTarget(popup)
+    end
+    if popup.special then return nil end
     local info = popup.dialogInfo or StaticPopupDialogs[popup.which]
     if not info or info.ignoreKeys or info.editBoxSecureText or EXCLUDED_POPUPS[popup.which] then return nil end
     local destroy = DELETE_POPUPS[popup.which]
@@ -163,6 +198,7 @@ end
 
 receiver:SetScript("OnKeyDown", function(_, key)
     if InCombatLockdown() then return end
+    receiver:SetPropagateKeyboardInput(true)
     ClearBinding()
     local cfg = GetConfig()
     if not cfg or not cfg.enabled or MODIFIER_KEYS[key] then return end
@@ -170,8 +206,15 @@ receiver:SetScript("OnKeyDown", function(_, key)
         (IsAltKeyDown() and "ALT-" or "") ..
         (IsShiftKeyDown() and "SHIFT-" or "") .. key
     if pressed ~= cfg.key then return end
-    local popup, button, editBox = GetTarget()
+    local popup, button, editBox, directClick = GetTarget()
     if not popup then return end
+    if directClick then
+        if not PrepareConfirmation(popup, button, editBox) then return end
+        -- Blizzard's unnamed delve button is unprotected; consume the key instead of jumping.
+        receiver:SetPropagateKeyboardInput(false)
+        button:Click("LeftButton")
+        return
+    end
     local name = button:GetName()
     if not name then
         Warn("This popup has no named confirmation button; click it manually.")
@@ -191,6 +234,10 @@ receiver:SetScript("OnKeyDown", function(_, key)
     bindingActive = true
     -- Safety only: clear if the key is never released or the button does not dispatch.
     bindingTimeout = C_Timer.NewTimer(5, ClearBinding)
+end)
+
+receiver:SetScript("OnKeyUp", function()
+    if not InCombatLockdown() then receiver:SetPropagateKeyboardInput(true) end
 end)
 
 local events = CreateFrame("Frame")

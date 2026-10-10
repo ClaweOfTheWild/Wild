@@ -2424,12 +2424,12 @@ local function CreateDialogKeyTab()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Press a key to click Yes, Accept, or OK on the topmost standard confirmation popup. Nothing is accepted automatically. NPC gossip and quest windows are not changed.|r")
+    desc:SetText("|cff888888Press a key to confirm standard popups, queue and role checks, or delve entry. Nothing is accepted automatically. NPC gossip and quest windows are not changed.|r")
 
     local enabledCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
     enabledCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
     enabledCB.Text:SetText("Enable dialog key")
-    enabledCB.tooltipText = "Use your configured key to confirm standard popups outside combat."
+    enabledCB.tooltipText = "Use your configured key to confirm standard popups, queue and role checks, and delve entry outside combat."
     enabledCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked() and true or false
         Wild.SetFeatureEnabled("dialog", checked)
