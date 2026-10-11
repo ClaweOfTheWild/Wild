@@ -164,6 +164,8 @@ Wild.GetFilterRules()        -- Returns the rules table
 -- Settings
 Wild.GetSetting(key)
 Wild.SetSetting(key, value)
+Wild.GetDefaultSetting(key)      -- Returns a copy for table-valued defaults
+Wild.NotifySettingsChanged(key)  -- Notify both interfaces after direct table mutations
 Wild.ResetSettings()
 
 -- Money display (amount in copper; follows WoW's colorblind setting)

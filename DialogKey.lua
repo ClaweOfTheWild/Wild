@@ -81,7 +81,7 @@ local function NormalizeKey(value)
         (modifiers.SHIFT and "SHIFT-" or "") .. key
 end
 
-function Wild.SetDialogKey(key)
+function Wild.SetDialogKey(key, source)
     local normalized = NormalizeKey(key)
     if not normalized then
         Warn("Invalid dialog key. Use a keyboard key such as SPACE or CTRL-F2; Escape is reserved for cancel.")
@@ -93,6 +93,7 @@ function Wild.SetDialogKey(key)
     end
     Wild.db.dialogKey.key = normalized
     ClearBinding()
+    Wild.NotifySettingsChanged("dialogKey.key", source)
     return true
 end
 
@@ -154,7 +155,7 @@ end
 local function GetTarget()
     local cfg = GetConfig()
     if not cfg or not cfg.enabled or InCombatLockdown() then return nil end
-    if WildSettingsFrame and WildSettingsFrame:IsShown() then return nil end
+    if Wild.settingsVisible or (WildSettingsFrame and WildSettingsFrame:IsShown()) then return nil end
     local popup = GetFrontPopup()
     if not popup or popup:IsForbidden() then return nil end
     if popup == LFGDungeonReadyPopup or popup == LFGInvitePopup or popup == DelvesDifficultyPickerFrame then

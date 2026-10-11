@@ -97,7 +97,7 @@ local function GetGroupedCurrencies(mode)
 end
 
 -- Save which headers the user collapsed in the currency tab
-local function SaveCurrencyCollapseState(groups)
+local function SaveCurrencyCollapseState(groups, source)
     if not Wild.db then return end
     local saved = {}
     for _, g in ipairs(groups) do
@@ -105,7 +105,7 @@ local function SaveCurrencyCollapseState(groups)
             saved[g.headerName] = true
         end
     end
-    Wild.db.currencyCollapsedHeaders = saved
+    Wild.SetSetting("currencyCollapsedHeaders", saved, source)
 end
 
 -- Legacy convenience functions
@@ -131,4 +131,3 @@ Wild.GetAllCurrencies = GetAllCurrencies
 Wild.GetCurrentExpansionCurrencies = GetCurrentExpansionCurrencies
 Wild.GetGroupedCurrencies = GetGroupedCurrencies
 Wild.SaveCurrencyCollapseState = SaveCurrencyCollapseState
-

@@ -578,6 +578,24 @@ local tests = {
         Key("SPACE")
         Equal(state.clicks, 1)
     end },
+    { "native settings visibility blocks confirmation until both settings interfaces are closed", function()
+        local Wild, state, Popup, Key = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        Popup("TEST_CONFIRM")
+        Wild.nativeSettingsVisible = true
+        Wild.UpdateSettingsVisibility()
+        Key("SPACE")
+        Equal(state.clicks, 0)
+        Wild.standaloneSettingsVisible = true
+        Wild.nativeSettingsVisible = false
+        Wild.UpdateSettingsVisibility()
+        Key("SPACE")
+        Equal(state.clicks, 0)
+        Wild.standaloneSettingsVisible = false
+        Wild.UpdateSettingsVisibility()
+        Key("SPACE")
+        Equal(state.clicks, 1)
+    end },
     { "forbidden popup children are not inspected or changed", function()
         for _, field in ipairs({ "button", "editBox" }) do
             local Wild, state, Popup, Key = NewEnvironment()

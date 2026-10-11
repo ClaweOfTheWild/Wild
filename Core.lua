@@ -173,6 +173,15 @@ local defaults = {
     },
 }
 
+local function CopySettingValue(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for key, child in pairs(value) do
+        copy[key] = CopySettingValue(child)
+    end
+    return copy
+end
+
 -- Deep merge: apply default values for missing keys, recursing into tables
 local function ApplyDefaults(target, source)
     for k, v in pairs(source) do
@@ -182,7 +191,7 @@ local function ApplyDefaults(target, source)
             end
             ApplyDefaults(target[k], v)
         elseif target[k] == nil then
-            target[k] = v
+            target[k] = CopySettingValue(v)
         end
     end
 end
@@ -522,7 +531,8 @@ end
 local function GetNestedValue(tbl, path)
     for segment in path:gmatch("[^%.]+") do
         if type(tbl) ~= "table" then return nil end
-        tbl = tbl[segment]
+        local key = segment:match("^%d+$") and tonumber(segment) or segment
+        tbl = tbl[key]
     end
     return tbl
 end
@@ -530,7 +540,7 @@ end
 local function SetNestedValue(tbl, path, value)
     local segments = {}
     for segment in path:gmatch("[^%.]+") do
-        segments[#segments + 1] = segment
+        segments[#segments + 1] = segment:match("^%d+$") and tonumber(segment) or segment
     end
     for i = 1, #segments - 1 do
         local seg = segments[i]
@@ -630,7 +640,7 @@ function Wild.IsFeatureEnabled(feature)
     return GetNestedValue(Wild.db, info.key) and true or false
 end
 
-function Wild.SetFeatureEnabled(feature, enabled)
+function Wild.SetFeatureEnabled(feature, enabled, source)
     if not Wild.db then return end
     local info = FEATURES[feature:lower()]
     if not info then
@@ -639,6 +649,7 @@ function Wild.SetFeatureEnabled(feature, enabled)
     end
     SetNestedValue(Wild.db, info.key, enabled)
     if info.onToggle then info.onToggle(enabled) end
+    Wild.NotifySettingsChanged(info.key, source)
 end
 
 -- ============================================================
@@ -650,13 +661,28 @@ function Wild.GetSetting(key)
     return GetNestedValue(Wild.db, key)
 end
 
-function Wild.SetSetting(key, value)
+function Wild.GetDefaultSetting(key)
+    return CopySettingValue(GetNestedValue(defaults, key))
+end
+
+function Wild.NotifySettingsChanged(key, source)
+    if Wild.RefreshNativeSettings then Wild.RefreshNativeSettings(key, source) end
+    if Wild.RefreshSettings then Wild.RefreshSettings(key, source) end
+end
+
+function Wild.UpdateSettingsVisibility()
+    Wild.settingsVisible = Wild.standaloneSettingsVisible == true or Wild.nativeSettingsVisible == true
+    if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+end
+
+function Wild.SetSetting(key, value, source)
     if not Wild.db then return end
     if key == "dialogKey.key" and Wild.SetDialogKey then
-        return Wild.SetDialogKey(value)
+        return Wild.SetDialogKey(value, source)
     end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+    Wild.NotifySettingsChanged(key, source)
 end
 
 function Wild.ResetSettings()
@@ -668,5 +694,6 @@ function Wild.ResetSettings()
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
     if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
+    Wild.NotifySettingsChanged()
     print("|cff00ccffWild:|r All settings reset to defaults.")
 end

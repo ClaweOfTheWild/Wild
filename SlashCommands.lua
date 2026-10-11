@@ -306,7 +306,7 @@ subcommands.lfg = function(args)
     elseif sub == "keys" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg keys on|off") return end
-        Wild.db.lfg.keystoneButtons = v
+        Wild.SetSetting("lfg.keystoneButtons", v)
         Print("Keystone Panel " .. StatusText(v))
         if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
     elseif sub == "anchor" then
@@ -317,7 +317,7 @@ subcommands.lfg = function(args)
             Print("Current: " .. (Wild.db.lfg.keystoneAnchor or "RIGHT"))
             return
         end
-        Wild.db.lfg.keystoneAnchor = val
+        Wild.SetSetting("lfg.keystoneAnchor", val)
         Print("Keystone panel anchor: " .. val)
         if Wild.__keystonePanelApplyAnchor then Wild.__keystonePanelApplyAnchor() end
     else
@@ -618,31 +618,31 @@ subcommands.gossip = function(args)
     if sub == "single" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip single on|off") return end
-        Wild.db.gossip.autoSelectSingle = v
+        Wild.SetSetting("gossip.autoSelectSingle", v)
         Print("Gossip Auto-Select Single " .. StatusText(v))
     elseif sub == "quest" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip quest on|off") return end
-        Wild.db.gossip.autoSelectQuest = v
+        Wild.SetSetting("gossip.autoSelectQuest", v)
         Print("Gossip Auto-Select Quest " .. StatusText(v))
     elseif sub == "delve" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip delve on|off") return end
-        Wild.db.gossip.autoSelectDelve = v
+        Wild.SetSetting("gossip.autoSelectDelve", v)
         Print("Gossip Auto-Select Delve " .. StatusText(v))
     elseif sub == "skip" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip skip on|off") return end
-        Wild.db.gossip.autoSkip = v
+        Wild.SetSetting("gossip.autoSkip", v)
         Print("Gossip Auto-Skip " .. StatusText(v))
     else
         -- Treat as on/off for all gossip automation
         local val = OnOff(sub)
         if val ~= nil then
-            Wild.db.gossip.autoSelectSingle = val
-            Wild.db.gossip.autoSelectQuest = val
-            Wild.db.gossip.autoSelectDelve = val
-            Wild.db.gossip.autoSkip = val
+            Wild.SetSetting("gossip.autoSelectSingle", val)
+            Wild.SetSetting("gossip.autoSelectQuest", val)
+            Wild.SetSetting("gossip.autoSelectDelve", val)
+            Wild.SetSetting("gossip.autoSkip", val)
             Print("Gossip automation " .. StatusText(val))
         else
             Print("Usage: /wild gossip [single|quest|delve|skip] on|off")
@@ -790,7 +790,7 @@ subcommands.delay = function(args)
         return
     end
     val = math.max(0.1, math.min(1.0, math.floor(val * 10 + 0.5) / 10))
-    Wild.db.advanced[setting.key] = val
+    Wild.SetSetting("advanced." .. setting.key, val)
     Print(setting.label .. " set to " .. val .. "s.")
 end
 

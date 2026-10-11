@@ -522,6 +522,7 @@ function Wild.UpdateCastHistory()
     if config.enabled and #entries > 0 then
         origin:SetScript("OnUpdate", AnimateEntries)
     end
+    Wild.NotifySettingsChanged("castHistory")
 end
 
 function Wild.SetCastHistoryEnabled(enabled)
