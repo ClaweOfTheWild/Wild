@@ -189,6 +189,37 @@ local function ParseUpgradeTrackFromTooltip(tooltipData)
     return nil
 end
 
+local function GetMaxItemLevel(itemID, containerInfo)
+    if not C_Item.GetItemUpgradeInfo then return nil end
+    local link = containerInfo and containerInfo.hyperlink
+    if not link and containerInfo and containerInfo.bag and containerInfo.slot
+       and C_Container and C_Container.GetContainerItemLink then
+        link = C_Container.GetContainerItemLink(containerInfo.bag, containerInfo.slot)
+    end
+    -- A bare item ID loses the instance's upgrades and bonus IDs.
+    if not link then return nil end
+    if not C_Item.IsItemDataCachedByID(link) then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+
+    local name, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(link)
+    if not name then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+    if not EQUIP_LOC_TO_SLOTS[equipLoc] then return nil end
+    local ilvl = GetDetailedItemLevelInfo(link)
+    if type(ilvl) ~= "number" or not (ilvl > 0) then return nil end
+
+    local upgradeInfo = C_Item.GetItemUpgradeInfo(link)
+    -- Cached equipment without an upgrade track uses its current effective level.
+    if not upgradeInfo then return ilvl end
+    local maxIlvl = upgradeInfo.maxItemLevel
+    if type(maxIlvl) == "number" and maxIlvl >= ilvl then return maxIlvl end
+    return nil
+end
+
 -- ============================================================
 -- Attribute definitions
 -- ============================================================
@@ -230,6 +261,11 @@ local ATTRIBUTES = {
             local _, _, _, ilvl = C_Item.GetItemInfo(itemID)
             return ilvl
         end,
+    },
+    {
+        key = "item.maxilvl", label = "Maximum Item Level", category = "Item",
+        valueType = "number",
+        resolve = GetMaxItemLevel,
     },
     {
         key = "item.type", label = "Item Type", category = "Item types and subtypes",
@@ -572,8 +608,9 @@ local DYNAMIC_REFS = {
             if not slots then return nil end
             local lowest
             for _, slotID in ipairs(slots) do
-                local ilvl = charCtx.slotIlvls[slotID]
-                if ilvl and (not lowest or ilvl < lowest) then lowest = ilvl end
+                local ilvl = charCtx.slotIlvls and charCtx.slotIlvls[slotID]
+                if type(ilvl) ~= "number" or not (ilvl > 0) then return nil end
+                if not lowest or ilvl < lowest then lowest = ilvl end
             end
             return lowest
         end,
@@ -1635,6 +1672,7 @@ Wild.OP_DISPLAY = OP_DISPLAY
 
 -- Functions
 Wild.BuildCharContext = BuildCharContext
+Wild.GetMaxItemLevel = GetMaxItemLevel
 Wild.IsRecipeKnown = IsRecipeKnown
 Wild.EvaluateCondition = EvaluateCondition
 Wild.IntentMatchesItem = IntentMatchesItem

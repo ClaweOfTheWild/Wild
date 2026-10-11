@@ -53,6 +53,13 @@ Condition evaluation lives in `Conditions.lua` and is shared across all processo
 
 To match soulbound items with no upgrade track, put **Bind Type is Soulbound** and **Upgrade Track = None** in the same include group. Choose **Fixed value** for the upgrade-track comparison. `None` is stored as rank `0`; ranked tracks remain `1` through `6`. Use a separate **Item Type** or **Equip Slot** condition if the rule should match only equipment.
 
+To sell equipment whose upgrade ceiling is below your currently equipped gear, create a **Sell** intent with **Bind Type is Soulbound** and **Maximum Item Level < Equipped Slot iLvl** in the same include group. Select **Maximum Item Level** as the attribute, **<** as the operator, and **Equipped Slot iLvl** as the value reference, with offset `0`. Leave **Destroy items with no sell price** unchecked. Use **<=** instead if equal ceilings should also match.
+
+- Maximum item level comes from `C_Item.GetItemUpgradeInfo(fullItemLink).maxItemLevel`, not the track's rank or a hard-coded seasonal table. Cached equipment with no upgrade track uses its current effective item level; crafted equipped gear therefore provides a valid current-level comparison even without a track.
+- The comparison requires the actual item hyperlink, supplied directly or resolved from its bag and slot. Never fall back to a bare item ID or template item level. Missing item data, unsupported equip locations, and invalid upgrade ceilings do not match.
+- **Equipped Slot iLvl** uses the weakest compatible equipped slot for rings, trinkets, and one-handed weapons. If any compatible slot is empty or its level is unavailable, the comparison does not match.
+- This is only an item-level comparison. It does not evaluate stats, effects, set bonuses, alternate specializations, or future recrafting. No sell intent is created or enabled automatically.
+
 ### Bank-Specific Phases
 
 1. **Pre-load**: On `BANKFRAME_OPENED` / `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, request item data for all bank slots via `C_Item.RequestLoadItemDataByID`. Listen for `ITEM_DATA_LOAD_RESULT` for each item. Once all arrive (or a 3s safety timeout), proceed.
@@ -143,6 +150,9 @@ Wild.UpdateDialogKey()
 
 -- Recipe knowledge (used by normal intent conditions and tooltip collection status)
 Wild.IsRecipeKnown(itemID, containerInfo) -- true/false, or nil if tooltip data is unavailable
+
+-- Equipment upgrade ceiling (requires a full hyperlink or bag and slot)
+Wild.GetMaxItemLevel(itemID, containerInfo) -- number, or nil if unavailable/not supported
 
 -- Bank
 Wild.GetFilterRuleSummary(rule)
