@@ -85,6 +85,7 @@ local subcommands = {}
 subcommands.help = function()
     print("|cff00ccff--- Wild Commands ---|r")
     Print("/wild — Toggle settings window")
+    Print("/wild native [page] - Open native WoW Settings (for example: /wild native speed)")
     Print("/wild help — Show this help")
     Print("/wild status — Show all feature states")
     Print("/wild <feature> on|off — Toggle a feature")
@@ -199,6 +200,11 @@ end
 -- /wild reset
 subcommands.reset = function()
     Wild.ResetSettings()
+end
+
+subcommands.native = function(args)
+    local page = #args > 0 and table.concat(args, " ") or nil
+    Wild.OpenNativeSettings(page)
 end
 
 -- /wild speed [on|off]

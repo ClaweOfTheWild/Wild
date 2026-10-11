@@ -35,4 +35,5 @@ Durability.lua
 Speed.lua
 DialogKey.lua
 SlashCommands.lua
+NativeSettings.lua
 Settings.lua

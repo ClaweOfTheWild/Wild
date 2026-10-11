@@ -1,4 +1,5 @@
 -- Run from the repository root with Lua 5.1: lua tests\RecipeSellingTest.lua
+local MenuTestHelpers = dofile("tests\\MenuTestHelpers.lua")
 local originalTrim = string.trim
 string.trim = function(text) return text:match("^%s*(.-)%s*$") end
 
@@ -211,57 +212,46 @@ local tests = {
     end },
     { "condition picker nests recipe attributes and still exposes every other attribute", function()
         local Wild, state, _, _, _, _, env = NewEnvironment()
-        local initializeMenu, entries, selected
-        env.UIDropDownMenu_Initialize = function(_, callback) initializeMenu = callback end
-        env.UIDropDownMenu_CreateInfo = function() return {} end
-        env.UIDropDownMenu_AddButton = function(info, level)
-            info.level = level
-            entries[#entries + 1] = info
-        end
-        env.CloseDropDownMenus = function() end
+        local initializeMenu, selected
+        env.MenuResponse = MenuTestHelpers.Response
         setfenv(assert(loadfile("Settings.lua")), env)("Wild", Wild)
         local loader = state.frames[#state.frames]
         local factory = GetUpvalue(loader.scripts.OnEvent, "CreateIntentRulesTab")
         local initialize = GetUpvalue(factory, "InitializeConditionAttributeDropdown")
-        initialize({}, function(attr) selected = attr end)
+        local dropdown = { SetupMenu = function(_, callback) initializeMenu = callback end }
+        initialize(dropdown, function(attr) selected = attr end)
 
-        entries = {}
-        initializeMenu(nil, 1)
+        local root = MenuTestHelpers.NewDescription("Root")
+        initializeMenu(dropdown, root)
         local seen = {}
-        local itemTypeMenus = 0
-        for _, entry in ipairs(entries) do
-            Equal(entry.level, 1)
-            if entry.menuList == "itemTypes" then
-                itemTypeMenus = itemTypeMenus + 1
-                Equal(entry.hasArrow, true)
+        local itemTypes
+        for _, entry in ipairs(root.children) do
+            if entry.text == "Item types and subtypes" then
+                assert(not itemTypes, "Only one item-type submenu")
+                itemTypes = entry
             end
-            if entry.value then seen[entry.value] = true end
+            if entry.data then seen[entry.data.key] = true end
         end
-        Equal(itemTypeMenus, 1)
+        assert(itemTypes, "Item types and subtypes must be a submenu")
         for _, attr in ipairs(Wild.ATTRIBUTES) do
             Equal(seen[attr.key] == true, attr.category ~= "Item types and subtypes")
         end
 
-        entries = {}
-        initializeMenu(nil, 2, "itemTypes")
+        local entries = itemTypes.children
         Equal(#entries, 3)
-        Equal(entries[1].value, "item.type")
-        Equal(entries[2].value, "item.subtype")
+        Equal(entries[1].data.key, "item.type")
+        Equal(entries[2].data.key, "item.subtype")
         Equal(entries[3].text, "Recipes")
-        Equal(entries[3].hasArrow, true)
-        Equal(entries[3].menuList, "recipes")
-        entries[1].func()
+        entries[1]:Pick()
         Equal(selected.key, "item.type")
 
-        entries = {}
-        initializeMenu(nil, 3, "recipes")
+        entries = entries[3].children
         Equal(#entries, 2)
         Equal(entries[1].text, "Recipe Knowledge")
         Equal(entries[2].text, "Recipe Profession")
         for _, entry in ipairs(entries) do
-            Equal(entry.level, 3)
-            entry.func()
-            Equal(selected, Wild.ATTR_BY_KEY[entry.value])
+            Equal(entry:Pick(), env.MenuResponse.CloseAll)
+            Equal(selected, Wild.ATTR_BY_KEY[entry.data.key])
         end
     end },
     { "recipe states match only recipes including negative operators", function()

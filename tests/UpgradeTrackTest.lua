@@ -1,4 +1,5 @@
 -- Run from the repository root with Lua 5.1: lua tests\UpgradeTrackTest.lua
+local MenuTestHelpers = dofile("tests\\MenuTestHelpers.lua")
 local originalTrim = string.trim
 string.trim = function(text) return text:match("^%s*(.-)%s*$") end
 
@@ -32,6 +33,7 @@ local function NewEnvironment()
     function methods:SetText(text) self.text = text end
     function methods:GetText() return self.text end
     function methods:GetWidth() return 520 end
+    function methods:IsShown() return self.shown ~= false end
     function methods:SetScript(event, callback) self.scripts[event] = callback end
     function methods:CreateFontString()
         return setmetatable({ scripts = {} }, { __index = methods })
@@ -60,11 +62,9 @@ local function NewEnvironment()
         C_TooltipInfo = { GetBagItem = Tooltip, GetHyperlink = Tooltip },
         C_Timer = { After = function() end },
         hooksecurefunc = function() end,
-        UIDropDownMenu_SetWidth = function() end,
-        UIDropDownMenu_SetText = function(frame, text) frame.text = text end,
-        UIDropDownMenu_CreateInfo = function() return {} end,
-        CloseDropDownMenus = function() state.closed = true end,
+        GetItemClassInfo = function(id) if id == 4 then return "Armor" end end,
     }, { __index = _G })
+    MenuTestHelpers.Install(env, methods, state)
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)
     return Wild, state, env
 end
@@ -87,12 +87,17 @@ local tests = {
         local Wild, state, env = NewEnvironment()
         local menu, dropdown
         local stop = {}
-        env.UIDropDownMenu_Initialize = function(frame, callback)
+        local createFrame = env.CreateFrame
+        env.CreateFrame = function(kind, name, parent, template)
+            local frame = createFrame(kind, name, parent, template)
             if frame.name == "WildIntentCondTrackDD" then
-                dropdown, menu = frame, callback
-                -- Stop UI construction once the real dropdown callback is registered.
-                error(stop)
+                function frame:SetupMenu(callback)
+                    dropdown, menu = self, callback
+                    -- Stop UI construction once the real dropdown callback is registered.
+                    error(stop)
+                end
             end
+            return frame
         end
         setfenv(assert(loadfile("Settings.lua")), env)("Wild", Wild)
         local loader = state.frames[#state.frames]
@@ -101,18 +106,18 @@ local tests = {
         Equal(success, false)
         Equal(reason, stop, "UI must reach the upgrade track dropdown")
 
-        local entries = {}
-        env.UIDropDownMenu_AddButton = function(info) entries[#entries + 1] = info end
-        menu()
+        local root = MenuTestHelpers.NewDescription("Root")
+        menu(dropdown, root)
+        local entries = root.children
         Equal(#entries, 7)
         for index, entry in ipairs(entries) do
-            Equal(entry.value, index - 1)
+            Equal(entry.data, index - 1)
             Equal(entry.text, Wild.UPGRADE_TRACK_NAMES[index - 1])
-            entry.func({ value = entry.value, GetText = function() return entry.text end })
-            local editorState = GetUpvalue(entry.func, "condEditorState")
+            Equal(entry:Pick(), env.MenuResponse.CloseAll)
+            local editorState = GetUpvalue(entry.callback, "condEditorState")
             Equal(editorState.value, index - 1)
             Equal(dropdown.text, entry.text)
-            Equal(state.closed, true)
+            Equal(entry:IsSelected(), true)
         end
     end },
     { "soulbound items without an upgrade track match the combined include group", function()

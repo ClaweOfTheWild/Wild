@@ -1,4 +1,5 @@
 -- Run from the repository root with Lua 5.1: lua tests\ItemLevelPotentialTest.lua
+local MenuTestHelpers = dofile("tests\\MenuTestHelpers.lua")
 local originalTrim = string.trim
 string.trim = function(text) return text:match("^%s*(.-)%s*$") end
 
@@ -347,20 +348,18 @@ local tests = {
     { "the existing attribute picker exposes the new condition", function()
         local Wild, state, _, _, env = NewEnvironment()
         local menu, selected
-        local entries = {}
-        env.UIDropDownMenu_Initialize = function(_, callback) menu = callback end
-        env.UIDropDownMenu_CreateInfo = function() return {} end
-        env.UIDropDownMenu_AddButton = function(info) entries[#entries + 1] = info end
-        env.CloseDropDownMenus = function() end
+        env.MenuResponse = MenuTestHelpers.Response
         setfenv(assert(loadfile("Settings.lua")), env)("Wild", Wild)
         local factory = GetUpvalue(state.frames[#state.frames].scripts.OnEvent, "CreateIntentRulesTab")
         local initialize = GetUpvalue(factory, "InitializeConditionAttributeDropdown")
-        initialize({}, function(attr) selected = attr end)
-        menu(nil, 1)
-        for _, entry in ipairs(entries) do
-            if entry.value == "item.maxilvl" then
+        local dropdown = { SetupMenu = function(_, callback) menu = callback end }
+        initialize(dropdown, function(attr) selected = attr end)
+        local root = MenuTestHelpers.NewDescription("Root")
+        menu(dropdown, root)
+        for _, entry in ipairs(root.children) do
+            if entry.data and entry.data.key == "item.maxilvl" then
                 Equal(entry.text, "Maximum Item Level")
-                entry.func()
+                entry:Pick()
             end
         end
         Equal(selected, Wild.ATTR_BY_KEY["item.maxilvl"])

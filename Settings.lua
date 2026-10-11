@@ -3,6 +3,50 @@ local ADDON_NAME, Wild = ...
 
 local mainFrame
 local currentTab
+local refreshingPanels = false
+local MENU_MAX_HEIGHT = 360
+
+local function SetSetting(key, value, source)
+    if not refreshingPanels then Wild.SetSetting(key, value, source or "standalone") end
+end
+
+local function RefreshPanel(panel, callback)
+    local focus = GetCurrentKeyBoardFocus()
+    while focus do
+        if focus == panel then return end
+        focus = focus:GetParent()
+    end
+    local previous = refreshingPanels
+    refreshingPanels = true
+    local ok, message = pcall(callback, panel)
+    refreshingPanels = previous
+    if not ok then error(message, 0) end
+end
+
+local function PrepareSettingsPanel(panel)
+    if panel.OnRefresh then return end
+    local onShow = panel:GetScript("OnShow")
+    if onShow then
+        panel.OnRefresh = function(self) RefreshPanel(self, onShow) end
+        panel:SetScript("OnShow", panel.OnRefresh)
+    else
+        panel.OnRefresh = function() end
+    end
+    local function GuardSliders(parent)
+        for _, child in ipairs({ parent:GetChildren() }) do
+            if child:GetObjectType() == "Slider" then
+                local onValueChanged = child:GetScript("OnValueChanged")
+                if onValueChanged then
+                    child:SetScript("OnValueChanged", function(...)
+                        if not refreshingPanels then onValueChanged(...) end
+                    end)
+                end
+            end
+            GuardSliders(child)
+        end
+    end
+    GuardSliders(panel)
+end
 
 -- ============================================================
 -- Helper: create an EditBox linked to a slider
@@ -48,64 +92,31 @@ local function HookScrollChildWidth(scrollFrame, sc)
 end
 
 local function InitializeConditionAttributeDropdown(dropdown, onSelect)
-    UIDropDownMenu_Initialize(dropdown, function(_, level, menuList)
-        level = level or 1
-        local function AddAttribute(attr)
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = attr.label
-            info.value = attr.key
-            info.func = function()
-                CloseDropDownMenus()
-                onSelect(attr)
-            end
-            UIDropDownMenu_AddButton(info, level)
+    dropdown:SetupMenu(function(_, rootDescription)
+        rootDescription:SetScrollMode(MENU_MAX_HEIGHT)
+        local function AddAttribute(menu, attr)
+            menu:CreateButton(attr.label, onSelect, attr):SetResponse(MenuResponse.CloseAll)
         end
 
-        if level == 2 and menuList == "itemTypes" then
-            for _, attr in ipairs(Wild.ATTRIBUTES) do
-                if attr.category == "Item types and subtypes" and not attr.subcategory then
-                    AddAttribute(attr)
+        local lastCat, itemTypes, recipes
+        for _, attr in ipairs(Wild.ATTRIBUTES) do
+            if attr.category == "Item types and subtypes" then
+                if not itemTypes then
+                    itemTypes = rootDescription:CreateButton("Item types and subtypes")
                 end
-            end
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = "Recipes"
-            info.hasArrow = true
-            info.notCheckable = true
-            info.menuList = "recipes"
-            UIDropDownMenu_AddButton(info, level)
-        elseif level == 3 and menuList == "recipes" then
-            for _, attr in ipairs(Wild.ATTRIBUTES) do
-                if attr.subcategory == "Recipes" then AddAttribute(attr) end
-            end
-        elseif level == 1 then
-            local lastCat
-            local addedItemTypes = false
-            for _, attr in ipairs(Wild.ATTRIBUTES) do
-                if attr.category == "Item types and subtypes" then
-                    if not addedItemTypes then
-                        local info = UIDropDownMenu_CreateInfo()
-                        info.text = "Item types and subtypes"
-                        info.hasArrow = true
-                        info.notCheckable = true
-                        info.menuList = "itemTypes"
-                        UIDropDownMenu_AddButton(info, level)
-                        addedItemTypes = true
-                    end
+                if attr.subcategory == "Recipes" then
+                    if not recipes then recipes = itemTypes:CreateButton("Recipes") end
+                    AddAttribute(recipes, attr)
                 else
-                    if attr.category ~= lastCat then
-                        if lastCat then
-                            local sep = UIDropDownMenu_CreateInfo()
-                            sep.text = ""; sep.isTitle = true; sep.notCheckable = true
-                            UIDropDownMenu_AddButton(sep, level)
-                        end
-                        local header = UIDropDownMenu_CreateInfo()
-                        header.text = "|cff888888-- " .. attr.category .. " --|r"
-                        header.isTitle = true; header.notCheckable = true
-                        UIDropDownMenu_AddButton(header, level)
-                        lastCat = attr.category
-                    end
-                    AddAttribute(attr)
+                    AddAttribute(itemTypes, attr)
                 end
+            else
+                if attr.category ~= lastCat then
+                    if lastCat then rootDescription:CreateDivider() end
+                    rootDescription:CreateTitle("|cff888888-- " .. attr.category .. " --|r")
+                    lastCat = attr.category
+                end
+                AddAttribute(rootDescription, attr)
             end
         end
     end)
@@ -214,8 +225,14 @@ local function CreateMainFrame()
     tinsert(UISpecialFrames, "WildSettingsFrame")
 
     -- Track visibility for tooltip integration
-    f:HookScript("OnShow", function() Wild.settingsVisible = true end)
-    f:HookScript("OnHide", function() Wild.settingsVisible = false end)
+    f:HookScript("OnShow", function()
+        Wild.standaloneSettingsVisible = true
+        Wild.UpdateSettingsVisibility()
+    end)
+    f:HookScript("OnHide", function()
+        Wild.standaloneSettingsVisible = false
+        Wild.UpdateSettingsVisibility()
+    end)
 
     f:Hide()
     mainFrame = f
@@ -261,6 +278,7 @@ end
 
 local function AddTab(name, tabPanel, indent)
     local f = mainFrame
+    PrepareSettingsPanel(tabPanel)
     tabPanel:SetParent(f.content)
     tabPanel:SetAllPoints(f.content)
     tabPanel:Hide()
@@ -404,7 +422,7 @@ end
 -- ============================================================
 -- Tab: LFG Quick Apply
 -- ============================================================
-local function CreateLFGTab()
+local function CreateLFGTab(namespace)
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -435,7 +453,7 @@ local function CreateLFGTab()
 
     quickApplyCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.lfg.quickApply = checked
+        SetSetting("lfg.quickApply", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -453,7 +471,7 @@ local function CreateLFGTab()
 
     autoRoleCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.lfg.autoConfirmRole = checked
+        SetSetting("lfg.autoConfirmRole", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -465,7 +483,7 @@ local function CreateLFGTab()
 
     autoRoleCheckCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.lfg.autoAcceptRoleCheck = checked
+        SetSetting("lfg.autoAcceptRoleCheck", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -481,7 +499,7 @@ local function CreateLFGTab()
 
     keystoneCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.lfg.keystoneButtons = checked
+        SetSetting("lfg.keystoneButtons", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
     end)
@@ -494,7 +512,7 @@ local function CreateLFGTab()
     local anchorButtons = {}
     local anchorPrev = anchorLabel
     for i, key in ipairs(ANCHOR_OPTIONS) do
-        local rb = CreateFrame("CheckButton", "WildKeystoneAnchor" .. key, sc, "UIRadioButtonTemplate")
+        local rb = CreateFrame("CheckButton", "WildKeystoneAnchor" .. (namespace or "") .. key, sc, "UIRadioButtonTemplate")
         if i == 1 then
             rb:SetPoint("TOPLEFT", anchorLabel, "BOTTOMLEFT", -2, -4)
         else
@@ -505,7 +523,7 @@ local function CreateLFGTab()
         rb.text:SetText(key:sub(1,1) .. key:sub(2):lower())
         rb.anchorKey = key
         rb:SetScript("OnClick", function(self)
-            Wild.db.lfg.keystoneAnchor = self.anchorKey
+            SetSetting("lfg.keystoneAnchor", self.anchorKey)
             PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
             for _, ab in ipairs(anchorButtons) do
                 ab:SetChecked(ab.anchorKey == self.anchorKey)
@@ -563,7 +581,7 @@ local function CreateCircleTab()
 
     circleCheckbox:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.screenCenterCircle = checked
+        SetSetting("screenCenterCircle", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
@@ -582,9 +600,11 @@ local function CreateCircleTab()
     sizeSlider.Low:SetText("1")
     sizeSlider.High:SetText("200")
 
+    local syncingSize = false
     sizeSlider:SetScript("OnValueChanged", function(self, value)
+        if syncingSize then return end
         value = math.floor(value + 0.5)
-        Wild.db.screenCenterCircleSize = value
+        SetSetting("screenCenterCircleSize", value)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
 
@@ -601,9 +621,11 @@ local function CreateCircleTab()
         local num = tonumber(sizeEditBox:GetText())
         if num and num >= 1 then
             num = math.floor(num + 0.5)
-            Wild.db.screenCenterCircleSize = num
+            SetSetting("screenCenterCircleSize", num)
             -- Clamp slider visual to its range without overwriting the db value
+            syncingSize = true
             sizeSlider:SetValue(math.min(num, 200))
+            syncingSize = false
             if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
         end
         sizeEditBox:ClearFocus()
@@ -638,7 +660,7 @@ local function CreateCircleTab()
 
     thicknessSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        Wild.db.screenCenterCircleThickness = value
+        SetSetting("screenCenterCircleThickness", value)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
 
@@ -651,20 +673,20 @@ local function CreateCircleTab()
 
     local opacitySlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
     opacitySlider:SetPoint("TOPLEFT", opacityLabel, "BOTTOMLEFT", 0, -4)
-    opacitySlider:SetMinMaxValues(10, 100)
+    opacitySlider:SetMinMaxValues(0, 100)
     opacitySlider:SetValueStep(1)
     opacitySlider:SetObeyStepOnDrag(true)
     opacitySlider:SetWidth(200)
-    opacitySlider.Low:SetText("10%")
+    opacitySlider.Low:SetText("0%")
     opacitySlider.High:SetText("100%")
 
     opacitySlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        Wild.db.screenCenterCircleColor.a = value / 100
+        SetSetting("screenCenterCircleColor.a", value / 100)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
 
-    local opacityEditBox = CreateSliderEditBox(sc, opacitySlider, 10, 100, true)
+    local opacityEditBox = CreateSliderEditBox(sc, opacitySlider, 0, 100, true)
 
     -- Color picker
     local colorBtn = CreateFrame("Button", nil, sc)
@@ -696,16 +718,16 @@ local function CreateCircleTab()
         info.hasOpacity = false
         info.swatchFunc = function()
             local r, g, b = ColorPickerFrame:GetColorRGB()
-            Wild.db.screenCenterCircleColor.r = r
-            Wild.db.screenCenterCircleColor.g = g
-            Wild.db.screenCenterCircleColor.b = b
+            SetSetting("screenCenterCircleColor.r", r)
+            SetSetting("screenCenterCircleColor.g", g)
+            SetSetting("screenCenterCircleColor.b", b)
             UpdateColorSwatch()
             if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
         end
         info.cancelFunc = function(prev)
-            Wild.db.screenCenterCircleColor.r = prev.r
-            Wild.db.screenCenterCircleColor.g = prev.g
-            Wild.db.screenCenterCircleColor.b = prev.b
+            SetSetting("screenCenterCircleColor.r", prev.r)
+            SetSetting("screenCenterCircleColor.g", prev.g)
+            SetSetting("screenCenterCircleColor.b", prev.b)
             UpdateColorSwatch()
             if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
         end
@@ -728,7 +750,7 @@ local function CreateCircleTab()
 
     offsetXSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        Wild.db.screenCenterCircleOffsetX = value
+        SetSetting("screenCenterCircleOffsetX", value)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
 
@@ -750,7 +772,7 @@ local function CreateCircleTab()
 
     offsetYSlider:SetScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        Wild.db.screenCenterCircleOffsetY = value
+        SetSetting("screenCenterCircleOffsetY", value)
         if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     end)
 
@@ -887,9 +909,9 @@ local function CreateCastHistoryTab()
     directionLabel:SetPoint("TOPLEFT", fadeSlider, "BOTTOMLEFT", 0, -24)
     directionLabel:SetText("Slide Direction")
 
-    local directionDropdown = CreateFrame("Frame", nil, sc, "UIDropDownMenuTemplate")
-    directionDropdown:SetPoint("TOPLEFT", directionLabel, "BOTTOMLEFT", -16, -4)
-    UIDropDownMenu_SetWidth(directionDropdown, 140)
+    local directionDropdown = CreateFrame("DropdownButton", nil, sc, "WowStyle1DropdownTemplate")
+    directionDropdown:SetPoint("TOPLEFT", directionLabel, "BOTTOMLEFT", 0, -4)
+    directionDropdown:SetWidth(140)
 
     local directionOptions = {
         { text = "Left", value = "LEFT" },
@@ -899,22 +921,19 @@ local function CreateCastHistoryTab()
     }
     local directionLabels = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
 
-    UIDropDownMenu_Initialize(directionDropdown, function()
+    directionDropdown:SetupMenu(function(_, rootDescription)
         for _, option in ipairs(directionOptions) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = option.text
-            info.value = option.value
-            info.func = function(button)
-                Wild.SetCastHistoryDirection(button.value)
-                UIDropDownMenu_SetText(directionDropdown, directionLabels[button.value])
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(option.text, function(value)
+                return Wild.GetSetting("castHistory.direction") == value
+            end, function(value)
+                Wild.SetCastHistoryDirection(value)
+                directionDropdown:OverrideText(directionLabels[value])
+            end, option.value)
         end
     end)
 
     local spacingLabel = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    spacingLabel:SetPoint("TOPLEFT", directionDropdown, "BOTTOMLEFT", 16, -16)
+    spacingLabel:SetPoint("TOPLEFT", directionDropdown, "BOTTOMLEFT", 0, -16)
     spacingLabel:SetText("Track Spacing")
 
     local spacingSlider = CreateFrame("Slider", nil, sc, "OptionsSliderTemplate")
@@ -1013,7 +1032,7 @@ local function CreateCastHistoryTab()
         lengthEditBox:SetText(tostring(config.historyLength or 8))
         fadeSlider:SetValue(config.fadeAfter or 5)
         fadeEditBox:SetText(string.format("%.1f", config.fadeAfter or 5))
-        UIDropDownMenu_SetText(directionDropdown, directionLabels[config.direction] or "Right")
+        directionDropdown:OverrideText(directionLabels[config.direction] or "Right")
         spacingSlider:SetValue(config.trackSpacing or 8)
         spacingEditBox:SetText(tostring(config.trackSpacing or 8))
         UpdateButtons()
@@ -1061,8 +1080,9 @@ end
 -- ============================================================
 -- Tab: Character (Reputation + Currency combined)
 -- ============================================================
-local function CreateCharacterTab()
+local function CreateCharacterTab(namespace)
     local panel = CreateFrame("Frame")
+    local source = namespace == "Native" and "native" or "standalone"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -1094,7 +1114,7 @@ local function CreateCharacterTab()
 
     repairCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.vendorAutoRepair = checked
+        SetSetting("vendorAutoRepair", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1105,7 +1125,7 @@ local function CreateCharacterTab()
 
     guildRepairCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.vendorRepairUseGuild = checked
+        SetSetting("vendorRepairUseGuild", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1143,22 +1163,18 @@ local function CreateCharacterTab()
     local REP_MODE_DISPLAY = {}
     for _, m in ipairs(REP_MODES) do REP_MODE_DISPLAY[m.value] = m.text end
 
-    local repModeDropdown = CreateFrame("Frame", "WildRepCollapseModeDD", sc, "UIDropDownMenuTemplate")
-    repModeDropdown:SetPoint("LEFT", repModeLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(repModeDropdown, 200)
+    local repModeDropdown = CreateFrame("DropdownButton", "WildRepCollapseModeDD" .. (namespace or ""), sc, "WowStyle1DropdownTemplate")
+    repModeDropdown:SetPoint("LEFT", repModeLabel, "RIGHT", 8, -2)
+    repModeDropdown:SetWidth(200)
 
-    UIDropDownMenu_Initialize(repModeDropdown, function(self, level)
+    repModeDropdown:SetupMenu(function(_, rootDescription)
         for _, opt in ipairs(REP_MODES) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text
-            info.value = opt.value
-            info.func = function(btn)
-                Wild.db.reputationCollapseMode = btn.value
-                UIDropDownMenu_SetText(repModeDropdown, btn:GetText())
-                CloseDropDownMenus()
-            end
-            info.checked = (Wild.db and Wild.db.reputationCollapseMode == opt.value)
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(opt.text, function(value)
+                return Wild.GetSetting("reputationCollapseMode") == value
+            end, function(value)
+                SetSetting("reputationCollapseMode", value, source)
+                repModeDropdown:OverrideText(REP_MODE_DISPLAY[value])
+            end, opt.value)
         end
     end)
 
@@ -1201,9 +1217,9 @@ local function CreateCharacterTab()
     local CURR_MODE_DISPLAY = {}
     for _, m in ipairs(CURR_MODES) do CURR_MODE_DISPLAY[m.value] = m.text end
 
-    local currModeDropdown = CreateFrame("Frame", "WildCurrCollapseModeDD", sc, "UIDropDownMenuTemplate")
-    currModeDropdown:SetPoint("LEFT", currModeLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(currModeDropdown, 200)
+    local currModeDropdown = CreateFrame("DropdownButton", "WildCurrCollapseModeDD" .. (namespace or ""), sc, "WowStyle1DropdownTemplate")
+    currModeDropdown:SetPoint("LEFT", currModeLabel, "RIGHT", 8, -2)
+    currModeDropdown:SetWidth(200)
 
     -- Container for currency rows
     local listFrame = CreateFrame("Frame", nil, sc)
@@ -1291,6 +1307,7 @@ local function CreateCharacterTab()
             header.label:SetText(group.headerName)
             header:SetScript("OnClick", function()
                 group.collapsed = not group.collapsed
+                if mode == "remember" then Wild.SaveCurrencyCollapseState(currentGroups, source) end
                 RefreshList()
             end)
             header:Show()
@@ -1328,19 +1345,15 @@ local function CreateCharacterTab()
         sc:SetHeight(math.max(1600, 500 + (-yOffset)))
     end
 
-    UIDropDownMenu_Initialize(currModeDropdown, function(self, level)
+    currModeDropdown:SetupMenu(function(_, rootDescription)
         for _, opt in ipairs(CURR_MODES) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text
-            info.value = opt.value
-            info.func = function(btn)
-                Wild.db.currencyCollapseMode = btn.value
-                UIDropDownMenu_SetText(currModeDropdown, btn:GetText())
-                CloseDropDownMenus()
+            rootDescription:CreateRadio(opt.text, function(value)
+                return Wild.GetSetting("currencyCollapseMode") == value
+            end, function(value)
+                SetSetting("currencyCollapseMode", value, source)
+                currModeDropdown:OverrideText(CURR_MODE_DISPLAY[value])
                 RefreshList()
-            end
-            info.checked = (Wild.db and Wild.db.currencyCollapseMode == opt.value)
-            UIDropDownMenu_AddButton(info)
+            end, opt.value)
         end
     end)
 
@@ -1348,15 +1361,15 @@ local function CreateCharacterTab()
         if Wild.db then
             repairCB:SetChecked(Wild.db.vendorAutoRepair)
             guildRepairCB:SetChecked(Wild.db.vendorRepairUseGuild)
-            UIDropDownMenu_SetText(repModeDropdown, REP_MODE_DISPLAY[Wild.db.reputationCollapseMode] or "Off")
-            UIDropDownMenu_SetText(currModeDropdown, CURR_MODE_DISPLAY[Wild.db.currencyCollapseMode] or "Off")
+            repModeDropdown:OverrideText(REP_MODE_DISPLAY[Wild.db.reputationCollapseMode] or "Off")
+            currModeDropdown:OverrideText(CURR_MODE_DISPLAY[Wild.db.currencyCollapseMode] or "Off")
         end
         RefreshList()
     end)
 
     panel:SetScript("OnHide", function()
         if Wild.db and Wild.db.currencyCollapseMode == "remember" and currentGroups then
-            Wild.SaveCurrencyCollapseState(currentGroups)
+            Wild.SaveCurrencyCollapseState(currentGroups, source)
         end
     end)
 
@@ -1398,7 +1411,7 @@ local function CreateAuctionHouseTab()
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.auctionHouse.enabled = checked
+        SetSetting("auctionHouse.enabled", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1445,7 +1458,7 @@ local function CreateAuctionHouseTab()
     minBox:SetNumeric(true)
     minBox:SetMaxLetters(4)
     minBox:SetScript("OnEnterPressed", function(self)
-        Wild.db.auctionHouse.minLevel = tonumber(self:GetText()) or 0
+        SetSetting("auctionHouse.minLevel", tonumber(self:GetText()) or 0)
         self:ClearFocus()
     end)
     minBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1457,7 +1470,7 @@ local function CreateAuctionHouseTab()
     maxBox:SetNumeric(true)
     maxBox:SetMaxLetters(4)
     maxBox:SetScript("OnEnterPressed", function(self)
-        Wild.db.auctionHouse.maxLevel = tonumber(self:GetText()) or 0
+        SetSetting("auctionHouse.maxLevel", tonumber(self:GetText()) or 0)
         self:ClearFocus()
     end)
     maxBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1493,6 +1506,7 @@ local function CreateAuctionHouseTab()
                     cb:SetScript("OnClick", function(self)
                         local checked = self:GetChecked()
                         Wild.db.auctionHouse.filters[self.enumVal] = checked
+                        Wild.NotifySettingsChanged("auctionHouse.filters", "standalone")
                         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
                     end)
                     filterCBs[#filterCBs + 1] = cb
@@ -1559,7 +1573,7 @@ local function CreateCraftingOrdersTab()
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.craftingOrders.enabled = checked
+        SetSetting("craftingOrders.enabled", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1606,7 +1620,7 @@ local function CreateCraftingOrdersTab()
     minBox:SetNumeric(true)
     minBox:SetMaxLetters(4)
     minBox:SetScript("OnEnterPressed", function(self)
-        Wild.db.craftingOrders.minLevel = tonumber(self:GetText()) or 0
+        SetSetting("craftingOrders.minLevel", tonumber(self:GetText()) or 0)
         self:ClearFocus()
     end)
     minBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1618,7 +1632,7 @@ local function CreateCraftingOrdersTab()
     maxBox:SetNumeric(true)
     maxBox:SetMaxLetters(4)
     maxBox:SetScript("OnEnterPressed", function(self)
-        Wild.db.craftingOrders.maxLevel = tonumber(self:GetText()) or 0
+        SetSetting("craftingOrders.maxLevel", tonumber(self:GetText()) or 0)
         self:ClearFocus()
     end)
     maxBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1655,6 +1669,7 @@ local function CreateCraftingOrdersTab()
                     cb:SetScript("OnClick", function(self)
                         local checked = self:GetChecked()
                         Wild.db.craftingOrders.filters[self.enumVal] = checked
+                        Wild.NotifySettingsChanged("craftingOrders.filters", "standalone")
                         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
                     end)
                     filterCBs[#filterCBs + 1] = cb
@@ -1723,7 +1738,7 @@ local function CreateMailTab()
 
     autoOpenCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.mail.autoOpen = checked
+        SetSetting("mail.autoOpen", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1745,7 +1760,7 @@ end
 -- ============================================================
 -- Tab: Tooltips
 -- ============================================================
-local function CreateTooltipTab()
+local function CreateTooltipTab(namespace)
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -1775,7 +1790,7 @@ local function CreateTooltipTab()
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.tooltip.enabled = checked
+        SetSetting("tooltip.enabled", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1818,25 +1833,22 @@ local function CreateTooltipTab()
         row.label:SetJustifyH("LEFT")
         row.label:SetText(lineDef.label)
 
-        local ddName = "WildTooltipLineDD_" .. lineDef.key
-        row.dropdown = CreateFrame("Frame", ddName, row, "UIDropDownMenuTemplate")
-        row.dropdown:SetPoint("LEFT", row.label, "RIGHT", -8, -2)
-        UIDropDownMenu_SetWidth(row.dropdown, 160)
+        local ddName = "WildTooltipLineDD_" .. (namespace or "") .. lineDef.key
+        row.dropdown = CreateFrame("DropdownButton", ddName, row, "WowStyle1DropdownTemplate")
+        row.dropdown:SetPoint("LEFT", row.label, "RIGHT", 8, -2)
+        row.dropdown:SetWidth(160)
 
         local currentKey = lineDef.key
-        UIDropDownMenu_Initialize(row.dropdown, function(self, level)
+        row.dropdown:SetupMenu(function(_, rootDescription)
             for _, mode in ipairs(Wild.TOOLTIP_VISIBILITY_MODES) do
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = mode.label
-                info.value = mode.key
-                info.func = function(btn)
+                rootDescription:CreateRadio(mode.label, function(value)
+                    return Wild.GetSetting("tooltip.lines." .. currentKey) == value
+                end, function(value)
                     if Wild.db and Wild.db.tooltip and Wild.db.tooltip.lines then
-                        Wild.db.tooltip.lines[currentKey] = btn.value
+                        SetSetting("tooltip.lines." .. currentKey, value)
                     end
-                    UIDropDownMenu_SetText(row.dropdown, modeLabels[btn.value] or btn.value)
-                    CloseDropDownMenus()
-                end
-                UIDropDownMenu_AddButton(info)
+                    row.dropdown:OverrideText(modeLabels[value] or value)
+                end, mode.key)
             end
         end)
 
@@ -1852,7 +1864,7 @@ local function CreateTooltipTab()
     previewHint:SetText(
         "|cff888888Visibility modes:|r\n" ..
         "|cffffffffAlways|r |cff888888\226\128\148 show on every item tooltip|r\n" ..
-        "|cffffffffWild Settings Open|r |cff888888\226\128\148 only when this settings window is visible|r\n" ..
+        "|cffffffffWild Settings Open|r |cff888888\226\128\148 while either Wild settings interface is visible|r\n" ..
         "|cffffffffShift/Ctrl/Alt Held|r |cff888888\226\128\148 only while holding that modifier key|r\n" ..
         "|cffffffffNever|r |cff888888\226\128\148 line is disabled|r"
     )
@@ -1865,7 +1877,7 @@ local function CreateTooltipTab()
                 local row = lineRows[idx]
                 if row then
                     local mode = lines[lineDef.key] or "never"
-                    UIDropDownMenu_SetText(row.dropdown, modeLabels[mode] or mode)
+                    row.dropdown:OverrideText(modeLabels[mode] or mode)
                 end
             end
         end
@@ -1877,8 +1889,9 @@ end
 -- ============================================================
 -- Tab: Auto-Reply
 -- ============================================================
-local function CreateAutoReplyTab()
+local function CreateAutoReplyTab(namespace)
     local panel = CreateFrame("Frame")
+    local source = namespace == "Native" and "native" or "standalone"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -1907,7 +1920,7 @@ local function CreateAutoReplyTab()
     enableCB.tooltipText = "Automatically send a reply to incoming whispers while you are in a Mythic+ keystone."
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.autoReply.enabled = checked
+        SetSetting("autoReply.enabled", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1924,7 +1937,7 @@ local function CreateAutoReplyTab()
     whisperCB.tooltipText = "Auto-reply to standard /whisper messages."
     whisperCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.autoReply.replyWhispers = checked
+        SetSetting("autoReply.replyWhispers", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1935,7 +1948,7 @@ local function CreateAutoReplyTab()
     bnetCB.tooltipText = "Auto-reply to Battle.net (Real ID / BattleTag) whisper messages."
     bnetCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.autoReply.replyBNetWhispers = checked
+        SetSetting("autoReply.replyBNetWhispers", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1946,7 +1959,7 @@ local function CreateAutoReplyTab()
     inProgressCB.tooltipText = "Only auto-reply when the Mythic+ timer is actively running. Disabling this will also reply during downtime inside the instance (e.g. before starting or after completion)."
     inProgressCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.autoReply.onlyInProgress = checked
+        SetSetting("autoReply.onlyInProgress", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -1989,7 +2002,7 @@ local function CreateAutoReplyTab()
     msgBox:SetScript("OnEditFocusLost", function(self)
         local text = self:GetText()
         if text and #text > 0 then
-            Wild.db.autoReply.message = text
+            SetSetting("autoReply.message", text, source)
         end
     end)
     msgBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -2021,8 +2034,9 @@ end
 -- ============================================================
 -- Tab: Dungeon Bar
 -- ============================================================
-local function CreateDungeonBarTab()
+local function CreateDungeonBarTab(namespace)
     local panel = CreateFrame("Frame")
+    local source = namespace == "Native" and "native" or "standalone"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -2051,7 +2065,7 @@ local function CreateDungeonBarTab()
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.dungeonBar.enabled = checked
+        SetSetting("dungeonBar.enabled", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         if checked then
             Wild.ShowDungeonBar()
@@ -2067,7 +2081,7 @@ local function CreateDungeonBarTab()
 
     autoShowCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.dungeonBar.autoShowInInstance = checked
+        SetSetting("dungeonBar.autoShowInInstance", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2097,7 +2111,7 @@ local function CreateDungeonBarTab()
     local function BarToggle(key, default)
         return function(self)
             local checked = self:GetChecked()
-            Wild.db.dungeonBar[key] = checked
+            SetSetting("dungeonBar." .. key, checked, source)
             PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
             Wild.RebuildDungeonBar()
         end
@@ -2180,10 +2194,12 @@ local function CreateDungeonBarTab()
                 local num = tonumber(self:GetText())
                 if num and num > 0 and num <= 999 then
                     Wild.db.dungeonBar.pullPresets[self.index] = num
+                    Wild.NotifySettingsChanged("dungeonBar.pullPresets", source)
                     self:SetText(tostring(num))
                 else
                     -- Remove this preset
                     table.remove(Wild.db.dungeonBar.pullPresets, self.index)
+                    Wild.NotifySettingsChanged("dungeonBar.pullPresets", source)
                     Wild.RebuildDungeonBar()
                     RebuildPresetBoxes()
                     return
@@ -2209,6 +2225,7 @@ local function CreateDungeonBarTab()
         end
         addBtn:SetScript("OnClick", function()
             table.insert(Wild.db.dungeonBar.pullPresets, 10)
+            Wild.NotifySettingsChanged("dungeonBar.pullPresets", source)
             Wild.RebuildDungeonBar()
             RebuildPresetBoxes()
         end)
@@ -2234,7 +2251,7 @@ local function CreateDungeonBarTab()
     showTooltipsCB.tooltipText = "Display tooltip hints when hovering over dungeon bar buttons."
     showTooltipsCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.dungeonBar.showTooltips = checked
+        SetSetting("dungeonBar.showTooltips", checked, source)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2257,7 +2274,7 @@ end
 -- ============================================================
 -- Tab: Quests
 -- ============================================================
-local function CreateQuestsTab()
+local function CreateQuestsTab(namespace)
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -2288,7 +2305,7 @@ local function CreateQuestsTab()
         cb.tooltipText = tooltip
         cb:SetScript("OnClick", function(self)
             local checked = self:GetChecked()
-            Wild.db.quests[dbKey] = checked
+            SetSetting("quests." .. dbKey, checked)
             PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         end)
         return cb
@@ -2344,22 +2361,18 @@ local function CreateQuestsTab()
     toggleLabel:SetPoint("TOPLEFT", acceptTrivialCB, "BOTTOMLEFT", 2, -14)
     toggleLabel:SetText("Pause key:")
 
-    local toggleDropdown = CreateFrame("Frame", "WildQuestToggleDD", sc, "UIDropDownMenuTemplate")
-    toggleDropdown:SetPoint("LEFT", toggleLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(toggleDropdown, 140)
+    local toggleDropdown = CreateFrame("DropdownButton", "WildQuestToggleDD" .. (namespace or ""), sc, "WowStyle1DropdownTemplate")
+    toggleDropdown:SetPoint("LEFT", toggleLabel, "RIGHT", 8, -2)
+    toggleDropdown:SetWidth(140)
 
-    UIDropDownMenu_Initialize(toggleDropdown, function(self, level)
+    toggleDropdown:SetupMenu(function(_, rootDescription)
         for i, text in ipairs(TOGGLE_OPTIONS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = text
-            info.value = i
-            info.func = function(btn)
-                Wild.db.quests.toggleKey = btn.value
-                UIDropDownMenu_SetText(toggleDropdown, btn:GetText())
-                CloseDropDownMenus()
-            end
-            info.checked = (Wild.db.quests.toggleKey == i)
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(text, function(value)
+                return Wild.GetSetting("quests.toggleKey") == value
+            end, function(value)
+                SetSetting("quests.toggleKey", value)
+                toggleDropdown:OverrideText(TOGGLE_OPTIONS[value])
+            end, i)
         end
     end)
 
@@ -2393,7 +2406,7 @@ local function CreateQuestsTab()
             acceptWeeklyCB:SetChecked(q.acceptWeekly)
             acceptRepeatableCB:SetChecked(q.acceptRepeatable)
             acceptTrivialCB:SetChecked(q.acceptTrivial)
-            UIDropDownMenu_SetText(toggleDropdown, TOGGLE_OPTIONS[q.toggleKey or 1])
+            toggleDropdown:OverrideText(TOGGLE_OPTIONS[q.toggleKey or 1])
             autoHandInCB:SetChecked(q.autoHandIn)
             autoRewardCB:SetChecked(q.autoSelectReward)
         end
@@ -2481,6 +2494,7 @@ local function CreateDialogKeyTab()
 
     local function StopCapture()
         capture:Hide()
+        if Wild.dialogKeyCaptureStop == StopCapture then Wild.dialogKeyCaptureStop = nil end
         keyButton:SetText(Wild.GetSetting("dialogKey.key") or "SPACE")
     end
     keyButton:SetScript("OnClick", function()
@@ -2492,6 +2506,8 @@ local function CreateDialogKeyTab()
             StopCapture()
             return
         end
+        if Wild.dialogKeyCaptureStop then Wild.dialogKeyCaptureStop() end
+        Wild.dialogKeyCaptureStop = StopCapture
         capture:SetPropagateKeyboardInput(true)
         capture:Show()
         keyButton:SetText("Press a key (Esc cancels)")
@@ -2505,7 +2521,7 @@ local function CreateDialogKeyTab()
         local binding = (IsControlKeyDown() and "CTRL-" or "") ..
             (IsAltKeyDown() and "ALT-" or "") ..
             (IsShiftKeyDown() and "SHIFT-" or "") .. key
-        Wild.SetDialogKey(binding)
+        Wild.SetDialogKey(binding, "standalone")
         StopCapture()
     end)
     capture:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -2522,7 +2538,7 @@ end
 -- ============================================================
 -- Tab: Gossip
 -- ============================================================
-local function CreateGossipTab()
+local function CreateGossipTab(namespace)
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -2552,7 +2568,7 @@ local function CreateGossipTab()
     autoSelectCB.tooltipText = "Automatically select the gossip option when an NPC only has one."
     autoSelectCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.autoSelectSingle = checked
+        SetSetting("gossip.autoSelectSingle", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2569,7 +2585,7 @@ local function CreateGossipTab()
     autoSelectQuestCB.tooltipText = "Automatically select gossip options that are related to quests."
     autoSelectQuestCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.autoSelectQuest = checked
+        SetSetting("gossip.autoSelectQuest", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2586,7 +2602,7 @@ local function CreateGossipTab()
     autoSelectDelveCB.tooltipText = "Automatically select gossip options that are related to delves."
     autoSelectDelveCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.autoSelectDelve = checked
+        SetSetting("gossip.autoSelectDelve", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2603,7 +2619,7 @@ local function CreateGossipTab()
     autoSkipCB.tooltipText = "Automatically select gossip options that offer to skip dialog or content."
     autoSkipCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.autoSkip = checked
+        SetSetting("gossip.autoSkip", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2620,7 +2636,7 @@ local function CreateGossipTab()
     skipIfQuestCB.tooltipText = "Don't auto-select the gossip option if the NPC also offers or accepts quests."
     skipIfQuestCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.skipIfQuest = checked
+        SetSetting("gossip.skipIfQuest", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2637,7 +2653,7 @@ local function CreateGossipTab()
     darkmoonCB.tooltipText = "Automatically accept the Darkmoon Faire teleport dialog when talking to the NPC."
     darkmoonCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.gossip.darkmoonTeleport = checked
+        SetSetting("gossip.darkmoonTeleport", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2653,22 +2669,18 @@ local function CreateGossipTab()
     toggleLabel:SetPoint("TOPLEFT", darkmoonHint, "BOTTOMLEFT", -22, -20)
     toggleLabel:SetText("Pause key:")
 
-    local toggleDropdown = CreateFrame("Frame", "WildGossipToggleDD", sc, "UIDropDownMenuTemplate")
-    toggleDropdown:SetPoint("LEFT", toggleLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(toggleDropdown, 140)
+    local toggleDropdown = CreateFrame("DropdownButton", "WildGossipToggleDD" .. (namespace or ""), sc, "WowStyle1DropdownTemplate")
+    toggleDropdown:SetPoint("LEFT", toggleLabel, "RIGHT", 8, -2)
+    toggleDropdown:SetWidth(140)
 
-    UIDropDownMenu_Initialize(toggleDropdown, function(self, level)
+    toggleDropdown:SetupMenu(function(_, rootDescription)
         for i, text in ipairs(TOGGLE_OPTIONS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = text
-            info.value = i
-            info.func = function(btn)
-                Wild.db.gossip.toggleKey = btn.value
-                UIDropDownMenu_SetText(toggleDropdown, btn:GetText())
-                CloseDropDownMenus()
-            end
-            info.checked = (Wild.db.gossip.toggleKey == i)
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(text, function(value)
+                return Wild.GetSetting("gossip.toggleKey") == value
+            end, function(value)
+                SetSetting("gossip.toggleKey", value)
+                toggleDropdown:OverrideText(TOGGLE_OPTIONS[value])
+            end, i)
         end
     end)
 
@@ -2687,7 +2699,7 @@ local function CreateGossipTab()
             autoSkipCB:SetChecked(g.autoSkip)
             skipIfQuestCB:SetChecked(g.skipIfQuest)
             darkmoonCB:SetChecked(g.darkmoonTeleport)
-            UIDropDownMenu_SetText(toggleDropdown, TOGGLE_OPTIONS[g.toggleKey or 1])
+            toggleDropdown:OverrideText(TOGGLE_OPTIONS[g.toggleKey or 1])
         end
     end)
 
@@ -2727,7 +2739,7 @@ local function CreateDarkmoonFaireTab()
     helperCB.tooltipText = "When you enter a Darkmoon Faire staging area during the event, show a popup listing items to buy before entering."
     helperCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.darkmoonFaire.showProfessionHelper = checked
+        SetSetting("darkmoonFaire.showProfessionHelper", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2796,7 +2808,7 @@ local function CreateDelveTab()
 
     autoPowerCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.delveAutoSelectPower = checked
+        SetSetting("delveAutoSelectPower", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -2818,7 +2830,7 @@ end
 -- ============================================================
 -- Tab: Loot
 -- ============================================================
-local function CreateLootTab()
+local function CreateLootTab(namespace)
     local panel = CreateFrame("Frame")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
@@ -2860,9 +2872,9 @@ local function CreateLootTab()
     modLabel:SetPoint("LEFT", 0, 0)
     modLabel:SetText("Skip modifier:")
 
-    local modDropdown = CreateFrame("Frame", "WildLootModifierDD", modRow, "UIDropDownMenuTemplate")
-    modDropdown:SetPoint("LEFT", modLabel, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(modDropdown, 100)
+    local modDropdown = CreateFrame("DropdownButton", "WildLootModifierDD" .. (namespace or ""), modRow, "WowStyle1DropdownTemplate")
+    modDropdown:SetPoint("LEFT", modLabel, "RIGHT", 8, -2)
+    modDropdown:SetWidth(100)
 
     local MODIFIER_OPTIONS = {
         { text = "Shift", value = "SHIFT" },
@@ -2872,17 +2884,14 @@ local function CreateLootTab()
     }
     local MODIFIER_LABELS = { SHIFT = "Shift", CTRL = "Ctrl", ALT = "Alt", NONE = "None" }
 
-    UIDropDownMenu_Initialize(modDropdown, function(self, level)
+    modDropdown:SetupMenu(function(_, rootDescription)
         for _, opt in ipairs(MODIFIER_OPTIONS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text
-            info.value = opt.value
-            info.func = function(btn)
-                Wild.SetAutoLootModifier(btn.value)
-                UIDropDownMenu_SetText(modDropdown, MODIFIER_LABELS[btn.value])
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(opt.text, function(value)
+                return Wild.GetSetting("lootAutoLootModifier") == value
+            end, function(value)
+                Wild.SetAutoLootModifier(value)
+                modDropdown:OverrideText(MODIFIER_LABELS[value])
+            end, opt.value)
         end
     end)
 
@@ -2903,7 +2912,7 @@ local function CreateLootTab()
             autoLootCB:SetChecked(Wild.db.lootAutoLoot)
             quickLootCheckbox:SetChecked(Wild.db.lootQuickLoot)
             local mod = Wild.db.lootAutoLootModifier or "SHIFT"
-            UIDropDownMenu_SetText(modDropdown, MODIFIER_LABELS[mod] or "Shift")
+            modDropdown:OverrideText(MODIFIER_LABELS[mod] or "Shift")
         end
     end)
 
@@ -2976,7 +2985,7 @@ local function CreateIntentsTab()
 
         slider:SetScript("OnValueChanged", function(self, value)
             value = math.floor(value * 10 + 0.5) / 10
-            Wild.db.advanced[key] = value
+            SetSetting("advanced." .. key, value)
         end)
 
         local editBox = CreateSliderEditBox(parent, slider, 0.1, 1.0, false)
@@ -3038,7 +3047,7 @@ local function CreateIntentsTab()
 
     debugCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.advanced.debug = checked
+        SetSetting("advanced.debug", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
     end)
 
@@ -3070,8 +3079,9 @@ end
 -- ============================================================
 -- Tab: Intent Rules (Unified automation rules)
 -- ============================================================
-local function CreateIntentRulesTab()
+local function CreateIntentRulesTab(namespace)
     local panel = CreateFrame("Frame")
+    local source = namespace == "Native" and "native" or "standalone"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -3171,6 +3181,7 @@ local function CreateIntentRulesTab()
     local editorIntent = {}
     local editorGroups = {}         -- working copy: { {mode="include"|"exclude", conditions={...}}, ... }
     local editingIndex = nil
+    local editingIntent
     local editingCondIdx = nil
     local editingGroupIdx = nil     -- which group is currently expanded for editing
 
@@ -3200,51 +3211,40 @@ local function CreateIntentRulesTab()
     local RefreshActorList
 
     -- Add actor dropdown
-    local addActorDD = CreateFrame("Frame", "WildIntentAddActorDD", editor, "UIDropDownMenuTemplate")
-    addActorDD:SetPoint("TOPLEFT", actorListFrame, "BOTTOMLEFT", -16, -4)
-    UIDropDownMenu_SetWidth(addActorDD, 180)
-    UIDropDownMenu_SetText(addActorDD, "Add actor...")
+    local addActorDD = CreateFrame("DropdownButton", "WildIntentAddActorDD" .. (namespace or ""), editor, "WowStyle1DropdownTemplate")
+    addActorDD:SetPoint("TOPLEFT", actorListFrame, "BOTTOMLEFT", 0, -4)
+    addActorDD:SetWidth(180)
+    addActorDD:OverrideText("Add actor...")
 
-    local addExcludeDD = CreateFrame("Frame", "WildIntentAddExcludeDD", editor, "UIDropDownMenuTemplate")
-    addExcludeDD:SetPoint("LEFT", addActorDD, "RIGHT", -16, 0)
-    UIDropDownMenu_SetWidth(addExcludeDD, 180)
-    UIDropDownMenu_SetText(addExcludeDD, "Add exclusion...")
+    local addExcludeDD = CreateFrame("DropdownButton", "WildIntentAddExcludeDD" .. (namespace or ""), editor, "WowStyle1DropdownTemplate")
+    addExcludeDD:SetPoint("LEFT", addActorDD, "RIGHT", 8, 0)
+    addExcludeDD:SetWidth(180)
+    addExcludeDD:OverrideText("Add exclusion...")
 
     local function BuildActorMenu(dropdown, isExclude)
-        UIDropDownMenu_Initialize(dropdown, function()
+        dropdown:SetupMenu(function(_, rootDescription)
+            rootDescription:SetScrollMode(MENU_MAX_HEIGHT)
             local options = Wild.GetAllActorOptions and Wild.GetAllActorOptions() or {}
             local lastCat = nil
             for _, opt in ipairs(options) do
-                    if opt.category ~= lastCat then
-                        if lastCat then
-                            local sep = UIDropDownMenu_CreateInfo()
-                            sep.text = ""; sep.isTitle = true; sep.notCheckable = true
-                            UIDropDownMenu_AddButton(sep)
-                        end
-                        local catHeader = UIDropDownMenu_CreateInfo()
-                        catHeader.text = "|cff888888-- " .. opt.category .. " --|r"
-                        catHeader.isTitle = true; catHeader.notCheckable = true
-                        UIDropDownMenu_AddButton(catHeader)
-                        lastCat = opt.category
+                if opt.category ~= lastCat then
+                    if lastCat then rootDescription:CreateDivider() end
+                    rootDescription:CreateTitle("|cff888888-- " .. opt.category .. " --|r")
+                    lastCat = opt.category
+                end
+                -- Check if already in the list
+                local alreadyAdded = false
+                for _, existing in ipairs(editorActors) do
+                    if existing.value == opt.value and (existing.exclude == true) == isExclude then
+                        alreadyAdded = true; break
                     end
-                    -- Check if already in the list
-                    local alreadyAdded = false
-                    for _, existing in ipairs(editorActors) do
-                        if existing.value == opt.value and (existing.exclude == true) == isExclude then
-                            alreadyAdded = true; break
-                        end
-                    end
-                    if not alreadyAdded then
-                        local info = UIDropDownMenu_CreateInfo()
-                        info.text = opt.display or opt.value
-                        info.value = opt.value
-                        info.func = function(btn)
-                            table.insert(editorActors, { value = btn.value, exclude = isExclude or nil })
-                            RefreshActorList()
-                            CloseDropDownMenus()
-                        end
-                        UIDropDownMenu_AddButton(info)
-                    end
+                end
+                if not alreadyAdded then
+                    rootDescription:CreateButton(opt.display or opt.value, function(value)
+                        table.insert(editorActors, { value = value, exclude = isExclude or nil })
+                        RefreshActorList()
+                    end, opt.value)
+                end
             end
         end)
     end
@@ -3320,9 +3320,9 @@ local function CreateIntentRulesTab()
         { text = "Hold", value = "hold" },
     }
 
-    local actionDD = CreateFrame("Frame", "WildIntentActionDD", editor, "UIDropDownMenuTemplate")
-    actionDD:SetPoint("TOPLEFT", editor, "TOPLEFT", COL_INPUT - 16, 0)  -- repositioned dynamically
-    UIDropDownMenu_SetWidth(actionDD, 180)
+    local actionDD = CreateFrame("DropdownButton", "WildIntentActionDD" .. (namespace or ""), editor, "WowStyle1DropdownTemplate")
+    actionDD:SetPoint("TOPLEFT", editor, "TOPLEFT", COL_INPUT, 0)  -- repositioned dynamically
+    actionDD:SetWidth(180)
 
     -- Source/Destination dropdown (shown for deposit/withdraw/gold)
     local sourceLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -3334,8 +3334,8 @@ local function CreateIntentRulesTab()
         { text = "Guild Bank", value = "guild" },
     }
 
-    local sourceDD = CreateFrame("Frame", "WildIntentSourceDD", editor, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(sourceDD, 160)
+    local sourceDD = CreateFrame("DropdownButton", "WildIntentSourceDD" .. (namespace or ""), editor, "WowStyle1DropdownTemplate")
+    sourceDD:SetWidth(160)
 
     -- Transfer source dropdown (where to pull FROM)
     local transferSourceLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -3347,8 +3347,8 @@ local function CreateIntentRulesTab()
         { text = "Guild Bank", value = "guild" },
     }
 
-    local transferSourceDD = CreateFrame("Frame", "WildIntentTransferSourceDD", editor, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(transferSourceDD, 160)
+    local transferSourceDD = CreateFrame("DropdownButton", "WildIntentTransferSourceDD" .. (namespace or ""), editor, "WowStyle1DropdownTemplate")
+    transferSourceDD:SetWidth(160)
 
     -- Transfer target label (override for transfer action)
     local transferTargetLabel = editor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -3658,32 +3658,27 @@ local function CreateIntentRulesTab()
     local condEditorState = {}
 
     -- Layout constants for the condition sub-editor.
-    -- WoW UIDropDownMenuTemplate frames are ~30px tall; labels are ~12px.
-    -- We anchor labels TOPLEFT relative to the previous label's BOTTOMLEFT.
-    -- The gap must be large enough that the dropdown sitting on one row
-    -- doesn't visually collide with the label of the next row.
     local CE_PAD       = 8   -- inset from condEditor edges
     local CE_COL_INPUT = 90  -- X where inputs/dropdowns start (from condEditor LEFT)
-    local CE_DD_X      = CE_COL_INPUT - 16 -- UIDropDown has 16px built-in left padding
     local CE_ROW_H     = 28  -- vertical distance between label baselines
 
     local ceAttrLabel = condEditor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     ceAttrLabel:SetPoint("TOPLEFT", CE_PAD, -10)
     ceAttrLabel:SetText("Attribute:")
 
-    local ceAttrDD = CreateFrame("Frame", "WildIntentCondAttrDD", condEditor, "UIDropDownMenuTemplate")
-    ceAttrDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceAttrDD:SetPoint("TOP", ceAttrLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceAttrDD, 180)
+    local ceAttrDD = CreateFrame("DropdownButton", "WildIntentCondAttrDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceAttrDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceAttrDD:SetPoint("TOP", ceAttrLabel, "TOP", 0, 4)
+    ceAttrDD:SetWidth(180)
 
     local ceOpLabel = condEditor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     ceOpLabel:SetPoint("TOPLEFT", ceAttrLabel, "BOTTOMLEFT", 0, -CE_ROW_H)
     ceOpLabel:SetText("Operator:")
 
-    local ceOpDD = CreateFrame("Frame", "WildIntentCondOpDD", condEditor, "UIDropDownMenuTemplate")
-    ceOpDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceOpDD:SetPoint("TOP", ceOpLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceOpDD, 140)
+    local ceOpDD = CreateFrame("DropdownButton", "WildIntentCondOpDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceOpDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceOpDD:SetPoint("TOP", ceOpLabel, "TOP", 0, 4)
+    ceOpDD:SetWidth(140)
 
     local ceValLabel = condEditor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     ceValLabel:SetPoint("TOPLEFT", ceOpLabel, "BOTTOMLEFT", 0, -CE_ROW_H)
@@ -3717,196 +3712,169 @@ local function CreateIntentRulesTab()
         end
     end)
 
-    local ceQualDD = CreateFrame("Frame", "WildIntentCondQualDD", condEditor, "UIDropDownMenuTemplate")
-    ceQualDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceQualDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceQualDD, 120)
+    local ceQualDD = CreateFrame("DropdownButton", "WildIntentCondQualDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceQualDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceQualDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceQualDD:SetWidth(120)
 
-    UIDropDownMenu_Initialize(ceQualDD, function()
+    ceQualDD:SetupMenu(function(_, rootDescription)
         for q = 0, 5 do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = (QUALITY_COLORS[q] or "") .. QUALITY_NAMES[q] .. "|r"
-            info.value = q
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceQualDD, (QUALITY_COLORS[btn.value] or "") .. QUALITY_NAMES[btn.value] .. "|r")
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio((QUALITY_COLORS[q] or "") .. QUALITY_NAMES[q] .. "|r", function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceQualDD:OverrideText((QUALITY_COLORS[value] or "") .. QUALITY_NAMES[value] .. "|r")
+            end, q)
         end
     end)
 
-    local ceTypeDD = CreateFrame("Frame", "WildIntentCondTypeDD", condEditor, "UIDropDownMenuTemplate")
-    ceTypeDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceTypeDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceTypeDD, 160)
+    local ceTypeDD = CreateFrame("DropdownButton", "WildIntentCondTypeDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceTypeDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceTypeDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceTypeDD:SetWidth(160)
 
-    UIDropDownMenu_Initialize(ceTypeDD, function()
+    ceTypeDD:SetupMenu(function(_, rootDescription)
         for _, cls in ipairs(GetItemClassList()) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = cls.name
-            info.value = cls.classID
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceTypeDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(cls.name, function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceTypeDD:OverrideText(cls.name)
+            end, cls.classID)
         end
     end)
 
-    local ceSubParentDD = CreateFrame("Frame", "WildIntentCondSubParDD", condEditor, "UIDropDownMenuTemplate")
-    ceSubParentDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceSubParentDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceSubParentDD, 120)
+    local ceSubParentDD = CreateFrame("DropdownButton", "WildIntentCondSubParDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceSubParentDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceSubParentDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceSubParentDD:SetWidth(120)
 
-    local ceSubTypeDD = CreateFrame("Frame", "WildIntentCondSubDD", condEditor, "UIDropDownMenuTemplate")
-    ceSubTypeDD:SetPoint("LEFT", ceSubParentDD, "RIGHT", -12, 0)
-    UIDropDownMenu_SetWidth(ceSubTypeDD, 120)
+    local ceSubTypeDD = CreateFrame("DropdownButton", "WildIntentCondSubDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceSubTypeDD:SetPoint("LEFT", ceSubParentDD, "RIGHT", 8, 0)
+    ceSubTypeDD:SetWidth(120)
 
-    UIDropDownMenu_Initialize(ceSubParentDD, function()
+    ceSubParentDD:SetupMenu(function(_, rootDescription)
         for _, cls in ipairs(GetItemClassList()) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = cls.name
-            info.value = cls.classID
-            info.func = function(btn)
-                condEditorState.subtypeParent = btn.value
+            rootDescription:CreateRadio(cls.name, function(value)
+                return condEditorState.subtypeParent == value
+            end, function(value)
+                condEditorState.subtypeParent = value
                 condEditorState.value = nil
-                UIDropDownMenu_SetText(ceSubParentDD, btn:GetText())
-                UIDropDownMenu_SetText(ceSubTypeDD, "Select...")
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+                ceSubParentDD:OverrideText(cls.name)
+                ceSubTypeDD:OverrideText("Select...")
+            end, cls.classID)
         end
     end)
 
-    UIDropDownMenu_Initialize(ceSubTypeDD, function()
+    ceSubTypeDD:SetupMenu(function(_, rootDescription)
         local parentID = condEditorState.subtypeParent
         if not parentID or parentID < 0 then return end
         for _, sub in ipairs(GetItemSubClassList(parentID)) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = sub.name
-            info.value = sub.subclassID
-            info.func = function(btn)
-                condEditorState.value = parentID * 1000 + btn.value
-                UIDropDownMenu_SetText(ceSubTypeDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(sub.name, function(value)
+                return condEditorState.value == parentID * 1000 + value
+            end, function(value)
+                condEditorState.value = parentID * 1000 + value
+                ceSubTypeDD:OverrideText(sub.name)
+            end, sub.subclassID)
         end
     end)
 
-    local ceEquipDD = CreateFrame("Frame", "WildIntentCondEquipDD", condEditor, "UIDropDownMenuTemplate")
-    ceEquipDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceEquipDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceEquipDD, 140)
+    local ceEquipDD = CreateFrame("DropdownButton", "WildIntentCondEquipDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceEquipDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceEquipDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceEquipDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceEquipDD, function()
+    ceEquipDD:SetupMenu(function(_, rootDescription)
         local seen = {}
         for loc, label in pairs(Wild.EQUIP_LOC_LABELS) do
             if not seen[label] then
                 seen[label] = true
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = label
-                info.value = loc
-                info.func = function(btn)
-                    condEditorState.value = btn.value
-                    UIDropDownMenu_SetText(ceEquipDD, btn:GetText())
-                    CloseDropDownMenus()
-                end
-                UIDropDownMenu_AddButton(info)
+                rootDescription:CreateRadio(label, function(value)
+                    return condEditorState.value == value
+                end, function(value)
+                    condEditorState.value = value
+                    ceEquipDD:OverrideText(label)
+                end, loc)
             end
         end
     end)
 
-    local ceProfDD = CreateFrame("Frame", "WildIntentCondProfDD", condEditor, "UIDropDownMenuTemplate")
-    ceProfDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceProfDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceProfDD, 140)
+    local ceProfDD = CreateFrame("DropdownButton", "WildIntentCondProfDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceProfDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceProfDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceProfDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceProfDD, function()
+    ceProfDD:SetupMenu(function(_, rootDescription)
         local sorted = {}
         for skillLine, name in pairs(Wild.PROFESSION_SKILL_LINES) do
             table.insert(sorted, { skillLine = skillLine, name = name })
         end
         table.sort(sorted, function(a, b) return a.name < b.name end)
         for _, prof in ipairs(sorted) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = prof.name
-            info.value = prof.skillLine
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceProfDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(prof.name, function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceProfDD:OverrideText(prof.name)
+            end, prof.skillLine)
         end
     end)
 
-    local ceClassDD = CreateFrame("Frame", "WildIntentCondClassDD", condEditor, "UIDropDownMenuTemplate")
-    ceClassDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceClassDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceClassDD, 140)
+    local ceClassDD = CreateFrame("DropdownButton", "WildIntentCondClassDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceClassDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceClassDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceClassDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceClassDD, function()
+    ceClassDD:SetupMenu(function(_, rootDescription)
         for _, classFile in ipairs(Wild.CLASS_FILES) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = Wild.CLASS_LABELS[classFile] or classFile
-            info.value = classFile
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceClassDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(Wild.CLASS_LABELS[classFile] or classFile, function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceClassDD:OverrideText(Wild.CLASS_LABELS[value] or value)
+            end, classFile)
         end
     end)
 
-    local ceBindDD = CreateFrame("Frame", "WildIntentCondBindDD", condEditor, "UIDropDownMenuTemplate")
-    ceBindDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceBindDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceBindDD, 140)
+    local ceBindDD = CreateFrame("DropdownButton", "WildIntentCondBindDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceBindDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceBindDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceBindDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceBindDD, function()
+    ceBindDD:SetupMenu(function(_, rootDescription)
         for val, label in pairs(Wild.BIND_LABELS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = label
-            info.value = val
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceBindDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(label, function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceBindDD:OverrideText(Wild.BIND_LABELS[value] or value)
+            end, val)
         end
     end)
 
-    local ceBoolDD = CreateFrame("Frame", "WildIntentCondBoolDD", condEditor, "UIDropDownMenuTemplate")
-    ceBoolDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceBoolDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceBoolDD, 100)
+    local ceBoolDD = CreateFrame("DropdownButton", "WildIntentCondBoolDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceBoolDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceBoolDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceBoolDD:SetWidth(100)
 
-    UIDropDownMenu_Initialize(ceBoolDD, function()
+    ceBoolDD:SetupMenu(function(_, rootDescription)
         local attrDef = condEditorState.attr and Wild.ATTR_BY_KEY[condEditorState.attr]
         for _, value in ipairs({ true, false }) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = Wild.FormatConditionValue({ value = value }, attrDef)
-            info.value = value
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceBoolDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(Wild.FormatConditionValue({ value = value }, attrDef), function(selected)
+                return condEditorState.value == selected
+            end, function(selected)
+                condEditorState.value = selected
+                ceBoolDD:OverrideText(Wild.FormatConditionValue({ value = selected }, attrDef))
+            end, value)
         end
     end)
 
-    local ceExpanDD = CreateFrame("Frame", "WildIntentCondExpanDD", condEditor, "UIDropDownMenuTemplate")
-    ceExpanDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceExpanDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceExpanDD, 140)
+    local ceExpanDD = CreateFrame("DropdownButton", "WildIntentCondExpanDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceExpanDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceExpanDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceExpanDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceExpanDD, function()
+    ceExpanDD:SetupMenu(function(_, rootDescription)
         -- Build sorted list by expansion ID (ascending)
         local sorted = {}
         for id, name in pairs(Wild.EXPANSION_NAMES) do
@@ -3914,37 +3882,31 @@ local function CreateIntentRulesTab()
         end
         table.sort(sorted, function(a, b) return a.id < b.id end)
         for _, expac in ipairs(sorted) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = expac.name
-            info.value = expac.name
-            info.func = function(btn)
-                condEditorState.value = btn.value
-                UIDropDownMenu_SetText(ceExpanDD, btn:GetText())
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info)
+            rootDescription:CreateRadio(expac.name, function(value)
+                return condEditorState.value == value
+            end, function(value)
+                condEditorState.value = value
+                ceExpanDD:OverrideText(value)
+            end, expac.name)
         end
     end)
 
-    local ceTrackDD = CreateFrame("Frame", "WildIntentCondTrackDD", condEditor, "UIDropDownMenuTemplate")
-    ceTrackDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceTrackDD:SetPoint("TOP", ceValLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceTrackDD, 140)
+    local ceTrackDD = CreateFrame("DropdownButton", "WildIntentCondTrackDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceTrackDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceTrackDD:SetPoint("TOP", ceValLabel, "TOP", 0, 4)
+    ceTrackDD:SetWidth(140)
 
-    UIDropDownMenu_Initialize(ceTrackDD, function()
+    ceTrackDD:SetupMenu(function(_, rootDescription)
         -- Build sorted list by track rank (ascending), including 0=None.
         for rank = 0, 6 do
             local name = Wild.UPGRADE_TRACK_NAMES[rank]
             if name then
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = name
-                info.value = rank
-                info.func = function(btn)
-                    condEditorState.value = btn.value
-                    UIDropDownMenu_SetText(ceTrackDD, btn:GetText())
-                    CloseDropDownMenus()
-                end
-                UIDropDownMenu_AddButton(info)
+                rootDescription:CreateRadio(name, function(value)
+                    return condEditorState.value == value
+                end, function(value)
+                    condEditorState.value = value
+                    ceTrackDD:OverrideText(Wild.UPGRADE_TRACK_NAMES[value])
+                end, rank)
             end
         end
     end)
@@ -3954,10 +3916,10 @@ local function CreateIntentRulesTab()
     ceValModeLabel:SetPoint("TOPLEFT", ceValLabel, "BOTTOMLEFT", 0, -CE_ROW_H)
     ceValModeLabel:SetText("Compare to:")
 
-    local ceValModeDD = CreateFrame("Frame", "WildIntentCondValModeDD", condEditor, "UIDropDownMenuTemplate")
-    ceValModeDD:SetPoint("LEFT", condEditor, "LEFT", CE_DD_X, 0)
-    ceValModeDD:SetPoint("TOP", ceValModeLabel, "TOP", 0, 8)
-    UIDropDownMenu_SetWidth(ceValModeDD, 160)
+    local ceValModeDD = CreateFrame("DropdownButton", "WildIntentCondValModeDD" .. (namespace or ""), condEditor, "WowStyle1DropdownTemplate")
+    ceValModeDD:SetPoint("LEFT", condEditor, "LEFT", CE_COL_INPUT, 0)
+    ceValModeDD:SetPoint("TOP", ceValModeLabel, "TOP", 0, 4)
+    ceValModeDD:SetWidth(160)
 
     -- Offset label (dynamic reference mode)
     local ceOffsetLabel = condEditor:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -4040,7 +4002,7 @@ local function CreateIntentRulesTab()
             elseif vt == "class" then ceClassDD:Show()
             elseif vt == "bind" then ceBindDD:Show()
             elseif vt == "boolean" then
-                UIDropDownMenu_SetWidth(ceBoolDD, attrDef.valueLabels and 170 or 100)
+                ceBoolDD:SetWidth(attrDef.valueLabels and 170 or 100)
                 ceBoolDD:Show()
             elseif vt == "expansion" then ceExpanDD:Show()
             end
@@ -4059,30 +4021,24 @@ local function CreateIntentRulesTab()
         end)
     end
 
-    UIDropDownMenu_Initialize(ceValModeDD, function()
-        local staticInfo = UIDropDownMenu_CreateInfo()
-        staticInfo.text = "Fixed value"
-        staticInfo.value = "_static"
-        staticInfo.func = function()
+    ceValModeDD:SetupMenu(function(_, rootDescription)
+        rootDescription:CreateRadio("Fixed value", function()
+            return condEditorState.ref == nil
+        end, function()
             condEditorState.ref = nil
             condEditorState.offset = nil
-            UIDropDownMenu_SetText(ceValModeDD, "Fixed value")
-            CloseDropDownMenus()
+            ceValModeDD:OverrideText("Fixed value")
             UpdateCondEditorLayout()
-        end
-        UIDropDownMenu_AddButton(staticInfo)
+        end, "_static")
         for _, ref in ipairs(Wild.DYNAMIC_REFS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = ref.label
-            info.value = ref.key
-            info.func = function(btn)
-                condEditorState.ref = btn.value
+            rootDescription:CreateRadio(ref.label, function(value)
+                return condEditorState.ref == value
+            end, function(value)
+                condEditorState.ref = value
                 condEditorState.value = nil
-                UIDropDownMenu_SetText(ceValModeDD, btn:GetText())
-                CloseDropDownMenus()
+                ceValModeDD:OverrideText(ref.label)
                 UpdateCondEditorLayout()
-            end
-            UIDropDownMenu_AddButton(info)
+            end, ref.key)
         end
     end)
 
@@ -4093,32 +4049,30 @@ local function CreateIntentRulesTab()
         condEditorState.ref = nil
         condEditorState.offset = nil
         condEditorState.subtypeParent = nil
-        UIDropDownMenu_SetText(ceAttrDD, attr.label)
-        if attr.valueType == "boolean" then UIDropDownMenu_SetText(ceBoolDD, "Select...") end
+        ceAttrDD:OverrideText(attr.label)
+        if attr.valueType == "boolean" then ceBoolDD:OverrideText("Select...") end
         for _, op in ipairs(Wild.OPERATORS) do
             if op.forTypes[attr.valueType] then
                 condEditorState.op = op.key
-                UIDropDownMenu_SetText(ceOpDD, op.label)
+                ceOpDD:OverrideText(op.label)
                 break
             end
         end
         UpdateCondEditorLayout()
     end)
 
-    UIDropDownMenu_Initialize(ceOpDD, function()
+    ceOpDD:SetupMenu(function(_, rootDescription)
         local attrKey = condEditorState.attr
         local attrDef = attrKey and Wild.ATTR_BY_KEY[attrKey]
         local vt = attrDef and attrDef.valueType or "string"
         for _, op in ipairs(Wild.OPERATORS) do
             if op.forTypes[vt] then
-                local info = UIDropDownMenu_CreateInfo()
-                info.text = op.label; info.value = op.key
-                info.func = function(btn)
-                    condEditorState.op = btn.value
-                    UIDropDownMenu_SetText(ceOpDD, btn:GetText())
-                    CloseDropDownMenus()
-                end
-                UIDropDownMenu_AddButton(info)
+                rootDescription:CreateRadio(op.label, function(value)
+                    return condEditorState.op == value
+                end, function(value)
+                    condEditorState.op = value
+                    ceOpDD:OverrideText(op.label)
+                end, op.key)
             end
         end
     end)
@@ -4133,25 +4087,25 @@ local function CreateIntentRulesTab()
             condEditorState.offset = cond.offset
         end
         local attrDef = condEditorState.attr and Wild.ATTR_BY_KEY[condEditorState.attr]
-        UIDropDownMenu_SetText(ceAttrDD, attrDef and attrDef.label or "Select...")
+        ceAttrDD:OverrideText(attrDef and attrDef.label or "Select...")
         local opLabel = "Select..."
         if condEditorState.op then
             for _, op in ipairs(Wild.OPERATORS) do
                 if op.key == condEditorState.op then opLabel = op.label; break end
             end
         end
-        UIDropDownMenu_SetText(ceOpDD, opLabel)
+        ceOpDD:OverrideText(opLabel)
 
         local vt = attrDef and attrDef.valueType or "string"
         if condEditorState.ref then
             for _, ref in ipairs(Wild.DYNAMIC_REFS) do
                 if ref.key == condEditorState.ref then
-                    UIDropDownMenu_SetText(ceValModeDD, ref.label); break
+                    ceValModeDD:OverrideText(ref.label); break
                 end
             end
             ceOffsetInput:SetText(tostring(condEditorState.offset or 0))
         else
-            UIDropDownMenu_SetText(ceValModeDD, "Fixed value")
+            ceValModeDD:OverrideText("Fixed value")
             ceOffsetInput:SetText("0")
             if vt == "number" or vt == "id" then
                 ceNumInput:SetText(tostring(condEditorState.value or ""))
@@ -4160,39 +4114,39 @@ local function CreateIntentRulesTab()
             elseif vt == "quality" then
                 local q = condEditorState.value
                 if q and q >= 0 then
-                    UIDropDownMenu_SetText(ceQualDD, (QUALITY_COLORS[q] or "") .. QUALITY_NAMES[q] .. "|r")
-                else UIDropDownMenu_SetText(ceQualDD, "Select...") end
+                    ceQualDD:OverrideText((QUALITY_COLORS[q] or "") .. QUALITY_NAMES[q] .. "|r")
+                else ceQualDD:OverrideText("Select...") end
             elseif vt == "upgradetrack" then
                 local t = condEditorState.value
                 if t and Wild.UPGRADE_TRACK_NAMES[t] then
-                    UIDropDownMenu_SetText(ceTrackDD, Wild.UPGRADE_TRACK_NAMES[t])
-                else UIDropDownMenu_SetText(ceTrackDD, "Select...") end
+                    ceTrackDD:OverrideText(Wild.UPGRADE_TRACK_NAMES[t])
+                else ceTrackDD:OverrideText("Select...") end
             elseif vt == "itemtype" then
-                UIDropDownMenu_SetText(ceTypeDD, condEditorState.value and GetItemClassInfo(condEditorState.value) or "Select...")
+                ceTypeDD:OverrideText(condEditorState.value and GetItemClassInfo(condEditorState.value) or "Select...")
             elseif vt == "itemsubtype" then
                 local packed = condEditorState.value
                 if packed then
                     local cid = math.floor(packed / 1000)
                     local sid = packed % 1000
                     condEditorState.subtypeParent = cid
-                    UIDropDownMenu_SetText(ceSubParentDD, GetItemClassInfo(cid) or "?")
-                    UIDropDownMenu_SetText(ceSubTypeDD, GetItemSubClassInfo(cid, sid) or "?")
+                    ceSubParentDD:OverrideText(GetItemClassInfo(cid) or "?")
+                    ceSubTypeDD:OverrideText(GetItemSubClassInfo(cid, sid) or "?")
                 else
-                    UIDropDownMenu_SetText(ceSubParentDD, "Select type...")
-                    UIDropDownMenu_SetText(ceSubTypeDD, "Select...")
+                    ceSubParentDD:OverrideText("Select type...")
+                    ceSubTypeDD:OverrideText("Select...")
                 end
             elseif vt == "equiploc" then
-                UIDropDownMenu_SetText(ceEquipDD, condEditorState.value and (Wild.EQUIP_LOC_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
+                ceEquipDD:OverrideText(condEditorState.value and (Wild.EQUIP_LOC_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
             elseif vt == "profession" then
-                UIDropDownMenu_SetText(ceProfDD, condEditorState.value and (Wild.PROFESSION_SKILL_LINES[condEditorState.value] or tostring(condEditorState.value)) or "Select...")
+                ceProfDD:OverrideText(condEditorState.value and (Wild.PROFESSION_SKILL_LINES[condEditorState.value] or tostring(condEditorState.value)) or "Select...")
             elseif vt == "class" then
-                UIDropDownMenu_SetText(ceClassDD, condEditorState.value and (Wild.CLASS_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
+                ceClassDD:OverrideText(condEditorState.value and (Wild.CLASS_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
             elseif vt == "bind" then
-                UIDropDownMenu_SetText(ceBindDD, condEditorState.value and (Wild.BIND_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
+                ceBindDD:OverrideText(condEditorState.value and (Wild.BIND_LABELS[condEditorState.value] or condEditorState.value) or "Select...")
             elseif vt == "expansion" then
-                UIDropDownMenu_SetText(ceExpanDD, condEditorState.value or "Select...")
+                ceExpanDD:OverrideText(condEditorState.value or "Select...")
             elseif vt == "boolean" then
-                UIDropDownMenu_SetText(ceBoolDD, condEditorState.value ~= nil
+                ceBoolDD:OverrideText(condEditorState.value ~= nil
                     and Wild.FormatConditionValue(condEditorState, attrDef) or "Select...")
             end
         end
@@ -4690,7 +4644,7 @@ local function CreateIntentRulesTab()
             for _, opt in ipairs(TARGET_OPTIONS) do
                 if opt.value == editorIntent.target then targetText = opt.text; break end
             end
-            UIDropDownMenu_SetText(sourceDD, targetText)
+            sourceDD:OverrideText(targetText)
         end
 
         -- Table layout: labels at COL_LEFT, inputs at COL_INPUT
@@ -4698,9 +4652,9 @@ local function CreateIntentRulesTab()
         local rowY = 0  -- offset from actionLabel top
 
         actionLabel:ClearAllPoints()
-        actionLabel:SetPoint("TOPLEFT", addActorDD, "BOTTOMLEFT", 16, -8)
+        actionLabel:SetPoint("TOPLEFT", addActorDD, "BOTTOMLEFT", 0, -8)
         actionDD:ClearAllPoints()
-        actionDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT - 16, 0)
+        actionDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
         actionDD:SetPoint("TOP", actionLabel, "TOP", 0, 2)
 
         local lastRowAnchor = actionLabel
@@ -4710,7 +4664,7 @@ local function CreateIntentRulesTab()
             transferSourceLabel:ClearAllPoints()
             transferSourceLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING)
             transferSourceDD:ClearAllPoints()
-            transferSourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT - 16, 0)
+            transferSourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
             transferSourceDD:SetPoint("TOP", transferSourceLabel, "TOP", 0, 2)
             lastRowAnchor = transferSourceLabel
 
@@ -4718,14 +4672,14 @@ local function CreateIntentRulesTab()
             transferTargetLabel:ClearAllPoints()
             transferTargetLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING)
             sourceDD:ClearAllPoints()
-            sourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT - 16, 0)
+            sourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
             sourceDD:SetPoint("TOP", transferTargetLabel, "TOP", 0, 2)
             lastRowAnchor = transferTargetLabel
         elseif needsTarget then
             sourceLabel:ClearAllPoints()
             sourceLabel:SetPoint("TOPLEFT", lastRowAnchor, "BOTTOMLEFT", 0, ROW_SPACING)
             sourceDD:ClearAllPoints()
-            sourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT - 16, 0)
+            sourceDD:SetPoint("LEFT", editor, "LEFT", COL_INPUT, 0)
             sourceDD:SetPoint("TOP", sourceLabel, "TOP", 0, 2)
             lastRowAnchor = sourceLabel
         elseif isMail then
@@ -4756,21 +4710,19 @@ local function CreateIntentRulesTab()
         UpdateSaveBtnAnchor()
     end
 
-    UIDropDownMenu_Initialize(actionDD, function()
+    actionDD:SetupMenu(function(_, rootDescription)
         for _, opt in ipairs(ACTION_OPTIONS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text; info.value = opt.value
-            info.func = function(btn)
-                editorIntent.action = btn.value
-                UIDropDownMenu_SetText(actionDD, btn:GetText())
-                CloseDropDownMenus()
+            rootDescription:CreateRadio(opt.text, function(value)
+                return editorIntent.action == value
+            end, function(value)
+                editorIntent.action = value
+                actionDD:OverrideText(opt.text)
                 UpdateEditorLayout()
-            end
-            UIDropDownMenu_AddButton(info)
+            end, opt.value)
         end
     end)
 
-    UIDropDownMenu_Initialize(sourceDD, function()
+    sourceDD:SetupMenu(function(_, rootDescription)
         local action = editorIntent.action or "deposit"
         local opts
         if action == "transfer" then
@@ -4785,19 +4737,17 @@ local function CreateIntentRulesTab()
             opts = TARGET_OPTIONS
         end
         for _, opt in ipairs(opts) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text; info.value = opt.value
-            info.func = function(btn)
-                editorIntent.target = btn.value
-                UIDropDownMenu_SetText(sourceDD, btn:GetText())
-                CloseDropDownMenus()
+            rootDescription:CreateRadio(opt.text, function(value)
+                return editorIntent.target == value
+            end, function(value)
+                editorIntent.target = value
+                sourceDD:OverrideText(opt.text)
                 UpdateEditorLayout()
-            end
-            UIDropDownMenu_AddButton(info)
+            end, opt.value)
         end
     end)
 
-    UIDropDownMenu_Initialize(transferSourceDD, function()
+    transferSourceDD:SetupMenu(function(_, rootDescription)
         -- Filter out the current target value
         local opts = {}
         for _, o in ipairs(TRANSFER_SOURCE_OPTIONS) do
@@ -4806,26 +4756,26 @@ local function CreateIntentRulesTab()
             end
         end
         for _, opt in ipairs(opts) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = opt.text; info.value = opt.value
-            info.func = function(btn)
-                editorIntent.source = btn.value
-                UIDropDownMenu_SetText(transferSourceDD, btn:GetText())
-                CloseDropDownMenus()
+            rootDescription:CreateRadio(opt.text, function(value)
+                return editorIntent.source == value
+            end, function(value)
+                editorIntent.source = value
+                transferSourceDD:OverrideText(opt.text)
                 UpdateEditorLayout()
-            end
-            UIDropDownMenu_AddButton(info)
+            end, opt.value)
         end
     end)
 
     local function ShowEditor(intentIndex)
         editingIndex = intentIndex
+        editingIntent = nil
         HideCondEditor()
         local intents = Wild.db and Wild.db.intents
         if intentIndex and intents and intents[intentIndex] then
             editorTitle:SetText("Edit Intent")
             saveBtn:SetText("Save")
             local intent = intents[intentIndex]
+            editingIntent = intent
             editorIntent = {
                 action = intent.action or "deposit",
                 target = intent.target,
@@ -4856,6 +4806,7 @@ local function CreateIntentRulesTab()
             end
         else
             editingIndex = nil
+            editingIntent = nil
             editorTitle:SetText("New Intent")
             saveBtn:SetText("Add")
             editorIntent = { action = "deposit", target = "warband" }
@@ -4868,7 +4819,7 @@ local function CreateIntentRulesTab()
         for _, opt in ipairs(ACTION_OPTIONS) do
             if opt.value == editorIntent.action then actionText = opt.text; break end
         end
-        UIDropDownMenu_SetText(actionDD, actionText)
+        actionDD:OverrideText(actionText)
 
         RefreshActorList()
 
@@ -4876,14 +4827,14 @@ local function CreateIntentRulesTab()
         for _, opt in ipairs(TARGET_OPTIONS) do
             if opt.value == editorIntent.target then targetText = opt.text; break end
         end
-        UIDropDownMenu_SetText(sourceDD, targetText)
+        sourceDD:OverrideText(targetText)
 
         -- Populate transfer source dropdown
         local sourceText = "Personal Bank"
         for _, opt in ipairs(TRANSFER_SOURCE_OPTIONS) do
             if opt.value == editorIntent.source then sourceText = opt.text; break end
         end
-        UIDropDownMenu_SetText(transferSourceDD, sourceText)
+        transferSourceDD:OverrideText(sourceText)
 
         recipientInput:SetText(editorIntent.recipient or "")
 
@@ -4900,10 +4851,22 @@ local function CreateIntentRulesTab()
         editor:Hide()
         HideCondEditor()
         editingIndex = nil
+        editingIntent = nil
         UpdateIntentsScrollHeight()
     end
 
     saveBtn:SetScript("OnClick", function()
+        if editingIndex then
+            local currentIndex
+            for index, intent in ipairs(Wild.db.intents or {}) do
+                if intent == editingIntent then currentIndex = index; break end
+            end
+            if not currentIndex then
+                Wild.Print("|cffff6600Wild:|r This intent changed in another settings window. Reopen it before saving.")
+                return
+            end
+            editingIndex = currentIndex
+        end
         local action = editorIntent.action or "deposit"
 
         -- Hold: must have at least one gold or item group
@@ -5018,6 +4981,7 @@ local function CreateIntentRulesTab()
 
         HideEditor()
         RefreshIntentList()
+        Wild.NotifySettingsChanged("intents", source)
     end)
 
     cancelBtn:SetScript("OnClick", HideEditor)
@@ -5091,6 +5055,7 @@ local function CreateIntentRulesTab()
                     intents[idx], intents[idx - 1] = intents[idx - 1], intents[idx]
                     HideEditor()
                     RefreshIntentList()
+                    Wild.NotifySettingsChanged("intents", source)
                 end
             end)
             row.downBtn:SetScript("OnClick", function()
@@ -5098,16 +5063,19 @@ local function CreateIntentRulesTab()
                     intents[idx], intents[idx + 1] = intents[idx + 1], intents[idx]
                     HideEditor()
                     RefreshIntentList()
+                    Wild.NotifySettingsChanged("intents", source)
                 end
             end)
             row.enableBtn:SetScript("OnClick", function(self)
                 intents[idx].enabled = self:GetChecked()
+                Wild.NotifySettingsChanged("intents", source)
             end)
             row.editBtn:SetScript("OnClick", function() ShowEditor(idx) end)
             row.removeBtn:SetScript("OnClick", function()
                 table.remove(Wild.db.intents, idx)
                 HideEditor()
                 RefreshIntentList()
+                Wild.NotifySettingsChanged("intents", source)
             end)
 
             row:Show()
@@ -5132,8 +5100,9 @@ end
 -- Tab: Actors (Character data & labels)
 -- ============================================================
 
-local function CreateActorsTab()
+local function CreateActorsTab(namespace)
     local panel = CreateFrame("Frame")
+    local source = namespace == "Native" and "native" or "standalone"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -5232,6 +5201,7 @@ local function CreateActorsTab()
         table.insert(Wild.db.actors.labels, { name = text })
         addLabelInput:SetText("")
         RefreshLabelList()
+        Wild.NotifySettingsChanged("actors", source)
     end)
 
     addLabelInput:SetScript("OnEnterPressed", function()
@@ -5283,6 +5253,7 @@ local function CreateActorsTab()
             row.enableCB:SetScript("OnClick", function(self)
                 labels[idx].enabled = self:GetChecked()
                 RefreshLabelList()
+                Wild.NotifySettingsChanged("actors", source)
             end)
             row.removeBtn:SetScript("OnClick", function()
                 -- Remove label from all characters
@@ -5299,6 +5270,7 @@ local function CreateActorsTab()
                 table.remove(Wild.db.actors.labels, idx)
                 RefreshLabelList()
                 RefreshCharList()
+                Wild.NotifySettingsChanged("actors", source)
             end)
 
             row:Show()
@@ -5441,11 +5413,6 @@ local function CreateActorsTab()
                 w.removeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff0000X|r") end)
                 w.removeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffff4444X|r") end)
 
-                -- Label toggle dropdown (on editBtn click)
-                w.labelMenu = CreateFrame("Frame", "WildActorLabelMenu" .. i, w, "UIDropDownMenuTemplate")
-                w.labelMenu:SetPoint("CENTER", w, "CENTER", 0, 0)
-                w.labelMenu:Hide()
-
                 charWidgets[i] = w
             end
 
@@ -5485,42 +5452,49 @@ local function CreateActorsTab()
                     return
                 end
 
-                local menuFrame = w.labelMenu
-                UIDropDownMenu_Initialize(menuFrame, function()
+                MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+                    rootDescription:SetScrollMode(MENU_MAX_HEIGHT)
                     local charData = Wild.db.actors.characters[thisCharKey]
                     if not charData then return end
-                    if not charData.labels then charData.labels = {} end
 
                     for _, lbl in ipairs(labels) do
-                        local info = UIDropDownMenu_CreateInfo()
-                        info.text = lbl.name
-                        info.isNotRadio = true
-                        info.keepShownOnClick = true
-
-                        -- Check if character has this label
-                        local hasLabel = false
-                        for _, cl in ipairs(charData.labels) do
-                            if cl == lbl.name then hasLabel = true; break end
-                        end
-                        info.checked = hasLabel
-
-                        info.func = function(btn)
-                            if not charData.labels then charData.labels = {} end
-                            if hasLabel then
-                                for j = #charData.labels, 1, -1 do
-                                    if charData.labels[j] == lbl.name then
-                                        table.remove(charData.labels, j)
+                        rootDescription:CreateCheckbox(lbl.name, function()
+                            local current = Wild.db.actors.characters[thisCharKey]
+                            for _, label in ipairs(current and current.labels or {}) do
+                                if label == lbl.name then return true end
+                            end
+                            return false
+                        end, function()
+                            local current = Wild.db.actors.characters[thisCharKey]
+                            local labelExists = false
+                            for _, label in ipairs(Wild.db.actors.labels or {}) do
+                                if label == lbl then labelExists = true; break end
+                            end
+                            if not current or not labelExists then
+                                Wild.Print("|cffff6600Wild:|r Character labels changed in another settings window. Reopen the label menu.")
+                                return MenuResponse.CloseAll
+                            end
+                            if not current.labels then current.labels = {} end
+                            local assigned = false
+                            for _, label in ipairs(current.labels) do
+                                if label == lbl.name then assigned = true; break end
+                            end
+                            if assigned then
+                                for j = #current.labels, 1, -1 do
+                                    if current.labels[j] == lbl.name then
+                                        table.remove(current.labels, j)
                                     end
                                 end
                             else
-                                table.insert(charData.labels, lbl.name)
+                                table.insert(current.labels, lbl.name)
                             end
-                            RefreshCharList()
-                        end
-                        UIDropDownMenu_AddButton(info)
+                            -- Hiding the owner during a list rebuild would close the checkbox menu.
+                            local text = FormatCustomLabels(current)
+                            w.customLabels:SetText(text ~= "" and text or "|cff666666none|r")
+                            Wild.NotifySettingsChanged("actors", source)
+                        end)
                     end
-                end, "MENU")
-                ToggleDropDownMenu(1, nil, menuFrame, self, 0, 0)
+                end)
             end)
 
             -- Remove button: remove character (don't allow removing current)
@@ -5528,6 +5502,7 @@ local function CreateActorsTab()
             w.removeBtn:SetScript("OnClick", function()
                 Wild.db.actors.characters[thisCharKey] = nil
                 RefreshCharList()
+                Wild.NotifySettingsChanged("actors", source)
             end)
 
             w:SetHeight(76)
@@ -5570,7 +5545,7 @@ local function CreateVolumeTab()
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.volumeControl.enabled = checked
+        SetSetting("volumeControl.enabled", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         Wild.UpdateVolumeControl()
     end)
@@ -5618,7 +5593,7 @@ local function CreateDurabilityTab()
 
     equippedCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.durability.showEquipped = checked
+        SetSetting("durability.showEquipped", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         Wild.UpdateDurabilityOverlays()
     end)
@@ -5637,7 +5612,7 @@ local function CreateDurabilityTab()
 
     totalCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.durability.showEquippedTotal = checked
+        SetSetting("durability.showEquippedTotal", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         Wild.UpdateDurabilityOverlays()
     end)
@@ -5656,7 +5631,7 @@ local function CreateDurabilityTab()
 
     bagsCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        Wild.db.durability.showBags = checked
+        SetSetting("durability.showBags", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
         Wild.UpdateDurabilityOverlays()
     end)
@@ -5725,6 +5700,67 @@ local function CreateSpeedTab()
     end)
 
     return panel
+end
+
+local PAGE_FACTORIES = {
+    ["LFG"] = CreateLFGTab,
+    ["Center Circle"] = CreateCircleTab,
+    ["Speed"] = CreateSpeedTab,
+    ["Cast History"] = CreateCastHistoryTab,
+    ["Intent Rules"] = CreateIntentRulesTab,
+    ["Actors"] = CreateActorsTab,
+    ["Advanced"] = CreateIntentsTab,
+    ["Character"] = CreateCharacterTab,
+    ["Auction House"] = CreateAuctionHouseTab,
+    ["Crafting Orders"] = CreateCraftingOrdersTab,
+    ["Mail"] = CreateMailTab,
+    ["Loot"] = CreateLootTab,
+    ["Quests"] = CreateQuestsTab,
+    ["Dialog Key"] = CreateDialogKeyTab,
+    ["Gossip"] = CreateGossipTab,
+    ["Darkmoon Faire"] = CreateDarkmoonFaireTab,
+    ["Tooltips"] = CreateTooltipTab,
+    ["Dungeon Bar"] = CreateDungeonBarTab,
+    ["Auto-Reply"] = CreateAutoReplyTab,
+    ["Delve"] = CreateDelveTab,
+    ["Volume"] = CreateVolumeTab,
+    ["Durability"] = CreateDurabilityTab,
+}
+
+local PAGE_PREFIXES = {
+    ["LFG"] = { "lfg" }, ["Center Circle"] = { "screenCenterCircle" },
+    ["Speed"] = { "speed" }, ["Cast History"] = { "castHistory" },
+    ["Intent Rules"] = { "intents", "actors" }, ["Actors"] = { "actors" },
+    ["Advanced"] = { "advanced" }, ["Character"] = { "vendor", "reputation", "currency" },
+    ["Auction House"] = { "auctionHouse" }, ["Crafting Orders"] = { "craftingOrders" },
+    ["Mail"] = { "mail" }, ["Loot"] = { "loot" }, ["Quests"] = { "quests" },
+    ["Dialog Key"] = { "dialogKey" }, ["Gossip"] = { "gossip" },
+    ["Darkmoon Faire"] = { "darkmoonFaire" }, ["Tooltips"] = { "tooltip" },
+    ["Dungeon Bar"] = { "dungeonBar" }, ["Auto-Reply"] = { "autoReply" },
+    ["Delve"] = { "delve" }, ["Volume"] = { "volumeControl" }, ["Durability"] = { "durability" },
+}
+
+function Wild.CreateSettingsCanvas(name, namespace)
+    local factory = PAGE_FACTORIES[name]
+    if not factory then error("Unknown Wild settings page: " .. tostring(name)) end
+    local panel = factory(namespace)
+    PrepareSettingsPanel(panel)
+    panel:Hide()
+    return panel
+end
+
+function Wild.RefreshSettings(key, source)
+    if source == "standalone" or refreshingPanels or not mainFrame or not mainFrame:IsShown() then return end
+    local panel = mainFrame.tabs[currentTab]
+    if not panel then return end
+    if key then
+        local matches = false
+        for _, prefix in ipairs(PAGE_PREFIXES[currentTab]) do
+            if key:sub(1, #prefix) == prefix or prefix:sub(1, #key) == key then matches = true; break end
+        end
+        if not matches then return end
+    end
+    panel:OnRefresh()
 end
 
 -- ============================================================
