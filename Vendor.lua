@@ -24,6 +24,8 @@ sellFrame.totalCopper = 0
 sellFrame.soldCount = 0
 sellFrame.timer = 0
 sellFrame.onBatchDone = nil
+sellFrame.batch = nil
+sellFrame.batchDone = false
 
 sellFrame:SetScript("OnUpdate", function(self, elapsed)
     self.timer = self.timer - elapsed
@@ -32,29 +34,31 @@ sellFrame:SetScript("OnUpdate", function(self, elapsed)
 
     if not MerchantFrame or not MerchantFrame:IsShown() then
         self:Hide()
-        if self.onBatchDone then self.onBatchDone(false) end
+        if self.onBatchDone then self.onBatchDone(false, true) end
         return
     end
 
     local item = tremove(self.pending, 1)
     if not item then
-        -- Batch done — notify callback with whether anything was sold
+        -- Requests are complete; bag changes still have to confirm the sales.
         self:Hide()
-        local soldThisBatch = self.soldCount > 0
-        if self.onBatchDone then self.onBatchDone(soldThisBatch) end
+        if self.onBatchDone then self.onBatchDone(#self.batch.entries > 0, false) end
         return
     end
 
     local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-    if info and info.itemID then
-        C_Container.UseContainerItem(item.bag, item.slot)
-        self.totalCopper = self.totalCopper + item.copper
-        self.soldCount = self.soldCount + item.count
-        self.soldEntries[#self.soldEntries + 1] = {
-            link = item.link,
-            count = item.count,
-            copper = item.copper,
-        }
+    if info and info.itemID == item.itemID and info.hyperlink == item.link and not info.isLocked then
+        info.bag = item.bag; info.slot = item.slot
+        local price = Wild.GetEffectiveSellPrice(info.itemID, info)
+        if price and price > 0 then
+            self.batch.observedBagUpdate = false
+            Wild.RecordItemAction(self.batch, info, info.stackCount or 1, price)
+            C_Container.UseContainerItem(item.bag, item.slot)
+        else
+            Wild.Log("Vendor", "Skipped a requested sale because its sell price is unavailable.")
+        end
+    else
+        Wild.Log("Vendor", "Skipped a requested sale because its bag slot changed or is locked.")
     end
 end)
 
@@ -155,6 +159,7 @@ local function BuildSellBatch()
                                 pending[#pending + 1] = {
                                     bag = bag,
                                     slot = slot,
+                                    itemID = info.itemID,
                                     link = info.hyperlink,
                                     count = info.stackCount or 1,
                                     copper = sellPrice * (info.stackCount or 1),
@@ -185,6 +190,10 @@ end
 
 local sellLoopActive = false
 local sellPassNum = 0
+local sellGeneration = 0
+local sellConfirmationTimer
+local RunSellPass
+local CONFIRMATION_TIMEOUT = 5
 
 local sellEventFrame = CreateFrame("Frame")
 sellEventFrame:Hide()
@@ -193,82 +202,130 @@ local function DestroyUnsellableItems(items)
     Wild.QueueDestroyItems(items)
 end
 
-local function RunSellPass()
+local function CollectSellResults()
+    if not sellFrame.batch then return true end
+    local entries, complete = Wild.ConfirmItemActionBatch(sellFrame.batch)
+    Wild.MergeItemActionEntries(sellFrame.soldEntries, entries)
+    for _, entry in ipairs(entries) do
+        sellFrame.soldCount = sellFrame.soldCount + entry.count
+        sellFrame.totalCopper = sellFrame.totalCopper + entry.copper
+    end
+    return complete
+end
+
+local function HasSellProgress()
+    if not sellFrame.batch then return false end
+    for _, count in pairs(sellFrame.batch.confirmed) do
+        if count > 0 then return true end
+    end
+    return false
+end
+
+local function FinishSellLoop(warning)
+    CollectSellResults()
+    sellLoopActive = false
+    sellGeneration = sellGeneration + 1
+    sellEventFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
+    sellEventFrame:SetScript("OnEvent", nil)
+    if sellConfirmationTimer then sellConfirmationTimer:Cancel(); sellConfirmationTimer = nil end
+    sellFrame:Hide()
+    sellFrame.pending = {}
+    sellFrame.batch = nil
+    sellFrame.onBatchDone = nil
+    if warning then Wild.Print("|cffff6600Wild:|r " .. warning) end
+    if sellFrame.soldCount > 0 then
+        for _, entry in ipairs(sellFrame.soldEntries) do
+            Wild.Print(string.format("|cff00ccffWild:|r Sold %s \195\151%d for %s.", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
+        end
+        Wild.Print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
+    end
+end
+
+local function ScheduleSellPass()
+    local batch = sellFrame.batch
+    if batch and batch.nextPassScheduled then return end
+    if batch then batch.nextPassScheduled = true end
+    if sellConfirmationTimer then sellConfirmationTimer:Cancel(); sellConfirmationTimer = nil end
+    local generation = sellGeneration
+    C_Timer.After(Wild.db.advanced.passDelay, function()
+        if sellLoopActive and sellGeneration == generation then
+            CollectSellResults()
+            sellFrame.batch = nil
+            RunSellPass()
+        end
+    end)
+end
+
+RunSellPass = function()
+    if not sellLoopActive then return end
     if not MerchantFrame or not MerchantFrame:IsShown() then
-        sellLoopActive = false
+        FinishSellLoop()
         return
     end
-
     sellPassNum = sellPassNum + 1
     if sellPassNum > MAX_SELL_PASSES then
-        print("|cffff6600Wild:|r Sell safety cap reached (" .. MAX_SELL_PASSES .. " passes).")
-        -- Print final summary
-        if sellFrame.soldCount > 0 then
-            for _, entry in ipairs(sellFrame.soldEntries) do
-                Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
-            end
-            print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
-        end
-        sellLoopActive = false
+        FinishSellLoop("Sell safety cap reached (" .. MAX_SELL_PASSES .. " passes).")
         return
     end
-
     local pending, destroyPending = BuildSellBatch()
-
     if #pending == 0 then
-        -- Nothing left to sell — destroy unsellable items if any, then print summary and done
-        if #destroyPending > 0 then
-            DestroyUnsellableItems(destroyPending)
-        end
-        if sellFrame.soldCount > 0 then
-            for _, entry in ipairs(sellFrame.soldEntries) do
-                Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
-            end
-            print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
-        end
-        sellLoopActive = false
+        if #destroyPending > 0 then DestroyUnsellableItems(destroyPending) end
+        FinishSellLoop()
         return
     end
 
-    -- Start selling this batch — keep accumulating into the same soldEntries
+    sellFrame.batch = Wild.CreateItemActionBatch(Wild.CapturePlayerItemCounts)
+    sellFrame.batchDone = false
     sellFrame.pending = pending
     sellFrame.timer = 0
-    sellFrame.onBatchDone = function(soldAny)
-        if soldAny then
-            -- Wait for bags to settle, then re-scan
-            sellEventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-            sellEventFrame:SetScript("OnEvent", function(self, event)
-                self:UnregisterEvent("BAG_UPDATE_DELAYED")
-                self:SetScript("OnEvent", nil)
-                C_Timer.After(Wild.db.advanced.passDelay, RunSellPass)
-            end)
+    sellFrame.onBatchDone = function(requestedAny, merchantClosed)
+        sellFrame.batchDone = true
+        if merchantClosed then
+            local complete = CollectSellResults()
+            FinishSellLoop(not complete and "Some vendor sales were not confirmed before the merchant closed." or nil)
+        elseif not requestedAny then
+            ScheduleSellPass()
+        elseif sellFrame.batch.observedBagUpdate and (CollectSellResults() or HasSellProgress()) then
+            ScheduleSellPass()
         else
-            -- Nothing sold in this batch (items vanished?) — done
-            if sellFrame.soldCount > 0 then
-                for _, entry in ipairs(sellFrame.soldEntries) do
-                    Wild.Print(string.format("|cff00ccffWild:|r  Sold %s \195\151%d for %s", entry.link or "?", entry.count, Wild.FormatGold(entry.copper)))
+            local batch = sellFrame.batch
+            sellConfirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
+                if not sellLoopActive or sellFrame.batch ~= batch then return end
+                if CollectSellResults() or HasSellProgress() then
+                    ScheduleSellPass()
+                else
+                    FinishSellLoop("Some vendor sales were not confirmed; stopped selling.")
                 end
-                print(string.format("|cff00ccffWild:|r Auto-sold %d item(s) for %s.", sellFrame.soldCount, Wild.FormatGold(sellFrame.totalCopper)))
-            end
-            sellLoopActive = false
+            end)
         end
     end
     sellFrame:Show()
 end
 
 local function ProcessSellIntents()
-    if not Wild.db or not Wild.db.intents then return end
-    if sellLoopActive then return end
-
+    if not Wild.db or not Wild.db.intents or sellLoopActive then return end
+    sellLoopActive = true
+    sellGeneration = sellGeneration + 1
+    local generation = sellGeneration
+    sellPassNum = 0
+    wipe(sellFrame.soldEntries)
+    sellFrame.totalCopper = 0
+    sellFrame.soldCount = 0
     PreloadBagItems(function()
-        if not MerchantFrame or not MerchantFrame:IsShown() then return end
-
-        sellLoopActive = true
-        sellPassNum = 0
-        -- Reset accumulated state for the whole sell session
-        wipe(sellFrame.soldEntries)
-        sellFrame.totalCopper = 0
-        sellFrame.soldCount = 0
+        if not sellLoopActive or sellGeneration ~= generation then return end
+        if not MerchantFrame or not MerchantFrame:IsShown() then
+            FinishSellLoop()
+            return
+        end
+        -- Listen while selling, since updates can arrive before the final tick.
+        sellEventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+        sellEventFrame:SetScript("OnEvent", function()
+            if sellLoopActive and sellFrame.batch then
+                sellFrame.batch.observedBagUpdate = true
+                local complete = CollectSellResults()
+                if sellFrame.batchDone and (complete or HasSellProgress()) then ScheduleSellPass() end
+            end
+        end)
         RunSellPass()
     end)
 end
@@ -331,10 +388,16 @@ end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("MERCHANT_SHOW")
+frame:RegisterEvent("MERCHANT_CLOSED")
 frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "MERCHANT_SHOW" then
         OnMerchantOpened()
+    elseif event == "MERCHANT_CLOSED" then
+        if sellLoopActive then
+            local complete = CollectSellResults()
+            FinishSellLoop(not complete and "Some vendor sales were not confirmed before the merchant closed." or nil)
+        end
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
         local interactionType = ...
         if interactionType == Enum.PlayerInteractionType.Merchant then

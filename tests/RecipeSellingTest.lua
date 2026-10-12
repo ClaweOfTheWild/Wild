@@ -123,7 +123,10 @@ local function NewEnvironment()
         GetTime = function() return state.time end,
         GetMoneyString = function(amount) return tostring(amount) .. " copper" end,
         GetItemClassInfo = function(id) return id == 9 and "Recipes" or "Items" end,
-        C_Timer = { After = function(_, callback) state.timers[#state.timers + 1] = callback end },
+        C_Timer = {
+            After = function(_, callback) state.timers[#state.timers + 1] = callback end,
+            NewTimer = function() return { Cancel = function() end } end,
+        },
         MerchantFrame = { IsShown = function() return state.merchantOpen end },
         C_Container = {
             GetContainerNumSlots = function(bag) return #state.bags[bag] end,

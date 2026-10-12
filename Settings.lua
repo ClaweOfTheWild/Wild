@@ -3043,7 +3043,7 @@ local function CreateIntentsTab()
     local debugCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
     debugCB:SetPoint("TOPLEFT", preloadTimeoutHint, "BOTTOMLEFT", -2, -20)
     debugCB.Text:SetText("Enable debug mode")
-    debugCB.tooltipText = "Print diagnostic messages to chat for troubleshooting. Covers bank automation, event handling, and other subsystems."
+    debugCB.tooltipText = "Save diagnostic messages for troubleshooting without printing scans or planned actions to chat. Use /wild log show to read them."
 
     debugCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
@@ -3055,7 +3055,7 @@ local function CreateIntentsTab()
     debugHint:SetPoint("TOPLEFT", debugCB, "BOTTOMLEFT", 22, -4)
     debugHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     debugHint:SetJustifyH("LEFT")
-    debugHint:SetText("|cff888888When enabled, Wild prints detailed debug output to chat and saves it to WildDB.bankDebug in saved variables. Disable when not actively troubleshooting.|r")
+    debugHint:SetText("|cff888888Diagnostics are saved in WildDB.log. Intent messages show confirmed actions and warnings only; /wild log show [filter] displays saved diagnostics when needed.|r")
 
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.advanced then

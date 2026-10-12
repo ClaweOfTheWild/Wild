@@ -20,6 +20,7 @@ local function NewEnvironment(...)
         frames = {}, timers = {}, messages = {}, iconRequests = {},
         icons = { [1] = 134400, [2] = "Interface\\Icons\\INV_Misc_Herb_01" },
         bags = { [0] = {}, [6] = {}, [12] = {}, [20] = {} },
+        attachments = {},
     }
     local env = setmetatable({
         print = function(...)
@@ -38,14 +39,20 @@ local function NewEnvironment(...)
         GetTime = function() return 10 end,
         date = function() return "2026-01-01 00:00:00" end,
         GetMoneyString = function(amount) return amount .. " copper" end,
-        GetCursorInfo = function() end,
-        ClearCursor = function() end,
+        GetCursorInfo = function()
+            if state.cursor then return "item", state.cursor.info.itemID, state.cursor.info.hyperlink end
+        end,
+        ClearCursor = function() state.cursor = nil end,
         DeleteCursorItem = function()
             local cursor = state.cursor
             state.bags[cursor.bag][cursor.slot] = nil
+            state.cursor = nil
         end,
         MerchantFrame = { IsShown = function() return true end },
-        C_Timer = { After = function(_, callback) state.timers[#state.timers + 1] = callback end },
+        C_Timer = {
+            After = function(_, callback) state.timers[#state.timers + 1] = callback end,
+            NewTimer = function() return { Cancel = function() end } end,
+        },
         C_Item = {
             GetItemIconByID = function(itemID)
                 state.iconRequests[#state.iconRequests + 1] = itemID
@@ -69,7 +76,20 @@ local function NewEnvironment(...)
         AutoStoreGuildBankItem = function(_, slot)
             state.bags[0][1], state.bags[20][slot] = state.bags[20][slot], nil
         end,
-        ClickSendMailItemButton = function() end,
+        ClickSendMailItemButton = function(index)
+            local cursor = state.cursor
+            state.attachments[index] = cursor.info
+            state.bags[cursor.bag][cursor.slot] = nil
+            state.cursor = nil
+        end,
+        GetSendMailItem = function(index)
+            local info = state.attachments[index]
+            if info then return "Test Item", info.itemID, 134400, info.stackCount, 4 end
+        end,
+        GetSendMailItemLink = function(index)
+            local info = state.attachments[index]
+            return info and info.hyperlink
+        end,
         SendMail = function(recipient) state.recipient = recipient end,
     }, { __index = _G })
     env.C_Container = {
@@ -83,7 +103,9 @@ local function NewEnvironment(...)
             local slots = state.bags[destination]
             slots[slots[1] and 2 or 1] = info
         end,
-        PickupContainerItem = function(bag, slot) state.cursor = { bag = bag, slot = slot } end,
+        PickupContainerItem = function(bag, slot)
+            state.cursor = { bag = bag, slot = slot, info = state.bags[bag][slot] }
+        end,
     }
     env.CreateFrame = function(frameType)
         local frame = { events = {}, scripts = {}, shown = false, frameType = frameType }
@@ -196,58 +218,67 @@ local tests = {
         end
         Equal(#state.iconRequests, 0)
     end },
-    { "debug chat gets icons without changing saved messages or bypassing its toggle", function()
-        local Wild, state, _, _, _, _, HasIcon = NewEnvironment()
+    { "debug diagnostics stay saved and explicit chat replay has item icons", function()
+        local Wild, state, env, _, _, _, HasIcon = NewEnvironment("SlashCommands.lua")
         local message = "Matched " .. LINK
         Wild.Log("Rules", message)
         Equal(#state.messages, 0)
         Wild.db.advanced.debug = true
         Wild.Log("Rules", message)
         Equal(Wild.GetLogEntries()[1].m, message)
+        Equal(#state.messages, 0)
+        env.SlashCmdList.WILD("log show Rules")
         HasIcon("Matched ")
     end },
-    { "bank deposits and their rule summaries both have item icons", function()
+    { "confirmed bank deposits have item icons and bank names", function()
         for _, target in ipairs({ "character", "warband" }) do
-            local Wild, state, _, _, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
+            local Wild, state, _, Fire, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
             state.bags[0][1] = Item(5)
             Wild.db.intents = { { action = "deposit", target = target, groups = { {} } } }
-            Wild.RunBankIntents(); RunTimers()
+            Wild.RunBankIntents()
+            Equal(#state.messages, 0)
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
             HasIcon(COUNT .. "5")
-            HasIcon("Deposited 5 item(s).")
+            HasIcon("Deposited ")
+            Equal(#state.messages, 1)
         end
     end },
     { "character, warband and guild withdrawals have item icons", function()
         for target, bag in pairs({ character = 6, warband = 12, guild = 20 }) do
-            local Wild, state, _, _, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
+            local Wild, state, _, Fire, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
             state.bags[bag][1] = Item(2)
             Wild.db.intents = { { action = "withdraw", target = target, groups = { {} } } }
-            Wild.RunBankIntents(); RunTimers()
+            Wild.RunBankIntents()
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
             HasIcon(COUNT .. "2")
-            HasIcon("Withdrew 2 item(s).")
+            HasIcon("Withdrew ")
         end
     end },
-    { "both bank transfer phases log item icons", function()
+    { "completed bank transfers log one item icon after both phases", function()
         local Wild, state, _, Fire, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
         state.bags[6][1] = Item(3)
         Wild.db.intents = { { action = "transfer", source = "character", target = "warband", groups = { {} } } }
-        Wild.RunBankIntents(); RunTimers()
-        HasIcon("Withdrew ")
+        Wild.RunBankIntents()
         Fire("BAG_UPDATE_DELAYED")
-        HasIcon("Deposited ")
-        HasIcon("Transferred 3 item(s).")
+        Equal(#state.messages, 0)
+        Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        HasIcon("Transferred ")
+        HasIcon(COUNT .. "3")
+        Equal(#state.messages, 1)
     end },
     { "hold rules show icons for deposits and withdrawals", function()
         for _, withdraw in ipairs({ false, true }) do
-            local Wild, state, _, _, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
+            local Wild, state, _, Fire, RunTimers, _, HasIcon = NewEnvironment("Bank.lua")
             if withdraw then
                 state.bags[12][1] = Item()
             else
                 state.bags[0][1], state.bags[0][2] = Item(), Item()
             end
             Wild.db.intents = { { action = "hold", target = "warband", groups = { { count = 1 } } } }
-            Wild.RunBankIntents(); RunTimers()
+            Wild.RunBankIntents()
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
             HasIcon(COUNT .. "1")
-            HasIcon("to reach 1 on character.")
+            HasIcon(withdraw and "Withdrew " or "Deposited ")
         end
     end },
     { "vendor sales show item icons while preserving amounts and totals", function()
@@ -266,11 +297,13 @@ local tests = {
         state.bags[0][1] = Item(4)
         Wild.db.intents = { { action = "mail", recipient = "Test-Realm", groups = { {} } } }
         Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.messages, 0)
+        Fire("MAIL_SEND_SUCCESS")
         HasIcon(COUNT .. "4")
         Equal(state.recipient, "Test-Realm")
     end },
     { "destroy logs have an item icon", function()
-        local Wild, state, _, _, _, _, HasIcon = NewEnvironment("Inventory.lua")
+        local Wild, state, _, Fire, _, _, HasIcon = NewEnvironment("Bank.lua", "Inventory.lua")
         state.bags[0][1] = Item()
         Wild.QueueDestroyItems({ { itemID = 1, bag = 0, slot = 1, link = LINK, count = 1 } })
         for _, frame in ipairs(state.frames) do
@@ -279,6 +312,8 @@ local tests = {
                 break
             end
         end
+        Equal(#state.messages, 0)
+        Fire("BAG_UPDATE_DELAYED")
         HasIcon("Destroyed ")
     end },
     { "slash item searches, bank rule listings and trace replay have icons", function()

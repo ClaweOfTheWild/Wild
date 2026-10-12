@@ -525,6 +525,108 @@ function Wild.Print(message)
 end
 
 -- ============================================================
+-- Item-action evidence and result aggregation
+-- ============================================================
+
+function Wild.CaptureBagItemCounts(bags)
+    local counts = {}
+    for _, bag in ipairs(bags) do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                local key = info.hyperlink or info.itemID
+                counts[key] = (counts[key] or 0) + (info.stackCount or 1)
+            end
+        end
+    end
+    return counts
+end
+
+function Wild.CapturePlayerItemCounts()
+    local bags = Wild.GetPlayerBags()
+    local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+    if reagentBag then
+        local included = false
+        for _, bag in ipairs(bags) do
+            if bag == reagentBag then included = true; break end
+        end
+        -- Evidence includes excluded bags, so sorting cannot masquerade as removal.
+        if not included then bags[#bags + 1] = reagentBag end
+    end
+    return Wild.CaptureBagItemCounts(bags)
+end
+
+function Wild.CreateItemActionBatch(readSource, readTarget)
+    return {
+        readSource = readSource, sourceBefore = readSource(),
+        readTarget = readTarget, targetBefore = readTarget and readTarget(),
+        entries = {}, confirmed = {},
+    }
+end
+
+function Wild.RecordItemAction(batch, info, count, unitCopper)
+    batch.entries[#batch.entries + 1] = {
+        key = info.hyperlink or info.link or info.itemID,
+        link = info.hyperlink or info.link, itemID = info.itemID,
+        count = count, unitCopper = unitCopper or 0, confirmed = 0,
+    }
+end
+
+function Wild.ConfirmItemActionBatch(batch)
+    local sourceAfter = batch.readSource()
+    local targetAfter = batch.readTarget and batch.readTarget()
+    local available = {}
+    local results = {}
+    local complete = true
+    for _, entry in ipairs(batch.entries) do
+        local key = entry.key
+        if available[key] == nil then
+            local removed = (batch.sourceBefore[key] or 0) - (sourceAfter[key] or 0)
+            if targetAfter then
+                local received = (targetAfter[key] or 0) - (batch.targetBefore[key] or 0)
+                removed = math.min(removed, received)
+            end
+            -- Repeated events must not report the same observed movement twice.
+            available[key] = math.max(0, removed - (batch.confirmed[key] or 0))
+        end
+        local count = math.min(entry.count - entry.confirmed, available[key])
+        if count > 0 then
+            entry.confirmed = entry.confirmed + count
+            batch.confirmed[key] = (batch.confirmed[key] or 0) + count
+            available[key] = available[key] - count
+            results[#results + 1] = {
+                key = key, link = entry.link, itemID = entry.itemID,
+                count = count, copper = entry.unitCopper * count,
+            }
+        end
+        if entry.confirmed < entry.count then complete = false end
+    end
+    return results, complete
+end
+
+function Wild.MergeItemActionEntries(results, entries)
+    for _, entry in ipairs(entries) do
+        local existing
+        for _, result in ipairs(results) do
+            if result.key == entry.key and result.source == entry.source and result.target == entry.target then
+                existing = result
+                break
+            end
+        end
+        if existing then
+            existing.count = existing.count + entry.count
+            existing.copper = existing.copper + (entry.copper or 0)
+        else
+            results[#results + 1] = {
+                key = entry.key, link = entry.link, itemID = entry.itemID,
+                count = entry.count, copper = entry.copper or 0,
+                source = entry.source, target = entry.target,
+            }
+        end
+    end
+end
+
+-- ============================================================
 -- Dotted-key navigation helpers
 -- ============================================================
 

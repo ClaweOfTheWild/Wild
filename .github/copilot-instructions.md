@@ -51,6 +51,18 @@ All automation (bank, vendor, mail, inventory destroy) uses a unified intent sys
 
 Condition evaluation lives in `Conditions.lua` and is shared across all processors.
 
+### Action Logging
+
+- Chat reports completed actions only, never queued items, planned amounts, no-match scans, or keep decisions.
+- Bank moves require matching source decreases and destination increases. Transfers are reported only after both the withdrawal and deposit are confirmed. Gold synchronization checks both player and bank balances.
+- Partial successes retry the remaining quantities without double-counting earlier results. A safety timeout stops work that cannot be confirmed instead of printing success or leaving the queue stuck.
+- Vendor sales require the requested item's bag count to decrease. Destruction also requires an empty cursor; picking up an item does not prove deletion.
+- Completion evidence reads all physical player bags, including a reagent bag excluded from rules. This is read-only: rule matching and item selection still respect `includeReagentBag`. Otherwise, sorting into an excluded bag could look like a sale or deletion.
+- Mail results and totals are recorded only on `MAIL_SEND_SUCCESS`, using actual attachment quantities. Failed or unconfirmed sends are not counted.
+- Combine confirmed stacks of the same item into one result per action. Keep partial successes, but report unconfirmed work as a warning instead of claiming completion.
+- Result records retain their actual source and destination even when a saved rule is edited while its operation is pending.
+- Debug mode writes scan, condition, and queue diagnostics to `WildDB.log` without automatically printing them. `/wild log show [filter]` displays the last 20 matching entries; `/wild log clear` clears the buffer.
+
 To match soulbound items with no upgrade track, put **Bind Type is Soulbound** and **Upgrade Track = None** in the same include group. Choose **Fixed value** for the upgrade-track comparison. `None` is stored as rank `0`; ranked tracks remain `1` through `6`. Use a separate **Item Type** or **Equip Slot** condition if the rule should match only equipment.
 
 To sell equipment whose upgrade ceiling is below your currently equipped gear, create a **Sell** intent with **Bind Type is Soulbound** and **Maximum Item Level < Equipped Slot iLvl** in the same include group. Select **Maximum Item Level** as the attribute, **<** as the operator, and **Equipped Slot iLvl** as the value reference, with offset `0`. Leave **Destroy items with no sell price** unchecked. Use **<=** instead if equal ceilings should also match.
@@ -64,7 +76,7 @@ To sell equipment whose upgrade ceiling is below your currently equipped gear, c
 
 1. **Pre-load**: On `BANKFRAME_OPENED` / `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, request item data for all bank slots via `C_Item.RequestLoadItemDataByID`. Listen for `ITEM_DATA_LOAD_RESULT` for each item. Once all arrive (or a 3s safety timeout), proceed.
 2. **Queue Build**: Collect all enabled, valid, actor-matching intents whose target bank type is accessible. Order matches `Wild.db.intents` (top to bottom in Settings UI).
-3. **Transfer Two-Phase**: Transfer actions (source bank → target bank) execute as withdraw → `BAG_UPDATE_DELAYED` → deposit → `BAG_UPDATE_DELAYED` → retry. Both phases are event-chained.
+3. **Transfer Two-Phase**: Transfer actions (source bank → target bank) execute as withdraw → `BAG_UPDATE_DELAYED` → deposit → `BAG_UPDATE_DELAYED` → retry. Deposit only confirmed withdrawn quantities, and retry a partial deposit before withdrawing more. Both phases are event-chained.
 
 ### Vendor-Specific Behaviour
 
@@ -85,11 +97,14 @@ To sell equipment whose upgrade ceiling is below your currently equipped gear, c
 - Each batch is sent and confirmed via `MAIL_SEND_SUCCESS` before the next batch.
 - After all batches in a pass are sent, `BAG_UPDATE_DELAYED` triggers a re-scan to find newly-eligible items.
 - `MAIL_FAILED` aborts the entire queue.
+- Closing the mailbox cancels future batches. An already-sent batch may still be logged on `MAIL_SEND_SUCCESS`, but its late acknowledgment never resumes the stopped queue.
 
 ### Destroy-Specific Behaviour
 
 - Items are destroyed directly via `PickupContainerItem` + `DeleteCursorItem`.
-- After each pass, `BAG_UPDATE_DELAYED` triggers a re-scan since bag slots have shifted.
+- Each hardware-button click waits for verified bag removal and an empty cursor before advancing. After each pass, re-scan from that confirmed bag update since bag slots may have shifted.
+- Existing typed-delete popups remain under the player's control. A logging safety timeout must not cancel or bypass an active deletion confirmation.
+- `Wild.QueueDestroyItems(items, onComplete)` reports confirmed item quantities to `onComplete(count, cancelled)`, not attempted clicks or stack counts.
 
 ### Concurrency Guards
 

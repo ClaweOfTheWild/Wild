@@ -148,7 +148,10 @@ local function NewEnvironment()
         UnitLevel = function() return 90 end,
         GetTime = function() return 10 end,
         GetMoneyString = function(amount) return tostring(amount) .. " copper" end,
-        C_Timer = { After = function(_, callback) state.timers[#state.timers + 1] = callback end },
+        C_Timer = {
+            After = function(_, callback) state.timers[#state.timers + 1] = callback end,
+            NewTimer = function() return { Cancel = function() end } end,
+        },
         Item = {
             CreateFromItemID = function()
                 return { IsItemDataCached = function() return true end }

@@ -41,7 +41,10 @@ local function NewEnvironment()
         IsInGuild = function() return true end,
         CanGuildBankRepair = function() return true end,
         MerchantFrame = { IsShown = function() return true end },
-        C_Timer = { After = function(_, callback) state.timers[#state.timers + 1] = callback end },
+        C_Timer = {
+            After = function(_, callback) state.timers[#state.timers + 1] = callback end,
+            NewTimer = function() return { Cancel = function() end } end,
+        },
         C_Item = { GetItemInfo = function(source)
             local price = state.linkPrices[source]
             if price == nil then price = state.price end
@@ -73,13 +76,13 @@ local function NewEnvironment()
             return { IsItemDataCached = function() return true end }
         end },
         C_Bank = {
-            DepositMoney = function(_, amount) state.deposited = amount end,
-            WithdrawMoney = function(_, amount) state.withdrawn = amount end,
+            DepositMoney = function(_, amount) state.deposited = amount; state.pendingMoney = -amount end,
+            WithdrawMoney = function(_, amount) state.withdrawn = amount; state.pendingMoney = amount end,
             FetchDepositedMoney = function() return state.bankMoney end,
         },
         GetGuildBankMoney = function() return state.bankMoney end,
-        DepositGuildBankMoney = function(amount) state.deposited = amount end,
-        WithdrawGuildBankMoney = function(amount) state.withdrawn = amount end,
+        DepositGuildBankMoney = function(amount) state.deposited = amount; state.pendingMoney = -amount end,
+        WithdrawGuildBankMoney = function(amount) state.withdrawn = amount; state.pendingMoney = amount end,
         GetNumGuildBankTabs = function() return 0 end,
     }, { __index = _G })
     env.CreateFrame = function()
@@ -123,6 +126,11 @@ local function NewEnvironment()
     setfenv(assert(loadfile("Tooltip.lua")), env)("Wild", Wild)
 
     local function Fire(event)
+        if event == "PLAYER_MONEY" and state.pendingMoney then
+            state.money = state.money + state.pendingMoney
+            state.bankMoney = state.bankMoney - state.pendingMoney
+            state.pendingMoney = nil
+        end
         for _, frame in ipairs(state.frames) do
             if frame.events[event] then frame.scripts.OnEvent(frame, event) end
         end
@@ -356,7 +364,7 @@ local tests = {
         for _, colorblind in ipairs({ false, true }) do
             for _, target in ipairs({ "warband", "guild" }) do
                 for _, balance in ipairs({ 100000, 500000 }) do
-                    local Wild, state, env, _, _, _, HasMessage = NewEnvironment()
+                    local Wild, state, env, Fire, RunTimers, _, HasMessage = NewEnvironment()
                     state.colorblind, state.money = colorblind, balance
                     Wild.db.intents = { { action = "hold", target = target,
                         groups = { { kind = "gold", gold = 25 } } } }
@@ -364,7 +372,9 @@ local tests = {
                     local delta = math.abs(balance - 250000)
                     local verb = balance > 250000 and "Deposited " or "Withdrew "
                     Equal(state.deposited or state.withdrawn, delta)
-                    HasMessage(verb .. env.GetMoneyString(delta, true) .. ".")
+                    Equal(#state.messages, 0)
+                    Fire("PLAYER_MONEY"); RunTimers()
+                    HasMessage(verb .. env.GetMoneyString(delta, true))
                     HasMessage("Hold phase 1: goldTarget=" .. env.GetMoneyString(250000, true), state.logs)
                     HasMessage("Gold sync: target=" .. env.GetMoneyString(250000, true), state.logs)
                 end

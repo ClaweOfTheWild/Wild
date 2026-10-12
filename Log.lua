@@ -35,9 +35,6 @@ function Wild.Log(source, msg)
         idx = 1
     end
     log.nextIndex = idx
-
-    -- Also print to chat when debug is on
-    Wild.Print(string.format("|cff00ccffWild [%s]:|r %s", source, msg))
 end
 
 -- ============================================================
