@@ -7,7 +7,9 @@ Wild is a World of Warcraft (Retail) quality-of-life addon written in Lua. It au
 ## Language & Runtime
 
 - **Lua 5.1** targeting the WoW client API (no standard `io`, `os`, `require`).
-- All code runs inside the WoW sandbox. Use WoW API functions (`CreateFrame`, `C_Item`, `C_Container`, `C_Bank`, `GetItemInfo`, etc.).
+- **Retail 12.1.5 (build 70391)** uses interface `120105` in `Wild.toc`. API contracts come from the [matching UI source](https://github.com/Gethe/wow-ui-source/tree/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated).
+- All code runs inside the WoW sandbox. Use WoW API functions (`CreateFrame`, `C_Item`, `C_Container`, `C_Bank`, `C_Item.GetItemInfo`, etc.).
+- Item queries use `C_Item.GetItemInfoInstant`, `C_Item.GetDetailedItemLevelInfo`, `C_Item.GetItemClassInfo`, `C_Item.GetItemSubClassInfo`, and `C_Item.GetItemSpell`, not their removed global aliases. Do not depend on `loadDeprecationFallbacks`.
 - No external build tools or package managers. Files are loaded by `Wild.toc` in strict order.
 
 ## Architecture

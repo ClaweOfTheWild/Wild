@@ -79,12 +79,12 @@ local function NewEnvironment()
             state.frames[#state.frames + 1] = frame
             return frame
         end,
-        GetItemInfoInstant = function(source)
-            local id = ItemID(source)
-            local item = state.items[id]
-            return id, nil, nil, nil, nil, item.classID, item.subclassID
-        end,
         C_Item = {
+            GetItemInfoInstant = function(source)
+                local id = ItemID(source)
+                local item = state.items[id]
+                return id, nil, nil, nil, nil, item.classID, item.subclassID
+            end,
             GetItemInfo = function(source)
                 local id = ItemID(source)
                 local item = state.items[id]
@@ -92,6 +92,8 @@ local function NewEnvironment()
                 return item.name or "Recipe", "item:" .. id, 3, 1, 1, nil, nil, 1, "",
                     nil, item.price or 100, item.classID, item.subclassID, item.bindType or 1
             end,
+            GetItemSpell = function() return "Learn recipe", 999 end,
+            GetItemClassInfo = function(id) return id == 9 and "Recipes" or "Items" end,
             IsItemBindToAccount = function(source)
                 return state.items[ItemID(source)].accountBound == true
             end,
@@ -107,7 +109,6 @@ local function NewEnvironment()
             GetHyperlink = function(link) return Tooltip(ItemID(link)) end,
             GetItemByID = Tooltip,
         },
-        GetItemSpell = function() return "Learn recipe", 999 end,
         IsSpellKnown = function() return false end,
         IsPlayerSpell = function() return false end,
         GetProfessions = function() return unpack(state.professionIndices, 1, 5) end,
@@ -122,7 +123,6 @@ local function NewEnvironment()
         GetInventoryItemLink = function() end,
         GetTime = function() return state.time end,
         GetMoneyString = function(amount) return tostring(amount) .. " copper" end,
-        GetItemClassInfo = function(id) return id == 9 and "Recipes" or "Items" end,
         C_Timer = {
             After = function(_, callback) state.timers[#state.timers + 1] = callback end,
             NewTimer = function() return { Cancel = function() end } end,

@@ -72,7 +72,7 @@ local function ScanContainer(bagID)
             -- Use link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local effectiveIlvl = itemLevel
             if info.hyperlink then
-                local detailedIlvl = GetDetailedItemLevelInfo(info.hyperlink)
+                local detailedIlvl = C_Item.GetDetailedItemLevelInfo(info.hyperlink)
                 if detailedIlvl then effectiveIlvl = detailedIlvl end
             end
             -- Use tooltip money for actual sell price (accounts for upgrades)
@@ -235,7 +235,7 @@ function Wild.SnapshotGuildBank()
                                   _, itemEquipLoc, _, sellPrice, classID, subclassID, bindType, expansionID
                                 = C_Item.GetItemInfo(link)
                             local effectiveIlvl = itemLevel
-                            local detailedIlvl = GetDetailedItemLevelInfo(link)
+                            local detailedIlvl = C_Item.GetDetailedItemLevelInfo(link)
                             if detailedIlvl then effectiveIlvl = detailedIlvl end
                             local effectiveSellPrice = Wild.GetEffectiveSellPrice(itemID, { hyperlink = link }) or sellPrice
                             allItems[#allItems + 1] = {

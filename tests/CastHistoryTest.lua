@@ -267,6 +267,24 @@ local tests = {
             Equal(assert(Latest()).kind, "spell")
         end
     end },
+    { "Retail 12.1.5 cast-bar identifiers remain opaque and optional", function()
+        local _, _, _, Fire, AddItem, Latest = NewEnvironment(true)
+        AddItem(101, 8001, 0)
+        Fire("ADDON_LOADED", "Wild")
+        local castBarID = setmetatable({}, {
+            __tostring = function() error("Cast-bar identifiers must not be interpreted") end,
+        })
+        Fire("UNIT_SPELLCAST_SENT", "player", "", "Attempt", 8001)
+        Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Attempt", 8001, castBarID)
+        local entry = assert(Latest())
+        Equal(entry.kind, "item")
+        Equal(entry.id, 101)
+        Fire("UNIT_SPELLCAST_FAILED", "player", "Failed", 8001, castBarID)
+        Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "Interrupted", 8001, castBarID)
+        Equal(Latest(), entry)
+        Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Spell", 9001)
+        Equal(assert(Latest()).kind, "spell")
+    end },
 }
 
 local failures = 0

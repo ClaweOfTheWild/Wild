@@ -1057,7 +1057,7 @@ local QUALITY_NAMES = {
 local function GetItemClassList()
     local classes = {}
     for classID = 0, 20 do
-        local name = GetItemClassInfo(classID)
+        local name = C_Item.GetItemClassInfo(classID)
         if name and name ~= "" then
             table.insert(classes, { classID = classID, name = name })
         end
@@ -1069,7 +1069,7 @@ local function GetItemSubClassList(classID)
     local subs = {}
     if not classID or classID < 0 then return subs end
     for subID = 0, 30 do
-        local name = GetItemSubClassInfo(classID, subID)
+        local name = C_Item.GetItemSubClassInfo(classID, subID)
         if name and name ~= "" then
             table.insert(subs, { subclassID = subID, name = name })
         end
@@ -4122,15 +4122,15 @@ local function CreateIntentRulesTab(namespace)
                     ceTrackDD:OverrideText(Wild.UPGRADE_TRACK_NAMES[t])
                 else ceTrackDD:OverrideText("Select...") end
             elseif vt == "itemtype" then
-                ceTypeDD:OverrideText(condEditorState.value and GetItemClassInfo(condEditorState.value) or "Select...")
+                ceTypeDD:OverrideText(condEditorState.value and C_Item.GetItemClassInfo(condEditorState.value) or "Select...")
             elseif vt == "itemsubtype" then
                 local packed = condEditorState.value
                 if packed then
                     local cid = math.floor(packed / 1000)
                     local sid = packed % 1000
                     condEditorState.subtypeParent = cid
-                    ceSubParentDD:OverrideText(GetItemClassInfo(cid) or "?")
-                    ceSubTypeDD:OverrideText(GetItemSubClassInfo(cid, sid) or "?")
+                    ceSubParentDD:OverrideText(C_Item.GetItemClassInfo(cid) or "?")
+                    ceSubTypeDD:OverrideText(C_Item.GetItemSubClassInfo(cid, sid) or "?")
                 else
                     ceSubParentDD:OverrideText("Select type...")
                     ceSubTypeDD:OverrideText("Select...")

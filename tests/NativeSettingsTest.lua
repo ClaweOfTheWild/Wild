@@ -40,7 +40,11 @@ local function NewEnvironment(saved, noFilterEnum)
         PlaySound = function() end,
         InCombatLockdown = function() return state.combat end,
         C_AddOns = { GetAddOnMetadata = function() return "1.0.0" end },
-        C_Item = { GetItemInfo = function(id) return "Item " .. tostring(id) end },
+        C_Item = {
+            GetItemInfo = function(id) return "Item " .. tostring(id) end,
+            GetItemClassInfo = function(id) return "Class " .. id end,
+            GetItemSubClassInfo = function() end,
+        },
         C_Timer = { After = function() end },
         Enum = { AuctionHouseFilter = {
             UncollectedOnly = 0, UsableOnly = 1, CurrentExpansionOnly = 2, UpgradesOnly = 3,
@@ -54,8 +58,6 @@ local function NewEnvironment(saved, noFilterEnum)
         GetTime = function() return 1 end,
         UnitName = function() return "Test" end,
         GetRealmName = function() return "Realm" end,
-        GetItemClassInfo = function(id) return "Class " .. id end,
-        GetItemSubClassInfo = function() end,
         GetMoneyString = function(value) return tostring(value) end,
     }, { __index = _G })
     env._G = env
@@ -975,7 +977,7 @@ local tests = {
     end },
     { "condition menus preserve false zero and packed subtype values without saving the draft", function()
         local Wild, state, env, _, _, Load = NewEnvironment()
-        env.GetItemSubClassInfo = function(classID, subclassID)
+        env.C_Item.GetItemSubClassInfo = function(classID, subclassID)
             if subclassID < 2 then return "Subtype " .. classID .. ":" .. subclassID end
         end
         Load("Conditions.lua")

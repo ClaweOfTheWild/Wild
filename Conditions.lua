@@ -42,7 +42,7 @@ local RECIPE_PROFESSION_SKILL_LINES = {
 }
 
 local function IsRecipeKnown(itemID, containerInfo)
-    local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
+    local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
     if classID ~= 9 then return nil end
 
     local lines = containerInfo and containerInfo.tooltipLines
@@ -209,7 +209,7 @@ local function GetMaxItemLevel(itemID, containerInfo)
         return nil
     end
     if not EQUIP_LOC_TO_SLOTS[equipLoc] then return nil end
-    local ilvl = GetDetailedItemLevelInfo(link)
+    local ilvl = C_Item.GetDetailedItemLevelInfo(link)
     if type(ilvl) ~= "number" or not (ilvl > 0) then return nil end
 
     local upgradeInfo = C_Item.GetItemUpgradeInfo(link)
@@ -254,7 +254,7 @@ local ATTRIBUTES = {
             -- Use the item link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local link = containerInfo and containerInfo.hyperlink
             if link then
-                local ilvl = GetDetailedItemLevelInfo(link)
+                local ilvl = C_Item.GetDetailedItemLevelInfo(link)
                 if ilvl then return ilvl end
             end
             -- Fallback to base template ilvl
@@ -271,7 +271,7 @@ local ATTRIBUTES = {
         key = "item.type", label = "Item Type", category = "Item types and subtypes",
         valueType = "itemtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
             return classID
         end,
     },
@@ -279,7 +279,7 @@ local ATTRIBUTES = {
         key = "item.subtype", label = "Item Subtype", category = "Item types and subtypes",
         valueType = "itemsubtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if classID and subclassID then return classID * 1000 + subclassID end
         end,
     },
@@ -323,7 +323,7 @@ local ATTRIBUTES = {
                     return isCollected and true or false
                 end
             end
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             -- 3) Pet (classID 15 = Miscellaneous, subclassID 2 = Companion Pets)
             if classID == 15 and subclassID == 2 then
                 if C_PetJournal and C_PetJournal.GetPetInfoByItemID then
@@ -356,7 +356,7 @@ local ATTRIBUTES = {
                 return IsRecipeKnown(itemID, containerInfo)
             end
             -- 6) Anything else that teaches a spell (covers decor, etc.)
-            local _, spellID = GetItemSpell(itemID)
+            local _, spellID = C_Item.GetItemSpell(itemID)
             if spellID then
                 return (IsSpellKnown(spellID) or IsPlayerSpell(spellID)) and true or false
             end
@@ -376,7 +376,7 @@ local ATTRIBUTES = {
         valueType = "boolean",
         valueLabels = { [true] = "Unknown profession", [false] = "Known profession" },
         resolve = function(itemID, containerInfo, charCtx)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if classID ~= 9 then return nil end
             local skillLine = RECIPE_PROFESSION_SKILL_LINES[subclassID]
             if not skillLine then return nil end
@@ -405,7 +405,7 @@ local ATTRIBUTES = {
         key = "item.isPet", label = "Is Pet", category = "Collection",
         valueType = "boolean",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             return classID == 15 and subclassID == 2
         end,
     },
@@ -416,7 +416,7 @@ local ATTRIBUTES = {
             local source = (containerInfo and containerInfo.hyperlink) or itemID
             local _, _, _, _, _, _, _, _, _, _, _, classID, _, bindType = C_Item.GetItemInfo(source)
             if not classID then
-                classID = select(6, GetItemInfoInstant(itemID))
+                classID = select(6, C_Item.GetItemInfoInstant(itemID))
             end
             local isRecipe = classID == 9
             -- Recipe tooltips also describe the crafted item, including its binding.
@@ -535,7 +535,7 @@ local ATTRIBUTES = {
         key = "item.isWrongArmorType", label = "Is Wrong Armor Type", category = "Item",
         valueType = "boolean",
         resolve = function(itemID, containerInfo, charCtx)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             -- classID 4 = Armor
             if classID ~= 4 or not subclassID then return false end
             -- Ignore non-typed armor: 0=Misc/Generic (trinkets, rings, neck, etc.), 6=Shield
@@ -694,7 +694,7 @@ local function BuildCharContext()
     for _, slotID in ipairs({1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}) do
         local link = GetInventoryItemLink("player", slotID)
         if link then
-            local ilvl = GetDetailedItemLevelInfo(link)
+            local ilvl = C_Item.GetDetailedItemLevelInfo(link)
             if ilvl then slotIlvls[slotID] = ilvl end
             if C_TooltipInfo and C_TooltipInfo.GetInventoryItem then
                 local data = C_TooltipInfo.GetInventoryItem("player", slotID)
@@ -755,12 +755,12 @@ local function FormatConditionValue(cond, attrDef)
     elseif vt == "upgradetrack" then
         return UPGRADE_TRACK_NAMES[cond.value] or tostring(cond.value)
     elseif vt == "itemtype" then
-        return GetItemClassInfo(cond.value) or tostring(cond.value)
+        return C_Item.GetItemClassInfo(cond.value) or tostring(cond.value)
     elseif vt == "itemsubtype" then
         local classID = math.floor((cond.value or 0) / 1000)
         local subclassID = (cond.value or 0) % 1000
-        local typeName = GetItemClassInfo(classID) or "?"
-        local subName = GetItemSubClassInfo(classID, subclassID) or "?"
+        local typeName = C_Item.GetItemClassInfo(classID) or "?"
+        local subName = C_Item.GetItemSubClassInfo(classID, subclassID) or "?"
         return typeName .. " > " .. subName
     elseif vt == "profession" then
         return PROFESSION_SKILL_LINES[cond.value] or tostring(cond.value)
@@ -802,11 +802,11 @@ local function FormatActualValue(left, attrDef)
     elseif vt == "bind" then
         return BIND_LABELS[left] or tostring(left)
     elseif vt == "itemtype" then
-        return (GetItemClassInfo(left) or tostring(left))
+        return (C_Item.GetItemClassInfo(left) or tostring(left))
     elseif vt == "itemsubtype" then
         local classID = math.floor((left or 0) / 1000)
         local subclassID = (left or 0) % 1000
-        return (GetItemClassInfo(classID) or "?") .. " > " .. (GetItemSubClassInfo(classID, subclassID) or "?")
+        return (C_Item.GetItemClassInfo(classID) or "?") .. " > " .. (C_Item.GetItemSubClassInfo(classID, subclassID) or "?")
     elseif vt == "equiploc" then
         return EQUIP_LOC_LABELS[left] or tostring(left)
     elseif vt == "class" then
@@ -1319,9 +1319,9 @@ local function FormatItemDescription(itemConds)
     elseif subtypeCode then
         local classID = math.floor(subtypeCode / 1000)
         local subclassID = subtypeCode % 1000
-        noun = GetItemSubClassInfo(classID, subclassID) or "items"
+        noun = C_Item.GetItemSubClassInfo(classID, subclassID) or "items"
     elseif typeID then
-        noun = GetItemClassInfo(typeID) or "items"
+        noun = C_Item.GetItemClassInfo(typeID) or "items"
     elseif hasRecipeCondition then
         noun = "Recipes"
     elseif isKnownVal == true then

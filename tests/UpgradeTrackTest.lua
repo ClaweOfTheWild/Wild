@@ -58,11 +58,11 @@ local function NewEnvironment()
                 return "Item", "item:" .. itemID, 3, 100, 1, nil, nil, 1, "",
                     nil, 100, 4, 2, state.items[itemID]
             end,
+            GetItemClassInfo = function(id) if id == 4 then return "Armor" end end,
         },
         C_TooltipInfo = { GetBagItem = Tooltip, GetHyperlink = Tooltip },
         C_Timer = { After = function() end },
         hooksecurefunc = function() end,
-        GetItemClassInfo = function(id) if id == 4 then return "Armor" end end,
     }, { __index = _G })
     MenuTestHelpers.Install(env, methods, state)
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)

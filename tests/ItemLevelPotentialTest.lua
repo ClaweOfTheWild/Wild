@@ -113,6 +113,10 @@ local function NewEnvironment()
                     }
                 end
             end,
+            GetDetailedItemLevelInfo = function(link)
+                local item = FindItem(link)
+                return item and item.level
+            end,
         },
         C_Container = {
             GetContainerNumSlots = function(bag) return #state.bags[bag] end,
@@ -137,10 +141,6 @@ local function NewEnvironment()
                 return link and Tooltip(link)
             end,
         },
-        GetDetailedItemLevelInfo = function(link)
-            local item = FindItem(link)
-            return item and item.level
-        end,
         GetInventoryItemLink = function(_, slot) return state.equipped[slot] end,
         GetAverageItemLevel = function() return 130, 130 end,
         GetProfessions = function() end,

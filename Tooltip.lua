@@ -25,10 +25,10 @@ local TOOLTIP_LINES = {
         key = "itemType",
         label = "Item Type / Subtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if not classID then return nil end
-            local typeName = GetItemClassInfo(classID) or "?"
-            local subName = GetItemSubClassInfo(classID, subclassID)
+            local typeName = C_Item.GetItemClassInfo(classID) or "?"
+            local subName = C_Item.GetItemSubClassInfo(classID, subclassID)
             if subName and subName ~= typeName then
                 return "Type: " .. typeName .. " > " .. subName .. "  |cff888888(" .. classID .. "/" .. subclassID .. ")|r"
             end
@@ -42,7 +42,7 @@ local TOOLTIP_LINES = {
             -- Use item link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local link = containerInfo and containerInfo.hyperlink
             if link then
-                local ilvl = GetDetailedItemLevelInfo(link)
+                local ilvl = C_Item.GetDetailedItemLevelInfo(link)
                 if ilvl then return "iLvl: " .. ilvl end
             end
             local _, _, _, ilvl = C_Item.GetItemInfo(itemID)
@@ -142,7 +142,7 @@ local TOOLTIP_LINES = {
                 end
             end
             -- Pet
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if classID == 15 and subclassID == 2 and C_PetJournal then
                 local speciesID = C_PetJournal.GetPetInfoByItemID and C_PetJournal.GetPetInfoByItemID(itemID)
                 if speciesID then
