@@ -4,8 +4,8 @@ local ADDON_NAME, Wild = ...
 local INFO = "|cff00ccffWild:|r "
 local WARN = "|cffff6600Wild:|r "
 
-local function Print(msg) print(INFO .. msg) end
-local function PrintWarn(msg) print(WARN .. msg) end
+local function Print(msg) Wild.Print(INFO .. msg) end
+local function PrintWarn(msg) Wild.Print(WARN .. msg) end
 
 local function ParseArgs(msg)
     local args = {}
@@ -53,6 +53,7 @@ local FEATURE_NAMES = {
     durabilitytotal    = "Durability Total Overlay",
     durabilitybags     = "Durability on Bag Items",
     speed              = "Speed Indicator",
+    dialog             = "Dialog Key",
 }
 
 -- ============================================================
@@ -84,6 +85,7 @@ local subcommands = {}
 subcommands.help = function()
     print("|cff00ccff--- Wild Commands ---|r")
     Print("/wild — Toggle settings window")
+    Print("/wild native [page] - Open native WoW Settings (for example: /wild native speed)")
     Print("/wild help — Show this help")
     Print("/wild status — Show all feature states")
     Print("/wild <feature> on|off — Toggle a feature")
@@ -92,7 +94,7 @@ subcommands.help = function()
     print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol), durability (dur), speed")
+    print("    volume (vol), durability (dur), speed, dialog")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -139,6 +141,10 @@ subcommands.help = function()
     Print("/wild gossip delve on|off — Toggle auto-select delve options")
     Print("/wild gossip skip on|off — Toggle auto-select skip options")
     print(" ")
+    Print("/wild dialog on|off - Toggle keyboard confirmation of popups, queues, and delve entry")
+    Print("/wild dialog key <key> - Set the confirmation key (SPACE, ENTER, CTRL-F2)")
+    Print("/wild dialog destroy on|off - Allow item destruction without typing DELETE")
+    print(" ")
     Print("/wild dungeonbar on|off — Toggle dungeon bar")
     Print("/wild dungeonbar show|hide|toggle — Control visibility")
     print(" ")
@@ -158,6 +164,8 @@ subcommands.help = function()
     Print("/wild trace filter <text> — Filter events by name")
     Print("/wild trace show — Show last 50 entries in chat")
     Print("/wild trace clear — Clear the log")
+    Print("/wild log show [filter] — Show the last 20 matching debug entries")
+    Print("/wild log clear — Clear saved debug diagnostics")
     print(" ")
     Print("/wild find <name> — Search items across all characters")
     Print("/wild datastore — Show cross-character datastore status")
@@ -183,7 +191,7 @@ subcommands.status = function()
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
-        "speed",
+        "speed", "dialog",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -196,10 +204,43 @@ subcommands.reset = function()
     Wild.ResetSettings()
 end
 
+subcommands.native = function(args)
+    local page = #args > 0 and table.concat(args, " ") or nil
+    Wild.OpenNativeSettings(page)
+end
+
 -- /wild speed [on|off]
 subcommands.speed = function(args)
     if HandleGenericFeature("speed", args) then return end
     PrintWarn("Usage: /wild speed [on|off]")
+end
+
+-- /wild dialog [on|off|key <key>|destroy on|off]
+subcommands.dialog = function(args)
+    if #args == 0 then
+        Print("Dialog Key: " .. StatusText(Wild.IsFeatureEnabled("dialog")))
+        Print("Item destruction: " .. StatusText(Wild.GetSetting("dialogKey.destroy")))
+        Print("Confirmation key: " .. tostring(Wild.GetSetting("dialogKey.key")))
+        return
+    end
+    if HandleGenericFeature("dialog", args) then return end
+    local sub = args[1]:lower()
+    if sub == "key" and #args == 2 then
+        if Wild.SetDialogKey(args[2]) then
+            Print("Dialog key set to " .. Wild.GetSetting("dialogKey.key"))
+        end
+    elseif sub == "destroy" and #args == 2 then
+        local enabled = OnOff(args[2])
+        if enabled == nil then
+            PrintWarn("Usage: /wild dialog destroy on|off")
+            return
+        end
+        Wild.SetSetting("dialogKey.destroy", enabled)
+        Print("Dialog item destruction " .. StatusText(enabled))
+        if enabled then PrintWarn("The confirmation key can permanently destroy the item on your cursor.") end
+    else
+        PrintWarn("Usage: /wild dialog [on|off|key <key>|destroy on|off]")
+    end
 end
 
 -- /wild circle [on|off|size|thickness|opacity|color|offset]
@@ -273,7 +314,7 @@ subcommands.lfg = function(args)
     elseif sub == "keys" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg keys on|off") return end
-        Wild.db.lfg.keystoneButtons = v
+        Wild.SetSetting("lfg.keystoneButtons", v)
         Print("Keystone Panel " .. StatusText(v))
         if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
     elseif sub == "anchor" then
@@ -284,7 +325,7 @@ subcommands.lfg = function(args)
             Print("Current: " .. (Wild.db.lfg.keystoneAnchor or "RIGHT"))
             return
         end
-        Wild.db.lfg.keystoneAnchor = val
+        Wild.SetSetting("lfg.keystoneAnchor", val)
         Print("Keystone panel anchor: " .. val)
         if Wild.__keystonePanelApplyAnchor then Wild.__keystonePanelApplyAnchor() end
     else
@@ -377,7 +418,7 @@ subcommands.bank = function(args)
                     any = true
                     local state = (intent.enabled ~= false) and "|cff44ff44ON|r" or "|cffff4444OFF|r"
                     local summary = Wild.GetIntentSummary and Wild.GetIntentSummary(intent) or "?"
-                    print(string.format("  %d. [%s] %s", i, state, summary))
+                    Wild.Print(string.format("  %d. [%s] %s", i, state, summary))
                 end
             end
         end
@@ -585,31 +626,31 @@ subcommands.gossip = function(args)
     if sub == "single" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip single on|off") return end
-        Wild.db.gossip.autoSelectSingle = v
+        Wild.SetSetting("gossip.autoSelectSingle", v)
         Print("Gossip Auto-Select Single " .. StatusText(v))
     elseif sub == "quest" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip quest on|off") return end
-        Wild.db.gossip.autoSelectQuest = v
+        Wild.SetSetting("gossip.autoSelectQuest", v)
         Print("Gossip Auto-Select Quest " .. StatusText(v))
     elseif sub == "delve" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip delve on|off") return end
-        Wild.db.gossip.autoSelectDelve = v
+        Wild.SetSetting("gossip.autoSelectDelve", v)
         Print("Gossip Auto-Select Delve " .. StatusText(v))
     elseif sub == "skip" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip skip on|off") return end
-        Wild.db.gossip.autoSkip = v
+        Wild.SetSetting("gossip.autoSkip", v)
         Print("Gossip Auto-Skip " .. StatusText(v))
     else
         -- Treat as on/off for all gossip automation
         local val = OnOff(sub)
         if val ~= nil then
-            Wild.db.gossip.autoSelectSingle = val
-            Wild.db.gossip.autoSelectQuest = val
-            Wild.db.gossip.autoSelectDelve = val
-            Wild.db.gossip.autoSkip = val
+            Wild.SetSetting("gossip.autoSelectSingle", val)
+            Wild.SetSetting("gossip.autoSelectQuest", val)
+            Wild.SetSetting("gossip.autoSelectDelve", val)
+            Wild.SetSetting("gossip.autoSkip", val)
             Print("Gossip automation " .. StatusText(val))
         else
             Print("Usage: /wild gossip [single|quest|delve|skip] on|off")
@@ -640,7 +681,7 @@ subcommands.find = function(args)
     for _, r in ipairs(results) do
         local display = r.link or r.name or tostring(r.itemID)
         local detail = Wild.FormatItemBreakdown(r.breakdown)
-        print(string.format("  %s — %dx total (%s)", display, r.total, detail))
+        Wild.Print(string.format("  %s — %dx total (%s)", display, r.total, detail))
     end
 end
 subcommands.search = subcommands.find
@@ -705,7 +746,7 @@ subcommands.datastore = function(args)
             Print(lines)
         else
             for _, line in ipairs(lines) do
-                print(line)
+                Wild.Print(line)
             end
         end
     elseif sub == "refresh" then
@@ -757,8 +798,27 @@ subcommands.delay = function(args)
         return
     end
     val = math.max(0.1, math.min(1.0, math.floor(val * 10 + 0.5) / 10))
-    Wild.db.advanced[setting.key] = val
+    Wild.SetSetting("advanced." .. setting.key, val)
     Print(setting.label .. " set to " .. val .. "s.")
+end
+
+subcommands.log = function(args)
+    local sub = args[1] and args[1]:lower() or ""
+    if sub == "clear" then
+        Wild.ClearLog()
+        Print("Debug log cleared.")
+    elseif sub == "show" then
+        local filter = #args > 1 and table.concat(args, " ", 2) or nil
+        local entries = Wild.GetLogEntries(filter)
+        local start = math.max(1, #entries - 19)
+        Print(string.format("Debug log: %d matching entries.", #entries))
+        for i = start, #entries do
+            local entry = entries[i]
+            Wild.Print(string.format("|cff00ccffWild [%s]:|r %s %s", entry.s, entry.d, entry.m))
+        end
+    else
+        Print(string.format("Debug log: %d saved entries. Use /wild log show [filter] or /wild log clear.", Wild.GetLogCount()))
+    end
 end
 
 -- ============================================================
@@ -861,7 +921,7 @@ do
             local start = math.max(1, count - 49)
             Print("Last " .. (count - start + 1) .. " of " .. count .. " entries:")
             for i = start, count do
-                print("  " .. Wild.db.eventTrace[i])
+                Wild.Print("  " .. Wild.db.eventTrace[i])
             end
 
         else

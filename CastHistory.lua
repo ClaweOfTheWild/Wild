@@ -14,6 +14,7 @@ local MIN_TRACK_SPACING = 0
 local MAX_TRACK_SPACING = 100
 local GLOBAL_COOLDOWN_SPELL_ID = 61304
 local FADE_DURATION = 1
+local PENDING_ITEM_TIMEOUT = 30
 
 local DIRECTION_VECTORS = {
     LEFT = { x = -1, y = 0 },
@@ -397,13 +398,6 @@ local function InstallItemUseHooks()
         end)
     end
 
-    if UseAction then
-        hooksecurefunc("UseAction", function(slot)
-            local actionType, itemID = GetActionInfo(slot)
-            if actionType == "item" then SetPendingItem(itemID) end
-        end)
-    end
-
     if C_Item and C_Item.UseItemByName then
         hooksecurefunc(C_Item, "UseItemByName", function(itemInfo)
             local itemID = C_Item.GetItemInfoInstant(itemInfo)
@@ -413,7 +407,7 @@ local function InstallItemUseHooks()
 end
 
 local function ResolveItem(spellID)
-    if pendingItem and GetTime() - pendingItem.time > 30 then
+    if pendingItem and GetTime() - pendingItem.time > PENDING_ITEM_TIMEOUT then
         pendingItem = nil
     end
     if pendingItem and pendingItem.spellID == spellID then
@@ -522,6 +516,7 @@ function Wild.UpdateCastHistory()
     if config.enabled and #entries > 0 then
         origin:SetScript("OnUpdate", AnimateEntries)
     end
+    Wild.NotifySettingsChanged("castHistory")
 end
 
 function Wild.SetCastHistoryEnabled(enabled)
@@ -622,6 +617,7 @@ eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
 eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 eventFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
 eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player")
 eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
 eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
@@ -636,6 +632,21 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         local config = GetConfig()
         if config and config.enabled then UpdateGCDDuration() end
+    elseif event == "UNIT_SPELLCAST_SENT" then
+        local unit, _, _, spellID = ...
+        if issecretvalue and (issecretvalue(unit) or issecretvalue(spellID)) then return end
+        local config = GetConfig()
+        if unit == "player" and config and config.enabled and spellID then
+            if not itemCacheReady then RebuildItemSpellCache() end
+            if pendingItem and GetTime() - pendingItem.time > PENDING_ITEM_TIMEOUT then
+                pendingItem = nil
+            end
+            if not pendingItem or pendingItem.spellID ~= spellID then
+                -- Keep the item identity if its last stack disappears before the success event.
+                local item = itemSpellCache[spellID]
+                if item then SetPendingItem(item.id) end
+            end
+        end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, castGUID, spellID = ...
         if unit == "player" then RecordSuccessfulCast(castGUID, spellID) end

@@ -29,7 +29,50 @@ local PROFESSION_SKILL_LINES = {
     [186] = "Mining",
     [393] = "Skinning",
     [197] = "Tailoring",
+    [185] = "Cooking",
+    [356] = "Fishing",
+    [794] = "Archaeology",
 }
+
+-- ItemRecipeSubclass -> base profession skill line. Books and obsolete First Aid
+-- recipes have no reliable current profession mapping, so leave them unmatched.
+local RECIPE_PROFESSION_SKILL_LINES = {
+    [1] = 165, [2] = 197, [3] = 202, [4] = 164, [5] = 185,
+    [6] = 171, [8] = 333, [9] = 356, [10] = 755, [11] = 773,
+}
+
+local function IsRecipeKnown(itemID, containerInfo)
+    local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
+    if classID ~= 9 then return nil end
+
+    local lines = containerInfo and containerInfo.tooltipLines
+    if not lines and C_TooltipInfo then
+        local data
+        if containerInfo and containerInfo.bag and containerInfo.slot and C_TooltipInfo.GetBagItem then
+            data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
+        elseif containerInfo and containerInfo.hyperlink and C_TooltipInfo.GetHyperlink then
+            data = C_TooltipInfo.GetHyperlink(containerInfo.hyperlink)
+        elseif C_TooltipInfo.GetItemByID then
+            data = C_TooltipInfo.GetItemByID(itemID)
+        end
+        if data and TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
+        lines = data and data.lines
+    end
+    if not lines or #lines == 0 or not ITEM_SPELL_KNOWN then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+
+    -- GetItemSpell can return the use/learning spell rather than the crafted
+    -- recipe. The localized tooltip is authoritative for "already known".
+    for _, line in ipairs(lines) do
+        for _, text in pairs({ line.leftText, line.rightText }) do
+            local clean = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):match("^%s*(.-)%s*$")
+            if clean == ITEM_SPELL_KNOWN then return true end
+        end
+    end
+    return false
+end
 
 -- ============================================================
 -- Class constants
@@ -146,6 +189,37 @@ local function ParseUpgradeTrackFromTooltip(tooltipData)
     return nil
 end
 
+local function GetMaxItemLevel(itemID, containerInfo)
+    if not C_Item.GetItemUpgradeInfo then return nil end
+    local link = containerInfo and containerInfo.hyperlink
+    if not link and containerInfo and containerInfo.bag and containerInfo.slot
+       and C_Container and C_Container.GetContainerItemLink then
+        link = C_Container.GetContainerItemLink(containerInfo.bag, containerInfo.slot)
+    end
+    -- A bare item ID loses the instance's upgrades and bonus IDs.
+    if not link then return nil end
+    if not C_Item.IsItemDataCachedByID(link) then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+
+    local name, _, _, _, _, _, _, _, equipLoc = C_Item.GetItemInfo(link)
+    if not name then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+    if not EQUIP_LOC_TO_SLOTS[equipLoc] then return nil end
+    local ilvl = C_Item.GetDetailedItemLevelInfo(link)
+    if type(ilvl) ~= "number" or not (ilvl > 0) then return nil end
+
+    local upgradeInfo = C_Item.GetItemUpgradeInfo(link)
+    -- Cached equipment without an upgrade track uses its current effective level.
+    if not upgradeInfo then return ilvl end
+    local maxIlvl = upgradeInfo.maxItemLevel
+    if type(maxIlvl) == "number" and maxIlvl >= ilvl then return maxIlvl end
+    return nil
+end
+
 -- ============================================================
 -- Attribute definitions
 -- ============================================================
@@ -180,7 +254,7 @@ local ATTRIBUTES = {
             -- Use the item link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local link = containerInfo and containerInfo.hyperlink
             if link then
-                local ilvl = GetDetailedItemLevelInfo(link)
+                local ilvl = C_Item.GetDetailedItemLevelInfo(link)
                 if ilvl then return ilvl end
             end
             -- Fallback to base template ilvl
@@ -189,18 +263,23 @@ local ATTRIBUTES = {
         end,
     },
     {
-        key = "item.type", label = "Item Type", category = "Item",
+        key = "item.maxilvl", label = "Maximum Item Level", category = "Item",
+        valueType = "number",
+        resolve = GetMaxItemLevel,
+    },
+    {
+        key = "item.type", label = "Item Type", category = "Item types and subtypes",
         valueType = "itemtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
             return classID
         end,
     },
     {
-        key = "item.subtype", label = "Item Subtype", category = "Item",
+        key = "item.subtype", label = "Item Subtype", category = "Item types and subtypes",
         valueType = "itemsubtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if classID and subclassID then return classID * 1000 + subclassID end
         end,
     },
@@ -230,7 +309,7 @@ local ATTRIBUTES = {
     {
         key = "item.isKnown", label = "Is Known", category = "Collection",
         valueType = "boolean",
-        resolve = function(itemID)
+        resolve = function(itemID, containerInfo)
             -- 1) Toy
             if C_ToyBox and C_ToyBox.GetToyInfo then
                 local _, toyID = C_ToyBox.GetToyInfo(itemID)
@@ -244,7 +323,7 @@ local ATTRIBUTES = {
                     return isCollected and true or false
                 end
             end
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             -- 3) Pet (classID 15 = Miscellaneous, subclassID 2 = Companion Pets)
             if classID == 15 and subclassID == 2 then
                 if C_PetJournal and C_PetJournal.GetPetInfoByItemID then
@@ -274,18 +353,34 @@ local ATTRIBUTES = {
             end
             -- 5) Recipe (classID 9)
             if classID == 9 then
-                local _, spellID = GetItemSpell(itemID)
-                if spellID then
-                    return (IsSpellKnown(spellID) or IsPlayerSpell(spellID)) and true or false
-                end
-                return false
+                return IsRecipeKnown(itemID, containerInfo)
             end
             -- 6) Anything else that teaches a spell (covers decor, etc.)
-            local _, spellID = GetItemSpell(itemID)
+            local _, spellID = C_Item.GetItemSpell(itemID)
             if spellID then
                 return (IsSpellKnown(spellID) or IsPlayerSpell(spellID)) and true or false
             end
             return false
+        end,
+    },
+    {
+        key = "item.isRecipeKnown", label = "Recipe Knowledge", category = "Item types and subtypes",
+        subcategory = "Recipes",
+        valueType = "boolean",
+        valueLabels = { [true] = "Already known", [false] = "Not yet known" },
+        resolve = IsRecipeKnown,
+    },
+    {
+        key = "item.isRecipeForMissingProfession", label = "Recipe Profession", category = "Item types and subtypes",
+        subcategory = "Recipes",
+        valueType = "boolean",
+        valueLabels = { [true] = "Unknown profession", [false] = "Known profession" },
+        resolve = function(itemID, containerInfo, charCtx)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
+            if classID ~= 9 then return nil end
+            local skillLine = RECIPE_PROFESSION_SKILL_LINES[subclassID]
+            if not skillLine then return nil end
+            return not charCtx.professions[skillLine]
         end,
     },
     {
@@ -310,7 +405,7 @@ local ATTRIBUTES = {
         key = "item.isPet", label = "Is Pet", category = "Collection",
         valueType = "boolean",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             return classID == 15 and subclassID == 2
         end,
     },
@@ -318,6 +413,17 @@ local ATTRIBUTES = {
         key = "item.bind", label = "Bind Type", category = "Item",
         valueType = "bind",
         resolve = function(itemID, containerInfo)
+            local source = (containerInfo and containerInfo.hyperlink) or itemID
+            local _, _, _, _, _, _, _, _, _, _, _, classID, _, bindType = C_Item.GetItemInfo(source)
+            if not classID then
+                classID = select(6, C_Item.GetItemInfoInstant(itemID))
+            end
+            local isRecipe = classID == 9
+            -- Recipe tooltips also describe the crafted item, including its binding.
+            if isRecipe and (C_Item.IsItemBindToAccount(source) or C_Item.IsItemBindToAccountUntilEquip(source)) then
+                return "warbound"
+            end
+
             -- Scan a list of tooltip lines for bind-type text; returns bind key or nil
             local function ScanLinesForBind(lines, ci)
                 for _, line in ipairs(lines) do
@@ -346,12 +452,11 @@ local ATTRIBUTES = {
             end
 
             -- Enum.ItemBind: 0=None,1=BoP,2=BoE,3=BoU,4=Quest,7=ToWoWAccount,8=ToBnetAccount,9=WarboundUntilEquipped
-            -- GetItemInfo returns bindType=1 (BoP) for many warbound items whose DB entry
-            -- predates the warbound system.  Tooltip text is always authoritative, so scan
-            -- the tooltip FIRST when we have a bag+slot, then fall back to GetItemInfo.
+            -- Non-recipe warbound items can report bindType=1, so their tooltip
+            -- still takes precedence over the numeric binding type.
 
             -- 1) Tooltip scanning – works for items in bags/bank where bag+slot are known
-            if containerInfo and containerInfo.bag and containerInfo.slot
+            if not isRecipe and containerInfo and containerInfo.bag and containerInfo.slot
                and C_TooltipInfo and C_TooltipInfo.GetBagItem then
                 local data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
                 if data then
@@ -364,14 +469,14 @@ local ATTRIBUTES = {
             end
 
             -- 2) Pre-parsed tooltip lines (from TooltipDataProcessor when bag/slot unavailable)
-            if containerInfo and containerInfo.tooltipLines then
+            if not isRecipe and containerInfo and containerInfo.tooltipLines then
                 local result = ScanLinesForBind(containerInfo.tooltipLines, containerInfo)
                 if result then return result end
             end
 
             -- 3) Hyperlink tooltip scan – works when bag/slot missing (bank UI, links)
             local link = containerInfo and containerInfo.hyperlink
-            if link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
+            if not isRecipe and link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
                 local data = C_TooltipInfo.GetHyperlink(link)
                 if data then
                     if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
@@ -383,14 +488,12 @@ local ATTRIBUTES = {
             end
 
             -- 4) GetItemInfo numeric fallback
-            local source = (containerInfo and containerInfo.hyperlink) or itemID
-            local _, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(source)
-
             if not bindType then
                 -- Request data for next time
                 if C_Item and C_Item.RequestLoadItemDataByID then
                     C_Item.RequestLoadItemDataByID(itemID)
                 end
+                if isRecipe then return nil end
                 if containerInfo and containerInfo.isBound then
                     return "soulbound"
                 end
@@ -432,7 +535,7 @@ local ATTRIBUTES = {
         key = "item.isWrongArmorType", label = "Is Wrong Armor Type", category = "Item",
         valueType = "boolean",
         resolve = function(itemID, containerInfo, charCtx)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             -- classID 4 = Armor
             if classID ~= 4 or not subclassID then return false end
             -- Ignore non-typed armor: 0=Misc/Generic (trinkets, rings, neck, etc.), 6=Shield
@@ -505,8 +608,9 @@ local DYNAMIC_REFS = {
             if not slots then return nil end
             local lowest
             for _, slotID in ipairs(slots) do
-                local ilvl = charCtx.slotIlvls[slotID]
-                if ilvl and (not lowest or ilvl < lowest) then lowest = ilvl end
+                local ilvl = charCtx.slotIlvls and charCtx.slotIlvls[slotID]
+                if type(ilvl) ~= "number" or not (ilvl > 0) then return nil end
+                if not lowest or ilvl < lowest then lowest = ilvl end
             end
             return lowest
         end,
@@ -565,8 +669,7 @@ for _, ref in ipairs(DYNAMIC_REFS) do REF_BY_KEY[ref.key] = ref end
 
 local function GetPlayerProfessionSkillLines()
     local result = {}
-    local prof1, prof2 = GetProfessions()
-    for _, idx in ipairs({ prof1, prof2 }) do
+    for _, idx in pairs({ GetProfessions() }) do
         if idx then
             local _, _, _, _, _, _, skillLine = GetProfessionInfo(idx)
             if skillLine then
@@ -591,7 +694,7 @@ local function BuildCharContext()
     for _, slotID in ipairs({1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}) do
         local link = GetInventoryItemLink("player", slotID)
         if link then
-            local ilvl = GetDetailedItemLevelInfo(link)
+            local ilvl = C_Item.GetDetailedItemLevelInfo(link)
             if ilvl then slotIlvls[slotID] = ilvl end
             if C_TooltipInfo and C_TooltipInfo.GetInventoryItem then
                 local data = C_TooltipInfo.GetInventoryItem("player", slotID)
@@ -642,7 +745,9 @@ local function FormatConditionValue(cond, attrDef)
     end
 
     local vt = attrDef and attrDef.valueType
-    if vt == "id" then
+    if attrDef and attrDef.key == "item.sellprice" and type(cond.value) == "number" and cond.value >= 0 then
+        return Wild.FormatGold(cond.value)
+    elseif vt == "id" then
         local _, link = C_Item.GetItemInfo(cond.value)
         return link or tostring(cond.value)
     elseif vt == "quality" then
@@ -650,12 +755,12 @@ local function FormatConditionValue(cond, attrDef)
     elseif vt == "upgradetrack" then
         return UPGRADE_TRACK_NAMES[cond.value] or tostring(cond.value)
     elseif vt == "itemtype" then
-        return GetItemClassInfo(cond.value) or tostring(cond.value)
+        return C_Item.GetItemClassInfo(cond.value) or tostring(cond.value)
     elseif vt == "itemsubtype" then
         local classID = math.floor((cond.value or 0) / 1000)
         local subclassID = (cond.value or 0) % 1000
-        local typeName = GetItemClassInfo(classID) or "?"
-        local subName = GetItemSubClassInfo(classID, subclassID) or "?"
+        local typeName = C_Item.GetItemClassInfo(classID) or "?"
+        local subName = C_Item.GetItemSubClassInfo(classID, subclassID) or "?"
         return typeName .. " > " .. subName
     elseif vt == "profession" then
         return PROFESSION_SKILL_LINES[cond.value] or tostring(cond.value)
@@ -668,6 +773,7 @@ local function FormatConditionValue(cond, attrDef)
     elseif vt == "expansion" then
         return tostring(cond.value or "?")
     elseif vt == "boolean" then
+        if attrDef.valueLabels then return attrDef.valueLabels[cond.value] or "?" end
         if cond.value == true then return "Yes" end
         return "No"
     end
@@ -685,20 +791,22 @@ end
 local function FormatActualValue(left, attrDef)
     if left == nil then return "|cff888888nil|r" end
     local vt = attrDef and attrDef.valueType
-    if vt == "quality" then
+    if attrDef and attrDef.key == "item.sellprice" and type(left) == "number" and left >= 0 then
+        return Wild.FormatGold(left)
+    elseif vt == "quality" then
         return (QUALITY_NAMES[left] or tostring(left)) .. " (" .. tostring(left) .. ")"
     elseif vt == "upgradetrack" then
         return (UPGRADE_TRACK_NAMES[left] or tostring(left)) .. " (" .. tostring(left) .. ")"
     elseif vt == "boolean" then
-        return left and "Yes" or "No"
+        return FormatConditionValue({ value = left }, attrDef)
     elseif vt == "bind" then
         return BIND_LABELS[left] or tostring(left)
     elseif vt == "itemtype" then
-        return (GetItemClassInfo(left) or tostring(left))
+        return (C_Item.GetItemClassInfo(left) or tostring(left))
     elseif vt == "itemsubtype" then
         local classID = math.floor((left or 0) / 1000)
         local subclassID = (left or 0) % 1000
-        return (GetItemClassInfo(classID) or "?") .. " > " .. (GetItemSubClassInfo(classID, subclassID) or "?")
+        return (C_Item.GetItemClassInfo(classID) or "?") .. " > " .. (C_Item.GetItemSubClassInfo(classID, subclassID) or "?")
     elseif vt == "equiploc" then
         return EQUIP_LOC_LABELS[left] or tostring(left)
     elseif vt == "class" then
@@ -1058,6 +1166,7 @@ local PROFESSION_PRACTITIONER = {
     [202] = "Engineer", [182] = "Herbalist", [773] = "Scribe",
     [755] = "Jewelcrafter", [165] = "Leatherworker", [186] = "Miner",
     [393] = "Skinner", [197] = "Tailor",
+    [185] = "Cook", [356] = "Fisher", [794] = "Archaeologist",
 }
 
 local ACTION_LABELS = {
@@ -1134,6 +1243,7 @@ local function FormatItemDescription(itemConds)
     local reagentVal
     local isKnownVal
     local isToyVal, isMountVal, isPetVal
+    local hasRecipeCondition = false
     local ilvlRefParts = {}
     local ilvlStatParts = {}
     local extras = {}
@@ -1184,6 +1294,7 @@ local function FormatItemDescription(itemConds)
             end
         else
             local attrDef = ATTR_BY_KEY[cond.attr]
+            if attrDef and attrDef.subcategory == "Recipes" then hasRecipeCondition = true end
             local attrLabel = attrDef and attrDef.label or cond.attr
             local opLabel = OP_DISPLAY[cond.op] or cond.op
             local valStr = FormatConditionValue(cond, attrDef)
@@ -1208,9 +1319,11 @@ local function FormatItemDescription(itemConds)
     elseif subtypeCode then
         local classID = math.floor(subtypeCode / 1000)
         local subclassID = subtypeCode % 1000
-        noun = GetItemSubClassInfo(classID, subclassID) or "items"
+        noun = C_Item.GetItemSubClassInfo(classID, subclassID) or "items"
     elseif typeID then
-        noun = GetItemClassInfo(typeID) or "items"
+        noun = C_Item.GetItemClassInfo(typeID) or "items"
+    elseif hasRecipeCondition then
+        noun = "Recipes"
     elseif isKnownVal == true then
         noun = "already-known Collectibles"
         consumedCollection = true
@@ -1359,7 +1472,7 @@ local function GetIntentSummary(intent)
         for _, group in ipairs(groups) do
             if group.mode ~= "exclude" then
                 if group.kind == "gold" and (group.gold or 0) > 0 then
-                    holdParts[#holdParts + 1] = string.format("%dg", group.gold)
+                    holdParts[#holdParts + 1] = Wild.FormatGold(group.gold * COPPER_PER_GOLD)
                 elseif group.kind == "item" and group.itemID then
                     local itemName = C_Item.GetItemInfo(group.itemID) or ("Item:" .. group.itemID)
                     holdParts[#holdParts + 1] = (group.count or 0) .. " " .. itemName
@@ -1528,10 +1641,7 @@ end
 -- ============================================================
 
 local function FormatGold(copper)
-    local gold = math.floor(copper / COPPER_PER_GOLD)
-    local silver = math.floor((copper % COPPER_PER_GOLD) / 100)
-    local copperRem = copper % 100
-    return string.format("%dg %ds %dc", gold, silver, copperRem)
+    return GetMoneyString(copper, true)
 end
 
 -- ============================================================
@@ -1562,6 +1672,8 @@ Wild.OP_DISPLAY = OP_DISPLAY
 
 -- Functions
 Wild.BuildCharContext = BuildCharContext
+Wild.GetMaxItemLevel = GetMaxItemLevel
+Wild.IsRecipeKnown = IsRecipeKnown
 Wild.EvaluateCondition = EvaluateCondition
 Wild.IntentMatchesItem = IntentMatchesItem
 Wild.IntentMatchesActor = IntentMatchesActor

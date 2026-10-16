@@ -25,10 +25,10 @@ local TOOLTIP_LINES = {
         key = "itemType",
         label = "Item Type / Subtype",
         resolve = function(itemID)
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if not classID then return nil end
-            local typeName = GetItemClassInfo(classID) or "?"
-            local subName = GetItemSubClassInfo(classID, subclassID)
+            local typeName = C_Item.GetItemClassInfo(classID) or "?"
+            local subName = C_Item.GetItemSubClassInfo(classID, subclassID)
             if subName and subName ~= typeName then
                 return "Type: " .. typeName .. " > " .. subName .. "  |cff888888(" .. classID .. "/" .. subclassID .. ")|r"
             end
@@ -42,7 +42,7 @@ local TOOLTIP_LINES = {
             -- Use item link for actual effective ilvl (accounts for upgrades/bonus IDs)
             local link = containerInfo and containerInfo.hyperlink
             if link then
-                local ilvl = GetDetailedItemLevelInfo(link)
+                local ilvl = C_Item.GetDetailedItemLevelInfo(link)
                 if ilvl then return "iLvl: " .. ilvl end
             end
             local _, _, _, ilvl = C_Item.GetItemInfo(itemID)
@@ -55,10 +55,7 @@ local TOOLTIP_LINES = {
         resolve = function(itemID, containerInfo)
             local sellPrice = Wild.GetEffectiveSellPrice(itemID, containerInfo)
             if not sellPrice or sellPrice == 0 then return "Sell Price: None" end
-            local gold = math.floor(sellPrice / 10000)
-            local silver = math.floor((sellPrice % 10000) / 100)
-            local copper = sellPrice % 100
-            return string.format("Sell Price: %dg %ds %dc  |cff888888(%d copper)|r", gold, silver, copper, sellPrice)
+            return "Sell Price: " .. Wild.FormatGold(sellPrice)
         end,
     },
     {
@@ -126,7 +123,7 @@ local TOOLTIP_LINES = {
     {
         key = "collectionStatus",
         label = "Collection Status",
-        resolve = function(itemID)
+        resolve = function(itemID, containerInfo)
             local parts = {}
             -- Toy
             if C_ToyBox and C_ToyBox.GetToyInfo then
@@ -145,7 +142,7 @@ local TOOLTIP_LINES = {
                 end
             end
             -- Pet
-            local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemID)
+            local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
             if classID == 15 and subclassID == 2 and C_PetJournal then
                 local speciesID = C_PetJournal.GetPetInfoByItemID and C_PetJournal.GetPetInfoByItemID(itemID)
                 if speciesID then
@@ -177,9 +174,8 @@ local TOOLTIP_LINES = {
             end
             -- Recipe
             if classID == 9 then
-                local _, spellID = GetItemSpell(itemID)
-                if spellID then
-                    local known = IsSpellKnown(spellID) or IsPlayerSpell(spellID)
+                local known = Wild.IsRecipeKnown(itemID, containerInfo)
+                if known ~= nil then
                     parts[#parts + 1] = "Recipe: " .. (known and "|cff00ff00known|r" or "|cffffff00unknown|r")
                 end
             end

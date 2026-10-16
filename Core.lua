@@ -112,6 +112,11 @@ local defaults = {
         darkmoonTeleport = false,  -- always accept the Darkmoon Faire teleport dialog
         toggleKey = 4,             -- 1 = none, 2 = ALT, 3 = CTRL, 4 = SHIFT — hold to bypass automation
     },
+    dialogKey = {
+        enabled = false,
+        key = "SPACE",
+        destroy = false,
+    },
     autoReply = {
         enabled = false,
         message = "I'm currently in a Mythic+ dungeon and can't respond right now. I'll get back to you after the key!",
@@ -168,6 +173,15 @@ local defaults = {
     },
 }
 
+local function CopySettingValue(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for key, child in pairs(value) do
+        copy[key] = CopySettingValue(child)
+    end
+    return copy
+end
+
 -- Deep merge: apply default values for missing keys, recursing into tables
 local function ApplyDefaults(target, source)
     for k, v in pairs(source) do
@@ -177,7 +191,7 @@ local function ApplyDefaults(target, source)
             end
             ApplyDefaults(target[k], v)
         elseif target[k] == nil then
-            target[k] = v
+            target[k] = CopySettingValue(v)
         end
     end
 end
@@ -204,6 +218,8 @@ frame:SetScript("OnEvent", function(self, event, addon)
         ["item.isRecipe"] = true,
     }
     for _, intent in ipairs(WildDB.intents) do
+        -- Retire the recipe shortcut marker without changing its saved rule.
+        intent.recipeSelling = nil
         -- Migrate flat conditions to groups
         if intent.conditions and not intent.groups then
             for _, cond in ipairs(intent.conditions) do
@@ -495,13 +511,130 @@ Wild.name = ADDON_NAME
 Wild.defaults = defaults
 
 -- ============================================================
+-- Public API — Chat output with item icons
+-- ============================================================
+
+local ITEM_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+function Wild.Print(message)
+    local formatted = message:gsub("(|Hitem:(%d+)[^|]*|h.-|h)", function(link, itemID)
+        local icon = C_Item.GetItemIconByID(tonumber(itemID)) or ITEM_ICON_FALLBACK
+        return "|T" .. icon .. ":0:0|t " .. link
+    end)
+    print(formatted)
+end
+
+-- ============================================================
+-- Item-action evidence and result aggregation
+-- ============================================================
+
+function Wild.CaptureBagItemCounts(bags)
+    local counts = {}
+    for _, bag in ipairs(bags) do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                local key = info.hyperlink or info.itemID
+                counts[key] = (counts[key] or 0) + (info.stackCount or 1)
+            end
+        end
+    end
+    return counts
+end
+
+function Wild.CapturePlayerItemCounts()
+    local bags = Wild.GetPlayerBags()
+    local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+    if reagentBag then
+        local included = false
+        for _, bag in ipairs(bags) do
+            if bag == reagentBag then included = true; break end
+        end
+        -- Evidence includes excluded bags, so sorting cannot masquerade as removal.
+        if not included then bags[#bags + 1] = reagentBag end
+    end
+    return Wild.CaptureBagItemCounts(bags)
+end
+
+function Wild.CreateItemActionBatch(readSource, readTarget)
+    return {
+        readSource = readSource, sourceBefore = readSource(),
+        readTarget = readTarget, targetBefore = readTarget and readTarget(),
+        entries = {}, confirmed = {},
+    }
+end
+
+function Wild.RecordItemAction(batch, info, count, unitCopper)
+    batch.entries[#batch.entries + 1] = {
+        key = info.hyperlink or info.link or info.itemID,
+        link = info.hyperlink or info.link, itemID = info.itemID,
+        count = count, unitCopper = unitCopper or 0, confirmed = 0,
+    }
+end
+
+function Wild.ConfirmItemActionBatch(batch)
+    local sourceAfter = batch.readSource()
+    local targetAfter = batch.readTarget and batch.readTarget()
+    local available = {}
+    local results = {}
+    local complete = true
+    for _, entry in ipairs(batch.entries) do
+        local key = entry.key
+        if available[key] == nil then
+            local removed = (batch.sourceBefore[key] or 0) - (sourceAfter[key] or 0)
+            if targetAfter then
+                local received = (targetAfter[key] or 0) - (batch.targetBefore[key] or 0)
+                removed = math.min(removed, received)
+            end
+            -- Repeated events must not report the same observed movement twice.
+            available[key] = math.max(0, removed - (batch.confirmed[key] or 0))
+        end
+        local count = math.min(entry.count - entry.confirmed, available[key])
+        if count > 0 then
+            entry.confirmed = entry.confirmed + count
+            batch.confirmed[key] = (batch.confirmed[key] or 0) + count
+            available[key] = available[key] - count
+            results[#results + 1] = {
+                key = key, link = entry.link, itemID = entry.itemID,
+                count = count, copper = entry.unitCopper * count,
+            }
+        end
+        if entry.confirmed < entry.count then complete = false end
+    end
+    return results, complete
+end
+
+function Wild.MergeItemActionEntries(results, entries)
+    for _, entry in ipairs(entries) do
+        local existing
+        for _, result in ipairs(results) do
+            if result.key == entry.key and result.source == entry.source and result.target == entry.target then
+                existing = result
+                break
+            end
+        end
+        if existing then
+            existing.count = existing.count + entry.count
+            existing.copper = existing.copper + (entry.copper or 0)
+        else
+            results[#results + 1] = {
+                key = entry.key, link = entry.link, itemID = entry.itemID,
+                count = entry.count, copper = entry.copper or 0,
+                source = entry.source, target = entry.target,
+            }
+        end
+    end
+end
+
+-- ============================================================
 -- Dotted-key navigation helpers
 -- ============================================================
 
 local function GetNestedValue(tbl, path)
     for segment in path:gmatch("[^%.]+") do
         if type(tbl) ~= "table" then return nil end
-        tbl = tbl[segment]
+        local key = segment:match("^%d+$") and tonumber(segment) or segment
+        tbl = tbl[key]
     end
     return tbl
 end
@@ -509,7 +642,7 @@ end
 local function SetNestedValue(tbl, path, value)
     local segments = {}
     for segment in path:gmatch("[^%.]+") do
-        segments[#segments + 1] = segment
+        segments[#segments + 1] = segment:match("^%d+$") and tonumber(segment) or segment
     end
     for i = 1, #segments - 1 do
         local seg = segments[i]
@@ -553,39 +686,48 @@ local FEATURES = {
     durabilitytotal  = { key = "durability.showEquippedTotal", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     durabilitybags   = { key = "durability.showBags", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     speed            = { key = "speed.enabled", onToggle = function() Wild.UpdateSpeedIndicator() end },
+    dialog           = { key = "dialogKey.enabled", onToggle = function() Wild.UpdateDialogKey() end },
 }
 
 Wild.FEATURES = FEATURES
 
 -- ============================================================
 -- Public API — Effective sell price
--- Uses C_TooltipInfo to get the real vendor price (accounts for
--- upgrades / bonus IDs) and falls back to GetItemInfo base price.
+-- Returns per-item copper using the native tooltip sell-price line.
 -- ============================================================
 
+local function GetTooltipSellPrice(data)
+    if not data then return nil end
+    if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
+    for _, line in ipairs(data.lines or {}) do
+        if line.type == Enum.TooltipDataLineType.SellPrice and line.price ~= nil then
+            return line.price
+        end
+    end
+end
+
 function Wild.GetEffectiveSellPrice(itemID, containerInfo)
-    -- 1) Tooltip money from bag item (most accurate, includes upgrade scaling)
     if containerInfo and containerInfo.bag and containerInfo.slot
        and C_TooltipInfo and C_TooltipInfo.GetBagItem then
-        local data = C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot)
-        if data then
-            if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
-            if data.money then return data.money end
+        local price = GetTooltipSellPrice(C_TooltipInfo.GetBagItem(containerInfo.bag, containerInfo.slot))
+        if price ~= nil then
+            -- Bag tooltips price the whole stack; callers expect a unit price.
+            local count = containerInfo.stackCount
+            if not count then
+                local info = C_Container.GetContainerItemInfo(containerInfo.bag, containerInfo.slot)
+                count = info and info.stackCount
+            end
+            if count and count > 0 then return price / count end
         end
     end
 
-    -- 2) Tooltip money from hyperlink (works outside bags)
     local link = containerInfo and containerInfo.hyperlink
     if link and C_TooltipInfo and C_TooltipInfo.GetHyperlink then
-        local data = C_TooltipInfo.GetHyperlink(link)
-        if data then
-            if TooltipUtil and TooltipUtil.SurfaceArgs then TooltipUtil.SurfaceArgs(data) end
-            if data.money then return data.money end
-        end
+        local price = GetTooltipSellPrice(C_TooltipInfo.GetHyperlink(link))
+        if price ~= nil then return price end
     end
 
-    -- 3) Fallback: GetItemInfo base sell price
-    local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(itemID)
+    local _, _, _, _, _, _, _, _, _, _, sellPrice = C_Item.GetItemInfo(link or itemID)
     return sellPrice or 0
 end
 
@@ -600,7 +742,7 @@ function Wild.IsFeatureEnabled(feature)
     return GetNestedValue(Wild.db, info.key) and true or false
 end
 
-function Wild.SetFeatureEnabled(feature, enabled)
+function Wild.SetFeatureEnabled(feature, enabled, source)
     if not Wild.db then return end
     local info = FEATURES[feature:lower()]
     if not info then
@@ -609,6 +751,7 @@ function Wild.SetFeatureEnabled(feature, enabled)
     end
     SetNestedValue(Wild.db, info.key, enabled)
     if info.onToggle then info.onToggle(enabled) end
+    Wild.NotifySettingsChanged(info.key, source)
 end
 
 -- ============================================================
@@ -620,9 +763,28 @@ function Wild.GetSetting(key)
     return GetNestedValue(Wild.db, key)
 end
 
-function Wild.SetSetting(key, value)
+function Wild.GetDefaultSetting(key)
+    return CopySettingValue(GetNestedValue(defaults, key))
+end
+
+function Wild.NotifySettingsChanged(key, source)
+    if Wild.RefreshNativeSettings then Wild.RefreshNativeSettings(key, source) end
+    if Wild.RefreshSettings then Wild.RefreshSettings(key, source) end
+end
+
+function Wild.UpdateSettingsVisibility()
+    Wild.settingsVisible = Wild.standaloneSettingsVisible == true or Wild.nativeSettingsVisible == true
+    if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+end
+
+function Wild.SetSetting(key, value, source)
     if not Wild.db then return end
+    if key == "dialogKey.key" and Wild.SetDialogKey then
+        return Wild.SetDialogKey(value, source)
+    end
     SetNestedValue(Wild.db, key, value)
+    if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+    Wild.NotifySettingsChanged(key, source)
 end
 
 function Wild.ResetSettings()
@@ -632,6 +794,8 @@ function Wild.ResetSettings()
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
+    if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
+    Wild.NotifySettingsChanged()
     print("|cff00ccffWild:|r All settings reset to defaults.")
 end

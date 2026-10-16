@@ -11,6 +11,9 @@ local MAX_DESTROY_PASSES = 50
 local destroyActive = false
 local destroyPassNum = 0
 local destroyTotalCount = 0
+local destroyGeneration = 0
+local CONFIRMATION_TIMEOUT = 5
+local POPUP_CONFIRMATION_TIMEOUT = 30
 
 local destroyFrame = CreateFrame("Frame")
 destroyFrame:Hide()
@@ -25,7 +28,11 @@ destroyFrame:Hide()
 local destroyQueueItems = {}
 local destroyQueueTotalCount = 0
 local destroyQueueDoneCount = 0
+local destroyQueueRemovedCount = 0
+local destroyQueueEntries = {}
 local destroyQueueOnComplete = nil
+local pendingDestroy
+local destroyConfirmationTimer
 
 local destroyBtnFrame = CreateFrame("Frame", "WildDestroyFrame", UIParent, "BackdropTemplate")
 destroyBtnFrame:SetSize(300, 100)
@@ -111,15 +118,28 @@ destroyCancelBtn:SetScript("OnLeave", function(self)
     self:SetBackdropColor(0.15, 0.15, 0.20, 1)
 end)
 
-local function FinishDestroyQueue()
+local function ClearDestroyWait()
+    destroyFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
+    destroyFrame:SetScript("OnEvent", nil)
+    if destroyConfirmationTimer then destroyConfirmationTimer:Cancel(); destroyConfirmationTimer = nil end
+    pendingDestroy = nil
+end
+
+local function FinishDestroyQueue(cancelled)
     destroyBtnFrame:Hide()
     local cb = destroyQueueOnComplete
-    local count = destroyQueueDoneCount
+    local count = destroyQueueRemovedCount
+    for _, item in ipairs(destroyQueueEntries) do
+        Wild.Print(string.format("|cff00ccffWild:|r Destroyed %s \195\151%d.", item.link or ("Item " .. item.itemID), item.count))
+    end
+    ClearDestroyWait()
     destroyQueueItems = {}
     destroyQueueTotalCount = 0
     destroyQueueDoneCount = 0
+    destroyQueueRemovedCount = 0
+    destroyQueueEntries = {}
     destroyQueueOnComplete = nil
-    if cb then cb(count) end
+    if cb then cb(count, cancelled) end
 end
 
 local function UpdateDestroyButton()
@@ -128,6 +148,7 @@ local function UpdateDestroyButton()
         return
     end
     local item = destroyQueueItems[1]
+    destroyBtn.label:SetText(pendingDestroy and "|cffaaaaaaWaiting...|r" or "|cffff4444Destroy|r")
     destroyItemText:SetText(string.format(
         "%s \195\151%d  (%d of %d)",
         item.link or item.name or ("Item " .. (item.itemID or "?")),
@@ -138,24 +159,98 @@ local function UpdateDestroyButton()
     destroyBtnFrame:Show()
 end
 
-destroyBtn:SetScript("OnClick", function()
-    if #destroyQueueItems == 0 then return end
-    local item = tremove(destroyQueueItems, 1)
-    ClearCursor()
-    local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-    if info and info.itemID == item.itemID then
-        C_Container.PickupContainerItem(item.bag, item.slot)
-        DeleteCursorItem()
-        destroyQueueDoneCount = destroyQueueDoneCount + 1
-        print(string.format("|cff00ccffWild:|r Destroyed %s \195\151%d.", item.link or "?", item.count or 1))
+local function StoreDestroyResults(request)
+    Wild.MergeItemActionEntries(destroyQueueEntries, request.confirmed)
+    for _, item in ipairs(request.confirmed) do destroyQueueRemovedCount = destroyQueueRemovedCount + item.count end
+    request.confirmed = {}
+end
+
+local function ConfirmDestroy()
+    if not pendingDestroy or GetCursorInfo() then return false end
+    local request = pendingDestroy
+    local entries, complete = Wild.ConfirmItemActionBatch(request.batch)
+    Wild.MergeItemActionEntries(request.confirmed, entries)
+    if not complete then return false end
+    StoreDestroyResults(request)
+    destroyQueueDoneCount = destroyQueueDoneCount + 1
+    tremove(destroyQueueItems, 1)
+    ClearDestroyWait()
+    UpdateDestroyButton()
+    return true
+end
+
+local function IsDestroyPopupVisible()
+    if not StaticPopup_Visible then return false end
+    return StaticPopup_Visible("DELETE_ITEM") or StaticPopup_Visible("DELETE_QUEST_ITEM")
+        or StaticPopup_Visible("DELETE_GOOD_ITEM") or StaticPopup_Visible("DELETE_GOOD_QUEST_ITEM")
+end
+
+local function FailDestroy(request)
+    if pendingDestroy ~= request then return end
+    if ConfirmDestroy() then return end
+    if IsDestroyPopupVisible() then
+        request.waitingForPopup = true
+        destroyConfirmationTimer = C_Timer.NewTimer(POPUP_CONFIRMATION_TIMEOUT, function() FailDestroy(request) end)
+        return
     end
+    StoreDestroyResults(request)
+    local cursorType, cursorItemID = GetCursorInfo()
+    if cursorType == "item" and cursorItemID == request.item.itemID then ClearCursor() end
+    ClearDestroyWait()
+    Wild.Print("|cffff6600Wild:|r Item destruction was not confirmed. Check the item and try again.")
+    UpdateDestroyButton()
+end
+
+destroyBtn:SetScript("OnClick", function()
+    if #destroyQueueItems == 0 or pendingDestroy then return end
+    if GetCursorInfo() then
+        Wild.Print("|cffff6600Wild:|r Clear the cursor before destroying an item.")
+        return
+    end
+    local item = destroyQueueItems[1]
+    local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
+    if not info or info.itemID ~= item.itemID or (info.hyperlink and item.link and info.hyperlink ~= item.link) then
+        Wild.Log("Inventory", "Skipped a destroy request because its bag slot changed.")
+        tremove(destroyQueueItems, 1)
+        UpdateDestroyButton()
+        return
+    end
+    if info.isLocked then
+        Wild.Print("|cffff6600Wild:|r Item is locked; try destroying it again after it unlocks.")
+        return
+    end
+    local request = { item = item, confirmed = {}, batch = Wild.CreateItemActionBatch(Wild.CapturePlayerItemCounts) }
+    Wild.RecordItemAction(request.batch, info, info.stackCount or 1)
+    pendingDestroy = request
+    destroyFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+    destroyFrame:SetScript("OnEvent", function()
+        if ConfirmDestroy() then return end
+        if pendingDestroy and pendingDestroy.waitingForPopup and not IsDestroyPopupVisible() and not GetCursorInfo() then
+            FailDestroy(pendingDestroy)
+        end
+    end)
+    destroyConfirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function() FailDestroy(request) end)
+    C_Container.PickupContainerItem(item.bag, item.slot)
+    local cursorType, cursorItemID, cursorLink = GetCursorInfo()
+    if cursorType ~= "item" or cursorItemID ~= info.itemID
+        or (info.hyperlink and cursorLink and cursorLink ~= info.hyperlink) then
+        FailDestroy(request)
+        return
+    end
+    DeleteCursorItem()
     UpdateDestroyButton()
 end)
 
 destroyCancelBtn:SetScript("OnClick", function()
+    if pendingDestroy and not GetCursorInfo() then
+        local entries = Wild.ConfirmItemActionBatch(pendingDestroy.batch)
+        Wild.MergeItemActionEntries(pendingDestroy.confirmed, entries)
+        StoreDestroyResults(pendingDestroy)
+    end
+    ClearDestroyWait()
     ClearCursor()
     destroyQueueItems = {}
-    FinishDestroyQueue()
+    FinishDestroyQueue(true)
 end)
 
 function Wild.QueueDestroyItems(items, onComplete)
@@ -167,14 +262,16 @@ function Wild.QueueDestroyItems(items, onComplete)
         destroyQueueItems[#destroyQueueItems + 1] = item
     end
     destroyQueueTotalCount = destroyQueueTotalCount + #items
-    destroyQueueOnComplete = onComplete
+    if onComplete then destroyQueueOnComplete = onComplete end
     UpdateDestroyButton()
 end
 
 local function RunDestroyPass()
+    if not destroyActive then return end
     if destroyPassNum >= MAX_DESTROY_PASSES then
+        Wild.Print("|cffff6600Wild:|r Destroy safety cap reached (" .. MAX_DESTROY_PASSES .. " passes).")
         if destroyTotalCount > 0 then
-            print(string.format("|cff00ccffWild:|r Auto-destroy complete: %d item(s) removed.", destroyTotalCount))
+            Wild.Print(string.format("|cff00ccffWild:|r Auto-destroy stopped: %d item(s) removed.", destroyTotalCount))
         end
         destroyActive = false
         return
@@ -248,15 +345,19 @@ local function RunDestroyPass()
     end
 
     if #pendingItems > 0 then
-        Wild.QueueDestroyItems(pendingItems, function(destroyedCount)
+        local generation = destroyGeneration
+        Wild.QueueDestroyItems(pendingItems, function(destroyedCount, cancelled)
             destroyTotalCount = destroyTotalCount + destroyedCount
-            if destroyedCount > 0 then
-                -- Wait for bags to settle, then re-scan
-                destroyFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-                destroyFrame:SetScript("OnEvent", function(self, event)
-                    self:UnregisterEvent("BAG_UPDATE_DELAYED")
-                    self:SetScript("OnEvent", nil)
-                    C_Timer.After(Wild.db.advanced.passDelay, RunDestroyPass)
+            if cancelled then
+                destroyActive = false
+                destroyGeneration = destroyGeneration + 1
+                if destroyTotalCount > 0 then
+                    Wild.Print(string.format("|cff00ccffWild:|r Auto-destroy stopped: %d item(s) removed.", destroyTotalCount))
+                end
+            elseif destroyedCount > 0 then
+                -- The destroy queue has already validated the bag update.
+                C_Timer.After(Wild.db.advanced.passDelay, function()
+                    if destroyActive and destroyGeneration == generation then RunDestroyPass() end
                 end)
             else
                 if destroyTotalCount > 0 then
@@ -288,6 +389,7 @@ local function ProcessDestroyIntents()
     if not hasDestroy then return end
 
     destroyActive = true
+    destroyGeneration = destroyGeneration + 1
     destroyPassNum = 0
     destroyTotalCount = 0
     RunDestroyPass()

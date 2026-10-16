@@ -16,6 +16,7 @@ function Wild.SetAutoLoot(enabled)
     if not Wild.db then return end
     Wild.db.lootAutoLoot = enabled
     ApplyAutoLoot()
+    Wild.NotifySettingsChanged("lootAutoLoot")
 end
 
 function Wild.SetAutoLootModifier(modifier)
@@ -23,6 +24,7 @@ function Wild.SetAutoLootModifier(modifier)
     Wild.db.lootAutoLootModifier = modifier
     SetModifiedClick("AUTOLOOTTOGGLE", modifier)
     SaveBindings(GetCurrentBindingSet())
+    Wild.NotifySettingsChanged("lootAutoLootModifier")
 end
 
 -- ============================================================
@@ -57,6 +59,7 @@ function Wild.SetQuickLoot(enabled)
     else
         quickLootFrame:UnregisterEvent("LOOT_READY")
     end
+    Wild.NotifySettingsChanged("lootQuickLoot")
 end
 
 quickLootFrame:SetScript("OnEvent", FastLoot)

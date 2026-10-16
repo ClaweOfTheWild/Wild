@@ -164,7 +164,7 @@ local TARGET_BANK_TYPE = {
 -- Character bank deposit: pass nil bankType (UseContainerItem defaults to character bank)
 -- Warband bank deposit: pass Enum.BankType.Account explicitly
 
-local function DepositFromBags(intent, charCtx, maxCount, bankType)
+local function DepositFromBags(intent, charCtx, maxCount, bankType, seen, itemLimits)
     if maxCount == 0 then maxCount = math.huge end
     local deposited = 0
     local entries = {}
@@ -174,12 +174,18 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
             if maxCount > 0 and deposited >= maxCount then return deposited, entries end
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info then info.bag = bag; info.slot = slot end
-            if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
+            local slotKey = bag .. ":" .. slot
+            local itemKey = info and (info.hyperlink or info.itemID)
+            if info and info.itemID and not seen[slotKey]
+                and (not itemLimits or (itemLimits[itemKey] or 0) > 0)
+                and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
                 local stackCount = info.stackCount or 1
                 local remaining = maxCount - deposited
-                local moveCount = stackCount
-                if remaining < stackCount then
-                    moveCount = remaining
+                local moveCount = math.min(stackCount, remaining)
+                if itemLimits then moveCount = math.min(moveCount, itemLimits[itemKey]) end
+                seen[slotKey] = true
+                if itemLimits then itemLimits[itemKey] = itemLimits[itemKey] - moveCount end
+                if moveCount < stackCount then
                     C_Container.SplitContainerItem(bag, slot, moveCount)
                     -- Cursor now holds the split portion; deposit it into the bank
                     PlaceCursorInBank(bankType or Enum.BankType.Character, info.itemID)
@@ -191,7 +197,7 @@ local function DepositFromBags(intent, charCtx, maxCount, bankType)
                     end
                 end
                 deposited = deposited + moveCount
-                entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
+                entries[#entries + 1] = { link = info.hyperlink, itemID = info.itemID, count = moveCount }
             end
         end
     end
@@ -202,7 +208,7 @@ end
 -- Withdraw from Character Bank
 -- ============================================================
 
-local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
+local function WithdrawFromCharacterBank(intent, charCtx, neededCount, seen)
     if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
@@ -219,10 +225,12 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                     info.bag = bag; info.slot = slot
                     itemCount = itemCount + 1
                 end
-                if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
+                local slotKey = bag .. ":" .. slot
+                if info and info.itemID and not seen[slotKey] and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
                     local stackCount = info.stackCount or 1
                     local remaining = neededCount - withdrawn
                     local moveCount = stackCount
+                    seen[slotKey] = true
                     if remaining < stackCount then
                         moveCount = remaining
                         C_Container.SplitContainerItem(bag, slot, moveCount)
@@ -232,7 +240,7 @@ local function WithdrawFromCharacterBank(intent, charCtx, neededCount)
                         C_Container.UseContainerItem(bag, slot)
                     end
                     withdrawn = withdrawn + moveCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
+                    entries[#entries + 1] = { link = info.hyperlink, itemID = info.itemID, count = moveCount }
                 end
             end
             BlogMsg("  Bank bag " .. tostring(bag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
@@ -245,7 +253,7 @@ end
 -- Withdraw from Warband Bank
 -- ============================================================
 
-local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
+local function WithdrawFromWarbandBank(intent, charCtx, neededCount, seen)
     if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
@@ -262,10 +270,12 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                     info.bag = bankBag; info.slot = slot
                     itemCount = itemCount + 1
                 end
-                if info and info.itemID and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
+                local slotKey = bankBag .. ":" .. slot
+                if info and info.itemID and not seen[slotKey] and Wild.IntentMatchesItem(intent, info.itemID, info, charCtx) then
                     local stackCount = info.stackCount or 1
                     local remaining = neededCount - withdrawn
                     local moveCount = stackCount
+                    seen[slotKey] = true
                     if remaining < stackCount then
                         moveCount = remaining
                         C_Container.SplitContainerItem(bankBag, slot, moveCount)
@@ -275,7 +285,7 @@ local function WithdrawFromWarbandBank(intent, charCtx, neededCount)
                         C_Container.UseContainerItem(bankBag, slot)
                     end
                     withdrawn = withdrawn + moveCount
-                    entries[#entries + 1] = { link = info.hyperlink, count = moveCount }
+                    entries[#entries + 1] = { link = info.hyperlink, itemID = info.itemID, count = moveCount }
                 end
             end
             BlogMsg("  Warband tab " .. tostring(bankBag) .. ": found " .. itemCount .. " item(s) in " .. tostring(numSlots) .. " slot(s)")
@@ -288,7 +298,7 @@ end
 -- Withdraw from Guild Bank
 -- ============================================================
 
-local function WithdrawFromGuildBank(intent, charCtx, neededCount)
+local function WithdrawFromGuildBank(intent, charCtx, neededCount, seen)
     if neededCount == 0 then neededCount = math.huge end
     local withdrawn = 0
     local entries = {}
@@ -299,14 +309,16 @@ local function WithdrawFromGuildBank(intent, charCtx, neededCount)
             for slot = 1, GUILD_BANK_SLOTS_PER_TAB do
                 if neededCount > 0 and withdrawn >= neededCount then return withdrawn, entries end
                 local _, itemCount = GetGuildBankItemInfo(tab, slot)
-                if itemCount and itemCount > 0 then
+                local slotKey = tab .. ":" .. slot
+                if itemCount and itemCount > 0 and not seen[slotKey] then
                     local link = GetGuildBankItemLink(tab, slot)
                     if link then
                         local itemID = tonumber(link:match("item:(%d+)"))
                         if itemID and Wild.IntentMatchesItem(intent, itemID, { quality = select(3, C_Item.GetItemInfo(itemID)), hyperlink = link }, charCtx) then
+                            seen[slotKey] = true
                             AutoStoreGuildBankItem(tab, slot)
                             withdrawn = withdrawn + itemCount
-                            entries[#entries + 1] = { link = link, count = itemCount }
+                            entries[#entries + 1] = { link = link, itemID = itemID, count = itemCount }
                         end
                     end
                 end
@@ -402,8 +414,16 @@ local BANK_COUNT_FUNCS = {
 
 local preloadFrame = CreateFrame("Frame")
 preloadFrame:Hide()
+local preloadTimer
+
+local function ClearBankPreload()
+    if preloadTimer then preloadTimer:Cancel(); preloadTimer = nil end
+    preloadFrame:UnregisterEvent("ITEM_DATA_LOAD_RESULT")
+    preloadFrame:SetScript("OnEvent", nil)
+end
 
 local function PreloadBankItemData(bankBagSets, onComplete)
+    ClearBankPreload()
     local pending = {}
     local pendingCount = 0
 
@@ -434,15 +454,17 @@ local function PreloadBankItemData(bankBagSets, onComplete)
     end
 
     -- Safety timeout: if items never arrive, proceed anyway
-    local safetyTimer = C_Timer.NewTimer(Wild.db.advanced.preloadTimeout, function()
+    local safetyTimer
+    safetyTimer = C_Timer.NewTimer(Wild.db.advanced.preloadTimeout, function()
+        if preloadTimer ~= safetyTimer then return end
         if pendingCount > 0 then
             BlogMsg("PreloadBankItemData: safety timeout with " .. pendingCount .. " item(s) still pending.")
             pendingCount = 0
-            preloadFrame:UnregisterEvent("ITEM_DATA_LOAD_RESULT")
-            preloadFrame:SetScript("OnEvent", nil)
+            ClearBankPreload()
             onComplete()
         end
     end)
+    preloadTimer = safetyTimer
 
     preloadFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
     preloadFrame:SetScript("OnEvent", function(self, event, itemID, success)
@@ -451,9 +473,7 @@ local function PreloadBankItemData(bankBagSets, onComplete)
             pendingCount = pendingCount - 1
             BlogMsg("PreloadBankItemData: loaded itemID " .. itemID .. " (" .. pendingCount .. " remaining)")
             if pendingCount <= 0 then
-                self:UnregisterEvent("ITEM_DATA_LOAD_RESULT")
-                self:SetScript("OnEvent", nil)
-                safetyTimer:Cancel()
+                ClearBankPreload()
                 onComplete()
             end
         end
@@ -461,391 +481,427 @@ local function PreloadBankItemData(bankBagSets, onComplete)
 end
 
 -- ============================================================
--- Event-driven intent queue processor
--- Executes intents one at a time, waiting for BAG_UPDATE_DELAYED
--- between each to let item movements settle.
+-- Event-driven intent queue processor and confirmed results
 -- ============================================================
 
 local queueFrame = CreateFrame("Frame")
 queueFrame:Hide()
 
--- Forward declarations
 local ProcessQueueStep
+local WaitForPass
+local CompletePass
 
--- Active queue state (only one queue runs at a time)
-local activeQueue = nil    -- array of { intent, triggerSource }
+local activeQueue = nil
 local activeIndex = 0
 local activeLen = 0
+local pendingPass
+local confirmationTimer
+local bankGeneration = 0
+
+local MAX_PASSES_PER_INTENT = 50
+local CONFIRMATION_TIMEOUT = 5
+local BANK_NAMES = { character = "Character bank", warband = "Warband bank", guild = "Guild bank" }
+local CONFIRMATION_EVENTS = {
+    "BAG_UPDATE_DELAYED", "PLAYERBANKSLOTS_CHANGED", "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED",
+    "GUILDBANKBAGSLOTS_CHANGED", "PLAYER_MONEY", "ACCOUNT_MONEY", "GUILDBANK_UPDATE_MONEY",
+}
+
+local function ReadPlayerItemCounts()
+    return Wild.CapturePlayerItemCounts()
+end
+
+local function ReadBankItemCounts(target)
+    if target ~= "guild" then
+        return Wild.CaptureBagItemCounts(target == "warband" and ACCOUNT_BANK_TABS or CHARACTER_BANK_BAGS)
+    end
+    local counts = {}
+    for tab = 1, GetNumGuildBankTabs() do
+        local _, _, viewable = GetGuildBankTabInfo(tab)
+        if viewable then
+            for slot = 1, GUILD_BANK_SLOTS_PER_TAB do
+                local _, count = GetGuildBankItemInfo(tab, slot)
+                local link = GetGuildBankItemLink(tab, slot)
+                if link and count and count > 0 then counts[link] = (counts[link] or 0) + count end
+            end
+        end
+    end
+    return counts
+end
+
+local function ReadBankMoney(target)
+    if target == "warband" then return C_Bank.FetchDepositedMoney(Enum.BankType.Account) end
+    if target == "guild" then return GetGuildBankMoney() end
+end
+
+local function PrintBankResults(entry)
+    local results = entry.results
+    for _, item in ipairs(results.deposit) do
+        Wild.Print(string.format("|cff00ccffWild:|r Deposited %s \195\151%d to %s.", item.link or ("Item " .. item.itemID), item.count, BANK_NAMES[item.target]))
+    end
+    for _, item in ipairs(results.withdraw) do
+        Wild.Print(string.format("|cff00ccffWild:|r Withdrew %s \195\151%d from %s.", item.link or ("Item " .. item.itemID), item.count,
+            BANK_NAMES[item.source]))
+    end
+    for _, item in ipairs(results.transfer) do
+        Wild.Print(string.format("|cff00ccffWild:|r Transferred %s \195\151%d from %s to %s.", item.link or ("Item " .. item.itemID), item.count,
+            BANK_NAMES[item.source], BANK_NAMES[item.target]))
+    end
+    for bank, copper in pairs(results.goldDeposit or {}) do
+        if copper > 0 then Wild.Print("|cff00ccffWild:|r Deposited " .. Wild.FormatGold(copper) .. " to " .. BANK_NAMES[bank] .. ".") end
+    end
+    for bank, copper in pairs(results.goldWithdraw or {}) do
+        if copper > 0 then Wild.Print("|cff00ccffWild:|r Withdrew " .. Wild.FormatGold(copper) .. " from " .. BANK_NAMES[bank] .. ".") end
+    end
+    entry.results = { deposit = {}, withdraw = {}, transfer = {} }
+end
+
+local function CollectPassResults(pass)
+    local complete = true
+    for action, batch in pairs(pass.batches) do
+        local entries, done = Wild.ConfirmItemActionBatch(batch)
+        for _, item in ipairs(entries) do
+            if action == "deposit" then
+                item.target = batch.bank
+                if pass.kind == "transferDeposit" then item.source = pass.source end
+            else
+                item.source = batch.bank
+            end
+        end
+        Wild.MergeItemActionEntries(pass.confirmed[action], entries)
+        if not done then complete = false end
+    end
+    local money = pass.money
+    if money then
+        local bankMoney = ReadBankMoney(money.target)
+        if type(bankMoney) == "number" then
+            local removed = money.deposit and money.playerBefore - GetMoney() or GetMoney() - money.playerBefore
+            local received = money.deposit and bankMoney - money.bankBefore or money.bankBefore - bankMoney
+            money.confirmed = math.max(money.confirmed, math.max(0, math.min(money.count, removed, received)))
+        end
+        if money.confirmed < money.count then complete = false end
+    end
+    if pass.kind == "transferDeposit" then
+        for _, item in ipairs(pass.withdrawn) do
+            local deposited = pass.batches.deposit and pass.batches.deposit.confirmed[item.key] or 0
+            if (deposited or 0) < item.count then complete = false end
+        end
+    end
+    return complete
+end
+
+local function TransferLeftovers(pass)
+    local leftovers = {}
+    for _, item in ipairs(pass.withdrawn) do
+        local deposited = pass.batches.deposit and pass.batches.deposit.confirmed[item.key] or 0
+        local remaining = item.count - (deposited or 0)
+        if remaining > 0 then
+            leftovers[#leftovers + 1] = {
+                key = item.key, link = item.link, itemID = item.itemID, count = remaining, source = item.source,
+            }
+        end
+    end
+    return leftovers
+end
+
+local function StorePassResults(pass, aborted)
+    local results = pass.entry.results
+    if pass.kind == "transferDeposit" then
+        Wild.MergeItemActionEntries(results.transfer, pass.confirmed.deposit)
+        pass.confirmed.deposit = {}
+        if aborted and not pass.leftoversStored then
+            Wild.MergeItemActionEntries(results.withdraw, TransferLeftovers(pass))
+            pass.leftoversStored = true
+        end
+    elseif pass.kind ~= "transferWithdraw" or aborted then
+        Wild.MergeItemActionEntries(results.deposit, pass.confirmed.deposit)
+        Wild.MergeItemActionEntries(results.withdraw, pass.confirmed.withdraw)
+        pass.confirmed = { deposit = {}, withdraw = {} }
+    end
+    if pass.money then
+        local key = pass.money.deposit and "goldDeposit" or "goldWithdraw"
+        local bank = pass.money.target
+        results[key] = results[key] or {}
+        results[key][bank] = (results[key][bank] or 0) + pass.money.confirmed - (pass.money.stored or 0)
+        pass.money.stored = pass.money.confirmed
+    end
+end
+
+local function HasBankProgress(pass)
+    for _, batch in pairs(pass.batches) do
+        for _, count in pairs(batch.confirmed) do
+            if count > 0 then return true end
+        end
+    end
+    return pass.money and pass.money.confirmed > 0
+end
+
+local function HasUnconfirmedRemovals(pass)
+    for _, batch in pairs(pass.batches) do
+        local sourceAfter = batch.readSource()
+        for _, item in ipairs(batch.entries) do
+            if item.confirmed < item.count then
+                local removed = (batch.sourceBefore[item.key] or 0) - (sourceAfter[item.key] or 0)
+                if removed > (batch.confirmed[item.key] or 0) then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function CanRetryPartialPass(pass)
+    return HasBankProgress(pass) and not HasUnconfirmedRemovals(pass)
+        and (not pass.money or pass.money.confirmed == pass.money.count)
+end
+
+local function ClearConfirmationWait()
+    for _, event in ipairs(CONFIRMATION_EVENTS) do queueFrame:UnregisterEvent(event) end
+    queueFrame:SetScript("OnEvent", nil)
+    if confirmationTimer then confirmationTimer:Cancel(); confirmationTimer = nil end
+    pendingPass = nil
+end
 
 local function FinishQueue()
-    queueFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
-    queueFrame:SetScript("OnEvent", nil)
+    if pendingPass then
+        CollectPassResults(pendingPass)
+        StorePassResults(pendingPass, true)
+    end
+    if activeQueue and activeQueue[activeIndex] then
+        local entry = activeQueue[activeIndex]
+        if entry.settlingPass then
+            CollectPassResults(entry.settlingPass)
+            StorePassResults(entry.settlingPass, true)
+        end
+        PrintBankResults(entry)
+    end
+    ClearConfirmationWait()
     queueFrame:Hide()
     activeQueue = nil
     activeIndex = 0
     activeLen = 0
 end
 
--- ============================================================
--- Execute a single intent pass (returns movedItems: true if bags changed)
--- A "pass" moves ONE batch of matching items. The queue will
--- re-run the same intent until a pass returns movedItems=false.
--- ============================================================
+local function ScheduleStep(delay, fn)
+    local queue = activeQueue
+    C_Timer.After(delay, function()
+        if activeQueue == queue then fn() end
+    end)
+end
 
-local function ExecuteIntentPass(intent, triggerSource, charCtx, queuePos, queueLen, passNum)
-    local summary = Wild.GetIntentSummary(intent)
-    local prefix = string.format("|cff00ccffWild:|r [%d/%d] ", queuePos, queueLen)
-    local movedItems = false
-
-    if intent.action == "hold" then
-        local reservoir = intent.target or "warband"
-
-        -- Phase 1: Gold sync (atomic, one pass) from gold-kind groups
-        local goldTarget = Wild.GetIntentGoldTarget(intent)
-        BlogMsg(string.format("Hold phase 1: goldTarget=%s reservoir=%s trigger=%s groups=%d",
-            tostring(goldTarget), tostring(reservoir), tostring(triggerSource), #(intent.groups or {})))
-        if goldTarget > 0 and reservoir ~= "character" then
-            local currentCopper = GetMoney()
-            local keepCopper = goldTarget * Wild.COPPER_PER_GOLD
-            BlogMsg(string.format("Gold sync: target=%dg current=%s keep=%s reservoir=%s trigger=%s",
-                goldTarget, Wild.FormatGold(currentCopper), Wild.FormatGold(keepCopper), tostring(reservoir), tostring(triggerSource)))
-
-            if currentCopper > keepCopper then
-                local depositCopper = currentCopper - keepCopper
-                if reservoir == "warband" then
-                    C_Bank.DepositMoney(Enum.BankType.Account, depositCopper)
-                elseif reservoir == "guild" then
-                    DepositGuildBankMoney(depositCopper)
-                end
-                print(prefix .. "Deposited " .. Wild.FormatGold(depositCopper) .. ".")
-            elseif currentCopper < keepCopper then
-                local withdrawCopper = keepCopper - currentCopper
-                if reservoir == "warband" and triggerSource == "warband" then
-                    local bankCopper = C_Bank.FetchDepositedMoney(Enum.BankType.Account) or 0
-                    BlogMsg("Warband bank gold: " .. Wild.FormatGold(bankCopper) .. " — need to withdraw: " .. Wild.FormatGold(withdrawCopper))
-                    if bankCopper <= 0 then
-                        print(prefix .. "|cff888888Warband bank has no gold to withdraw.|r [" .. summary .. "]")
-                    else
-                        if withdrawCopper > bankCopper then
-                            withdrawCopper = bankCopper
-                        end
-                        C_Bank.WithdrawMoney(Enum.BankType.Account, withdrawCopper)
-                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
-                    end
-                elseif reservoir == "guild" and triggerSource == "guild" then
-                    local bankCopper = GetGuildBankMoney and GetGuildBankMoney() or 0
-                    if bankCopper <= 0 then
-                        print(prefix .. "|cff888888Guild bank has no gold to withdraw.|r [" .. summary .. "]")
-                    else
-                        if withdrawCopper > bankCopper then
-                            withdrawCopper = bankCopper
-                        end
-                        WithdrawGuildBankMoney(withdrawCopper)
-                        print(prefix .. "Withdrew " .. Wild.FormatGold(withdrawCopper) .. ".")
-                    end
-                else
-                    BlogMsg("Gold deficit but trigger source (" .. tostring(triggerSource) .. ") != reservoir (" .. reservoir .. ") — skipping withdraw.")
-                end
-            else
-                BlogMsg("Gold already at target.")
-            end
+local function RequestBankItems(pass, action, target, intent, charCtx, count, itemLimits)
+    if not BANK_NAMES[target] then
+        Wild.Print("|cffff6600Wild:|r Invalid bank target: " .. tostring(target))
+        return
+    end
+    local batch = pass.batches[action]
+    if not batch then
+        local function ReadBank() return ReadBankItemCounts(target) end
+        if action == "deposit" then
+            batch = Wild.CreateItemActionBatch(ReadPlayerItemCounts, ReadBank)
+        else
+            batch = Wild.CreateItemActionBatch(ReadBank, ReadPlayerItemCounts)
         end
+        batch.seen = {}
+        batch.bank = target
+        pass.batches[action] = batch
+    end
+    local requested, entries
+    if action == "deposit" then
+        requested, entries = DepositFromBags(intent, charCtx, count, TARGET_BANK_TYPE[target], batch.seen, itemLimits)
+    elseif WITHDRAW_FUNCS[target] then
+        requested, entries = WITHDRAW_FUNCS[target](intent, charCtx, count, batch.seen)
+    else
+        Wild.Print("|cffff6600Wild:|r No withdraw function for target: " .. tostring(target))
+        return
+    end
+    for _, item in ipairs(entries) do Wild.RecordItemAction(batch, item, item.count) end
+    BlogMsg("Requested " .. action .. " of " .. requested .. " item(s) for " .. target .. ".")
+end
 
-        -- Phase 2: Item sync per include group (bidirectional, retry-until-done)
+local function RequestGoldSync(pass)
+    local intent = pass.entry.intent
+    local target = intent.target or "warband"
+    local goldTarget = Wild.GetIntentGoldTarget(intent)
+    BlogMsg(string.format("Hold phase 1: goldTarget=%s reservoir=%s trigger=%s groups=%d",
+        Wild.FormatGold(goldTarget * Wild.COPPER_PER_GOLD), target, pass.entry.triggerSource, #(intent.groups or {})))
+    if goldTarget <= 0 or target == "character" then return end
+    local playerBefore, keep = GetMoney(), goldTarget * Wild.COPPER_PER_GOLD
+    BlogMsg(string.format("Gold sync: target=%s current=%s keep=%s reservoir=%s trigger=%s",
+        Wild.FormatGold(keep), Wild.FormatGold(playerBefore), Wild.FormatGold(keep), target, pass.entry.triggerSource))
+    if playerBefore == keep then return end
+    if playerBefore < keep and pass.entry.triggerSource ~= target then return end
+    local bankBefore = ReadBankMoney(target)
+    if type(bankBefore) ~= "number" then
+        Wild.Print("|cffff6600Wild:|r Cannot read bank gold; skipped gold synchronization.")
+        return
+    end
+    local deposit = playerBefore > keep
+    local count = deposit and playerBefore - keep or math.min(keep - playerBefore, bankBefore)
+    if count <= 0 then BlogMsg("No bank gold available to withdraw."); return end
+    pass.money = { target = target, playerBefore = playerBefore, bankBefore = bankBefore,
+        deposit = deposit, count = count, confirmed = 0 }
+    if target == "warband" then
+        if deposit then C_Bank.DepositMoney(Enum.BankType.Account, count)
+        else C_Bank.WithdrawMoney(Enum.BankType.Account, count) end
+    elseif deposit then
+        DepositGuildBankMoney(count)
+    else
+        WithdrawGuildBankMoney(count)
+    end
+end
+
+local function NewPass(entry, kind)
+    return { entry = entry, kind = kind, batches = {}, confirmed = { deposit = {}, withdraw = {} } }
+end
+
+local function ExecuteIntentPass(entry)
+    local intent = entry.intent
+    local charCtx = Wild.BuildCharContext()
+    local pass = NewPass(entry, intent.action == "transfer" and "transferWithdraw" or "normal")
+    if intent.action == "hold" then
+        RequestGoldSync(pass)
+        local target = intent.target or "warband"
         for _, group in ipairs(Wild.GetItemGroups(intent)) do
             local keep = group.count or 0
             if keep > 0 then
                 local subIntent = Wild.SubIntentForGroup(intent, group)
                 local current = Wild.CountMatchingInBags(subIntent, charCtx)
                 if current < keep then
-                    local deficit = keep - current
-                    local withdrawFunc = WITHDRAW_FUNCS[reservoir]
-                    if withdrawFunc then
-                        local count, entries = withdrawFunc(subIntent, charCtx, deficit)
-                        if count > 0 then
-                            for _, entry in ipairs(entries) do
-                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
-                            end
-                            if passNum == 1 then
-                                print(prefix .. string.format("Withdrew %d item(s) to reach %d on character. [%s]", count, keep, summary))
-                            end
-                            movedItems = true
-                        else
-                            if passNum == 1 then
-                                print(prefix .. "|cff888888No matching items in bank to withdraw.|r [" .. summary .. "]")
-                            end
-                        end
-                    else
-                        print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(reservoir) .. "|r")
-                    end
+                    RequestBankItems(pass, "withdraw", target, subIntent, charCtx, keep - current)
                 elseif current > keep then
-                    local excess = current - keep
-                    local bankType = TARGET_BANK_TYPE[reservoir]
-                    local count, entries = DepositFromBags(subIntent, charCtx, excess, bankType)
-                    if count > 0 then
-                        for _, entry in ipairs(entries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
-                        end
-                        if passNum == 1 then
-                            print(prefix .. string.format("Deposited %d item(s) to reach %d on character. [%s]", count, keep, summary))
-                        end
-                        movedItems = true
-                    else
-                        if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in bags to deposit.|r [" .. summary .. "]")
-                        end
-                    end
-                else
-                    if passNum == 1 then
-                        BlogMsg("Items already at target (" .. current .. "/" .. keep .. ").")
-                    end
+                    RequestBankItems(pass, "deposit", target, subIntent, charCtx, current - keep)
                 end
             end
         end
-
-    elseif intent.action == "deposit" then
-        local bankType = TARGET_BANK_TYPE[intent.target]
+    else
+        local withdrawing = intent.action == "withdraw" or intent.action == "transfer"
+        local target = intent.action == "transfer" and (intent.source or "character") or (intent.target or entry.triggerSource)
         for _, group in ipairs(Wild.GetItemGroups(intent)) do
-            local keep = group.count or 0
             local subIntent = Wild.SubIntentForGroup(intent, group)
-            local maxDeposit = 0
+            local keep = group.count or 0
+            local count = 0
             if keep > 0 then
-                local current = Wild.CountMatchingInBags(subIntent, charCtx)
-                local excess = current - keep
-                if excess <= 0 then
-                    maxDeposit = -1
+                local current
+                if withdrawing then
+                    local countFunc = BANK_COUNT_FUNCS[target]
+                    current = countFunc and countFunc(subIntent, charCtx) or 0
                 else
-                    maxDeposit = excess
+                    current = Wild.CountMatchingInBags(subIntent, charCtx)
                 end
+                count = current - keep
             end
-            if maxDeposit ~= -1 then
-                local count, entries = DepositFromBags(subIntent, charCtx, maxDeposit, bankType)
-                if count > 0 then
-                    for _, entry in ipairs(entries) do
-                        print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
-                    end
-                    if passNum == 1 then
-                        print(prefix .. string.format("Deposited %d item(s). [%s]", count, summary))
-                    end
-                    movedItems = true
-                else
-                    if passNum == 1 then
-                        print(prefix .. "|cff888888No matching items in bags.|r [" .. summary .. "]")
-                    end
-                end
+            if keep == 0 or count > 0 then
+                RequestBankItems(pass, withdrawing and "withdraw" or "deposit", target, subIntent, charCtx, count)
             else
-                if passNum == 1 then
-                    print(prefix .. "|cff888888Keeping all (have " .. Wild.CountMatchingInBags(subIntent, charCtx) .. ", keep " .. keep .. ").|r [" .. summary .. "]")
-                end
+                BlogMsg("Keeping matching items for " .. Wild.GetIntentSummary(intent))
             end
-        end
-
-    elseif intent.action == "withdraw" then
-        local bankTarget = intent.target or triggerSource
-        local withdrawFunc = WITHDRAW_FUNCS[bankTarget]
-        if withdrawFunc then
-            for _, group in ipairs(Wild.GetItemGroups(intent)) do
-                local keep = group.count or 0
-                local subIntent = Wild.SubIntentForGroup(intent, group)
-                if keep == 0 then
-                    local count, entries = withdrawFunc(subIntent, charCtx, 0)
-                    if count > 0 then
-                        for _, entry in ipairs(entries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
-                        end
-                        if passNum == 1 then
-                            print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
-                        end
-                        movedItems = true
-                    else
-                        if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
-                        end
-                    end
-                else
-                    local countFunc = BANK_COUNT_FUNCS[bankTarget]
-                    local bankCount = countFunc and countFunc(subIntent, charCtx) or 0
-                    local excess = bankCount - keep
-                    if excess > 0 then
-                        local count, entries = withdrawFunc(subIntent, charCtx, excess)
-                        if count > 0 then
-                            for _, entry in ipairs(entries) do
-                                print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
-                            end
-                            if passNum == 1 then
-                                print(prefix .. string.format("Withdrew %d item(s). [%s]", count, summary))
-                            end
-                            movedItems = true
-                        else
-                            if passNum == 1 then
-                                print(prefix .. "|cff888888No matching items in bank.|r [" .. summary .. "]")
-                            end
-                        end
-                    else
-                        if passNum == 1 then
-                            print(prefix .. "|cff888888Keeping all (" .. bankCount .. " in bank, keep " .. keep .. ").|r [" .. summary .. "]")
-                        end
-                    end
-                end
-            end
-        else
-            print(prefix .. "|cffff6600No withdraw function for target: " .. tostring(bankTarget) .. "|r")
-        end
-
-    elseif intent.action == "transfer" then
-        local source = intent.source or "character"
-        local target = intent.target or "warband"
-        local withdrawFunc = WITHDRAW_FUNCS[source]
-        local bankType = TARGET_BANK_TYPE[target]
-        if withdrawFunc then
-            for _, group in ipairs(Wild.GetItemGroups(intent)) do
-                local keep = group.count or 0
-                local subIntent = Wild.SubIntentForGroup(intent, group)
-                local neededCount = 0
-                if keep > 0 then
-                    local countFunc = BANK_COUNT_FUNCS[source]
-                    local bankCount = countFunc and countFunc(subIntent, charCtx) or 0
-                    local excess = bankCount - keep
-                    if excess <= 0 then
-                        neededCount = -1
-                    else
-                        neededCount = excess
-                    end
-                end
-                if neededCount ~= -1 then
-                    local wCount, wEntries = withdrawFunc(subIntent, charCtx, neededCount)
-                    if wCount > 0 then
-                        for _, entry in ipairs(wEntries) do
-                            print(string.format("|cff00ccffWild:|r  \226\134\147 %s \195\151%d", entry.link or "?", entry.count))
-                        end
-                        movedItems = true
-                        intent._transferPending = { count = wCount, bankType = bankType, summary = summary, prefix = prefix }
-                    else
-                        if passNum == 1 then
-                            print(prefix .. "|cff888888No matching items in source bank.|r [" .. summary .. "]")
-                        end
-                    end
-                else
-                    if passNum == 1 then
-                        print(prefix .. "|cff888888Keeping all in source bank.|r [" .. summary .. "]")
-                    end
-                end
-            end
-        else
-            print(prefix .. "|cffff6600No withdraw function for source: " .. tostring(source) .. "|r")
         end
     end
-
-    return movedItems
+    return pass
 end
 
--- ============================================================
--- Transfer phase 2: deposit items that were just withdrawn
--- ============================================================
-
-local function ExecuteTransferDeposit(intent, charCtx)
-    local tp = intent._transferPending
-    if not tp then return false end
-    intent._transferPending = nil
-
-    local dCount, dEntries = DepositFromBags(intent, charCtx, tp.count, tp.bankType)
-    if dCount > 0 then
-        for _, entry in ipairs(dEntries) do
-            print(string.format("|cff00ccffWild:|r  \226\134\145 %s \195\151%d", entry.link or "?", entry.count))
-        end
+local function HasItemRequests(pass)
+    for _, batch in pairs(pass.batches) do
+        if #batch.entries > 0 then return true end
     end
-    print(tp.prefix .. string.format("Transferred %d item(s). [%s]", tp.count, tp.summary))
-    return dCount > 0
+    return false
 end
 
--- ============================================================
--- Queue step: execute current intent in a retry loop.
--- Each pass scans the source/target containers and acts on
--- ONE batch of matching items. After BAG_UPDATE_DELAYED the
--- same intent runs again. Only when a pass finds ZERO matches
--- (movedItems == false) does it advance to the next intent.
--- A safety cap prevents infinite loops.
--- ============================================================
+local function AdvanceIntent()
+    PrintBankResults(activeQueue[activeIndex])
+    activeIndex = activeIndex + 1
+    if activeIndex > activeLen then FinishQueue()
+    else ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep) end
+end
 
-local MAX_PASSES_PER_INTENT = 50
+local function StartTransferDeposit(entry, withdrawn)
+    local pass = NewPass(entry, "transferDeposit")
+    pass.withdrawn = withdrawn
+    pass.source = withdrawn[1].source
+    local limits, count = {}, 0
+    for _, item in ipairs(withdrawn) do
+        limits[item.key] = item.count
+        count = count + item.count
+    end
+    RequestBankItems(pass, "deposit", entry.intent.target or "warband",
+        entry.intent, Wild.BuildCharContext(), count, limits)
+    if HasItemRequests(pass) then
+        WaitForPass(pass)
+    else
+        StorePassResults(pass, true)
+        Wild.Print("|cffff6600Wild:|r Transfer deposit was not confirmed; stopped intent processing.")
+        FinishQueue()
+    end
+end
 
-local function ScheduleStep(delay, fn)
-    C_Timer.After(delay, fn)
+CompletePass = function(pass)
+    ClearConfirmationWait()
+    if pass.kind == "transferWithdraw" and #pass.confirmed.withdraw > 0 then
+        StartTransferDeposit(pass.entry, pass.confirmed.withdraw)
+        return
+    end
+    StorePassResults(pass, false)
+    pass.entry.settlingPass = pass
+    if pass.entry.passNum >= MAX_PASSES_PER_INTENT then
+        StorePassResults(pass, true)
+        Wild.Print("|cffff6600Wild:|r Bank intent safety cap reached (" .. MAX_PASSES_PER_INTENT .. " passes).")
+        AdvanceIntent()
+    elseif pass.kind == "transferDeposit" and #TransferLeftovers(pass) > 0 then
+        ScheduleStep(Wild.db.advanced.passDelay, function()
+            CollectPassResults(pass)
+            StorePassResults(pass, false)
+            local leftovers = TransferLeftovers(pass)
+            pass.entry.settlingPass = nil
+            if #leftovers > 0 then
+                pass.entry.passNum = pass.entry.passNum + 1
+                StartTransferDeposit(pass.entry, leftovers)
+            else
+                ProcessQueueStep()
+            end
+        end)
+    else
+        ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)
+    end
+end
+
+WaitForPass = function(pass)
+    pendingPass = pass
+    for _, event in ipairs(CONFIRMATION_EVENTS) do queueFrame:RegisterEvent(event) end
+    queueFrame:SetScript("OnEvent", function(_, event)
+        if pendingPass ~= pass then return end
+        if event == "BAG_UPDATE_DELAYED" then pass.bagsUpdated = true end
+        local complete = CollectPassResults(pass)
+        local partial = pass.kind ~= "transferWithdraw" and CanRetryPartialPass(pass)
+        if (complete or partial) and (not HasItemRequests(pass) or pass.bagsUpdated) then
+            CompletePass(pass)
+        end
+    end)
+    confirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
+        if pendingPass ~= pass then return end
+        if CollectPassResults(pass) or CanRetryPartialPass(pass) then
+            CompletePass(pass)
+        else
+            StorePassResults(pass, true)
+            Wild.Print("|cffff6600Wild:|r Some bank actions were not confirmed; stopped intent processing.")
+            FinishQueue()
+        end
+    end)
 end
 
 ProcessQueueStep = function()
-    if not activeQueue or activeIndex > activeLen then
-        -- Queue is done: ensure no further event handlers are active
-        FinishQueue()
-        -- Lock out further processing until a new bank open event
-        queueFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
-        queueFrame:SetScript("OnEvent", nil)
-        return
-    end
-
+    if not activeQueue then return end
     local entry = activeQueue[activeIndex]
-    entry.passNum = (entry.passNum or 0) + 1
-    local passNum = entry.passNum
-    local charCtx = Wild.BuildCharContext()
-    local movedItems = ExecuteIntentPass(entry.intent, entry.triggerSource, charCtx, activeIndex, activeLen, passNum)
-
-    -- Safety cap: prevent infinite retry
-    if passNum >= MAX_PASSES_PER_INTENT then
-        BlogMsg("Intent " .. activeIndex .. " hit safety cap (" .. MAX_PASSES_PER_INTENT .. " passes) — advancing")
-        activeIndex = activeIndex + 1
-        ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep)
-        return
+    if entry.settlingPass then
+        CollectPassResults(entry.settlingPass)
+        StorePassResults(entry.settlingPass, false)
+        entry.settlingPass = nil
     end
-
-    if entry.intent._transferPending then
-        -- Transfer phase 1 done (withdraw) — wait for bags, then deposit
-        BlogMsg("Intent " .. activeIndex .. " transfer phase 1 (pass " .. passNum .. ") — waiting for BAG_UPDATE_DELAYED")
-        queueFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-        queueFrame:SetScript("OnEvent", function(self, event)
-            self:UnregisterEvent("BAG_UPDATE_DELAYED")
-            self:SetScript("OnEvent", nil)
-            BlogMsg("Intent " .. activeIndex .. " transfer phase 2 — depositing")
-            local freshCtx = Wild.BuildCharContext()
-            local depositMoved = ExecuteTransferDeposit(entry.intent, freshCtx)
-            if depositMoved then
-                -- Deposit settled — retry the same intent (more items to transfer?)
-                self:RegisterEvent("BAG_UPDATE_DELAYED")
-                self:SetScript("OnEvent", function(self2, event2)
-                    self2:UnregisterEvent("BAG_UPDATE_DELAYED")
-                    self2:SetScript("OnEvent", nil)
-                    ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)  -- retry same intent
-                end)
-            else
-                -- Deposit had nothing — retry same intent to check if source has more
-                ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)
-            end
-        end)
-    elseif movedItems then
-        -- Items moved — wait for BAG_UPDATE_DELAYED, then retry same intent
-        BlogMsg("Intent " .. activeIndex .. " moved items (pass " .. passNum .. ") — waiting for BAG_UPDATE_DELAYED then retrying")
-        queueFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-        queueFrame:SetScript("OnEvent", function(self, event)
-            self:UnregisterEvent("BAG_UPDATE_DELAYED")
-            self:SetScript("OnEvent", nil)
-            BlogMsg("Intent " .. activeIndex .. " bags settled (pass " .. passNum .. ") — retrying")
-            ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)  -- retry same intent
-        end)
+    entry.passNum = (entry.passNum or 0) + 1
+    local pass = ExecuteIntentPass(entry)
+    if HasItemRequests(pass) or pass.money then
+        WaitForPass(pass)
     else
-        -- No items moved: this intent is done — advance
-        if passNum > 1 then
-            BlogMsg("Intent " .. activeIndex .. " completed after " .. passNum .. " passes")
-        else
-            BlogMsg("Intent " .. activeIndex .. " no matches — advancing")
-        end
-        activeIndex = activeIndex + 1
-        -- If this was the last intent, ensure we unregister event handlers
-        if activeIndex > activeLen then
-            FinishQueue()
-            queueFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
-            queueFrame:SetScript("OnEvent", nil)
-            return
-        end
-        ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep)
+        BlogMsg("Intent " .. activeIndex .. " has no remaining actions.")
+        AdvanceIntent()
     end
 end
 
@@ -910,7 +966,10 @@ local function ProcessIntents(accessibleSources)
                 local triggerSource = IntentFiresFor(intent, accessibleSources)
                 if triggerSource then
                     BlogMsg("  [" .. i .. "] QUEUED (trigger=" .. triggerSource .. "): " .. summary)
-                    queue[#queue + 1] = { intent = intent, triggerSource = triggerSource }
+                    queue[#queue + 1] = {
+                        intent = intent, triggerSource = triggerSource,
+                        results = { deposit = {}, withdraw = {}, transfer = {} },
+                    }
                 else
                     BlogMsg("  [" .. i .. "] SKIP (target '" .. tostring(intent.target) .. "' not accessible): " .. summary)
                 end
@@ -922,8 +981,6 @@ local function ProcessIntents(accessibleSources)
         BlogMsg("ProcessIntents: no intents matched — queue empty.")
         return
     end
-
-    print(string.format("|cff00ccffWild:|r Processing %d intent(s)...", #queue))
 
     activeQueue = queue
     activeIndex = 1
@@ -949,18 +1006,22 @@ local function OnBankOpened()
         BlogMsg("Wild.db is nil — aborting.")
         return
     end
+    bankGeneration = bankGeneration + 1
+    local generation = bankGeneration
 
     -- Process warband-specific auto-deposit flags (legacy convenience)
     local warbandCfg = Wild.db.bankWarband
     if warbandCfg and warbandCfg.enabled then
         if warbandCfg.depositWarbound then
             C_Timer.After(0.3, function()
+                if bankGeneration ~= generation then return end
                 C_Bank.AutoDepositItemsIntoBank(Enum.BankType.Account)
-                BlogMsg("Auto-deposited warbound items.")
+                BlogMsg("Requested auto-deposit of warbound items.")
             end)
         end
         if warbandCfg.depositReagents then
             C_Timer.After(0.5, function()
+                if bankGeneration ~= generation then return end
                 local reagentCount = 0
                 for _, bag in ipairs(GetPlayerBags()) do
                     local numSlots = C_Container.GetContainerNumSlots(bag)
@@ -976,7 +1037,7 @@ local function OnBankOpened()
                     end
                 end
                 if reagentCount > 0 then
-                    print(string.format("|cff00ccffWild:|r [Warband] Depositing %d reagent(s).", reagentCount))
+                    BlogMsg("Requested deposit of " .. reagentCount .. " reagent stack(s).")
                 end
             end)
         end
@@ -985,7 +1046,9 @@ local function OnBankOpened()
     -- Event-driven: pre-load item data, then process intents once all data has arrived
     -- Include player bags so deposit/hold intents have cached GetItemInfo data
     C_Timer.After(Wild.db.advanced.bankStartDelay, function()
+        if bankGeneration ~= generation then return end
         PreloadBankItemData({ CHARACTER_BANK_BAGS, ACCOUNT_BANK_TABS, GetPlayerBags() }, function()
+            if bankGeneration ~= generation then return end
             BlogMsg("All bank and bag item data loaded — starting intent queue.")
             ProcessIntents({ character = true, warband = true })
         end)
@@ -998,15 +1061,26 @@ local function OnGuildBankOpened()
     if now - lastGuildBankOpen < 1 then return end
     lastGuildBankOpen = now
     if not Wild.db then return end
+    bankGeneration = bankGeneration + 1
+    local generation = bankGeneration
 
     -- Guild bank items use GetGuildBankItemLink (always available), so no pre-load needed
     C_Timer.After(Wild.db.advanced.guildBankStartDelay, function()
+        if bankGeneration ~= generation then return end
         ProcessIntents({ guild = true })
     end)
 end
 
 local function OnBankClosed()
+    bankGeneration = bankGeneration + 1
+    ClearBankPreload()
     BlogMsg("Bank closed — resetting intent queue.")
+    local entry = activeQueue and activeQueue[activeIndex]
+    local unconfirmed = pendingPass and not CollectPassResults(pendingPass)
+    if entry and entry.settlingPass and not CollectPassResults(entry.settlingPass) then unconfirmed = true end
+    if unconfirmed then
+        Wild.Print("|cffff6600Wild:|r Bank closed before all actions were confirmed; stopped intent processing.")
+    end
     FinishQueue()
 end
 
