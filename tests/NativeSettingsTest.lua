@@ -23,7 +23,7 @@ end
 local function NewEnvironment(saved, noFilterEnum)
     local state = {
         frames = {}, categories = {}, settings = {}, layouts = {}, messages = {},
-        updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0, legacyOpens = 0,
+        updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0,
         speedUpdates = 0, circleUpdates = 0, castUpdates = 0, combat = false,
     }
     local env = setmetatable({
@@ -374,8 +374,6 @@ local function NewEnvironment(saved, noFilterEnum)
     Wild.UpdateScreenCenterCircle = function() state.circleUpdates = state.circleUpdates + 1 end
     Wild.UpdateCastHistory = function() state.castUpdates = state.castUpdates + 1 end
     Wild.UpdateDialogKey = function() end
-    Wild.ToggleSettings = function() state.legacyOpens = state.legacyOpens + 1 end
-    Wild.OpenSettings = Wild.ToggleSettings
     Wild.CreateSettingsCanvas = function(name, namespace)
         state.creates[name] = (state.creates[name] or 0) + 1
         Equal(namespace, "Native")
@@ -574,7 +572,7 @@ local tests = {
         size.slider:SetValue(125)
         Equal(Wild.db.screenCenterCircleSize, 125, "Physical slider changes still save normally")
     end },
-    { "standalone exact-value input preserves large sizes with a visible native slider", function()
+    { "canvas exact-value input preserves large sizes with a visible native slider", function()
         local Wild, state, _, _, _, Load = NewEnvironment()
         local native = state.ShowSlider("screenCenterCircleSize")
         Load("Settings.lua")
@@ -634,7 +632,7 @@ local tests = {
         Equal(Wild.db.castHistory.enabled, false)
         Equal(Wild.db.quests.autoAccept, false)
     end },
-    { "both opacity interfaces cover zero through one hundred percent", function()
+    { "canvas and native opacity controls cover zero through one hundred percent", function()
         local Wild, state, _, Setting, _, Load = NewEnvironment()
         local native = state.ShowSlider("screenCenterCircleColor.a")
         Equal(native.slider.minimum, 0)
@@ -674,7 +672,7 @@ local tests = {
         for _, initializer in ipairs(state.layouts["Darkmoon Faire"].initializers) do
             if initializer.data.buttonText == "Show Shopping List Now" then action = initializer; break end
         end
-        assert(action, "The native Darkmoon page must include the standalone manual action")
+        assert(action, "The native Darkmoon page must include the manual shopping-list action")
         Equal(action:EvaluateModifyPredicates(), true)
         action.data.buttonClick()
         Equal(shows, 1)
@@ -714,16 +712,53 @@ local tests = {
         Equal(Setting("auctionHouse.filters." .. rarity):GetValue(), true)
         Equal(Wild.GetSetting("auctionHouse.filters." .. rarity), true)
     end },
-    { "the existing command stays standalone and the native command opens a category by ID", function()
+    { "the main command and native alias open native settings without toggling the window closed", function()
         local Wild, state = NewEnvironment()
         Wild.HandleSlashCommand("")
-        Equal(state.legacyOpens, 1)
-        Equal(state.opens, 0)
+        Equal(state.selected, state.root)
+        Equal(state.opens, 1)
+        state.pending = "unapplied game setting"
+        Wild.HandleSlashCommand("   ")
+        Equal(state.selected, state.root)
+        Equal(state.opens, 1)
+        Equal(state.pending, "unapplied game setting")
         Wild.HandleSlashCommand("native speed")
         Equal(state.selected.name, "Speed")
         Equal(state.opens, 1)
+        Wild.HandleSlashCommand("native")
+        Equal(state.selected, state.root)
+        Wild.HandleSlashCommand("native cEnTeR cIrClE")
+        Equal(state.selected.name, "Center Circle")
+    end },
+    { "existing settings APIs redirect to native categories after the canvas module loads", function()
+        local Wild, state, env, _, _, Load = NewEnvironment()
+        Load("Settings.lua")
+        Equal(Wild.OpenSettings("Speed"), true)
+        Equal(state.selected.name, "Speed")
+        Equal(Wild.ToggleSettings("Loot"), true)
+        Equal(state.selected.name, "Loot")
+        Equal(env.SettingsPanel:IsShown(), true)
+        Equal(Wild.ToggleSettings(), true)
+        Equal(state.selected, state.root)
         Wild.OpenNativeSettings("Center Circle")
         Equal(state.selected.name, "Center Circle")
+        Equal(Wild.OpenSettings("missing"), false)
+        Equal(state.selected.name, "Center Circle")
+        Equal(Wild.ToggleSettings({}), false)
+        Equal(state.selected.name, "Center Circle")
+        Equal(state.opens, 1)
+        Equal(env.WildSettingsFrame, nil)
+    end },
+    { "the native landing page and command help contain no standalone entry points", function()
+        local Wild, state = NewEnvironment()
+        for _, initializer in ipairs(state.layouts.Wild.initializers) do
+            assert(initializer.data.buttonText ~= "Open Standalone Settings")
+            assert(initializer.data.name ~= "Compare interfaces")
+        end
+        Wild.HandleSlashCommand("help")
+        local help = table.concat(state.messages, "\n")
+        assert(help:find("/wild - Open WoW Settings > AddOns > Wild", 1, true))
+        assert(not help:find("Toggle settings window", 1, true))
     end },
     { "navigating an already open native panel does not discard pending game settings", function()
         local Wild, state = NewEnvironment()
@@ -736,15 +771,11 @@ local tests = {
         Equal(Wild.OpenNativeSettings("missing"), false)
         Equal(state.pending, "unapplied game setting")
     end },
-    { "both windows contribute to settings visibility independently", function()
+    { "only native Wild pages contribute to settings visibility", function()
         local Wild, _, env = NewEnvironment()
         Wild.OpenNativeSettings("Speed")
         Equal(Wild.settingsVisible, true)
-        Wild.standaloneSettingsVisible = true
         env.SettingsPanel:Close()
-        Equal(Wild.settingsVisible, true)
-        Wild.standaloneSettingsVisible = false
-        Wild.UpdateSettingsVisibility()
         Equal(Wild.settingsVisible, false)
         env.SettingsPanel:Show()
         env.EventRegistry:TriggerEvent("Settings.CategoryChanged", { GetParentCategory = function() end })
@@ -841,7 +872,7 @@ local tests = {
         box:ClearFocus()
         Equal(Wild.db.autoReply.message, Wild.GetDefaultSetting("autoReply.message"))
     end },
-    { "native and standalone rule editors have independent frames and reject stale saves", function()
+    { "independent rule editor canvases reject stale saves", function()
         local Wild, state, _, _, _, Load = NewEnvironment()
         Load("Conditions.lua")
         Load("Settings.lua")
@@ -849,10 +880,10 @@ local tests = {
             { mode = "include", kind = "items", conditions = { { attr = "item.id", op = "=", value = 123 } } },
         } }
         Wild.db.intents = { intent }
-        local legacy = Wild.CreateSettingsCanvas("Intent Rules")
+        local first = Wild.CreateSettingsCanvas("Intent Rules")
         local native = Wild.CreateSettingsCanvas("Intent Rules", "Native")
-        assert(legacy ~= native)
-        legacy:OnRefresh()
+        assert(first ~= native)
+        first:OnRefresh()
         native:OnRefresh()
         local add, save
         for _, frame in ipairs(state.frames) do
@@ -877,33 +908,21 @@ local tests = {
         Equal(Wild.db.intents[1], replacement)
         assert(state.messages[#state.messages]:find("another settings window", 1, true))
     end },
-    { "the complete standalone loader keeps every page and synchronizes its visible controls", function()
-        local Wild, _, env, Setting, Fire, Load = NewEnvironment()
+    { "loading settings creates no standalone window or eager editor frames", function()
+        local Wild, state, env, _, Fire, Load = NewEnvironment()
         Load("Conditions.lua")
-        Load("Settings.lua")
         local saved = Copy(Wild.db)
+        local frames = #state.frames
+        Load("Settings.lua")
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        local main = assert(env.WildSettingsFrame)
-        Equal(#main.tabButtons, 22)
+        Equal(#state.frames, frames)
+        Equal(env.WildSettingsFrame, nil)
+        Equal(#env.UISpecialFrames, 0)
+        Equal(next(state.creates), nil)
         Wild.OpenSettings()
-        for _, button in ipairs(main.tabButtons) do
-            if button.tabName == "Speed" then button:Click() end
-        end
-        local checkbox
-        local function Find(parent)
-            for _, child in ipairs(parent.children) do
-                if child.kind == "CheckButton" then checkbox = child end
-                Find(child)
-            end
-        end
-        Find(main.tabs.Speed)
-        assert(checkbox)
-        Setting("speed.enabled"):SetValue(true)
-        Equal(checkbox:GetChecked(), true)
-        checkbox:SetChecked(false)
-        checkbox:Click()
-        Equal(Setting("speed.enabled"):GetValue(), false)
+        Equal(state.selected, state.root)
+        Equal(#state.frames, frames)
     end },
     { "startup and every native editor avoid shared legacy dropdown state", function()
         local Wild, state, env, _, Fire, Load = NewEnvironment()
@@ -917,10 +936,14 @@ local tests = {
         Wild.GetGroupedCurrencies = function() return {} end
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
-        for _, button in ipairs(env.WildSettingsFrame.tabButtons) do
-            local panel = Wild.CreateSettingsCanvas(button.tabName, "Native")
+        local editors = 0
+        for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply" }) do
+            Wild.OpenNativeSettings(page)
+            local panel = assert(state.layouts[page].frame.content)
             panel:OnRefresh()
+            editors = editors + 1
         end
+        Equal(editors, 5)
         local dropdowns = 0
         for _, frame in ipairs(state.frames) do
             if frame.menuGenerator then
@@ -937,7 +960,7 @@ local tests = {
         Equal(env.DropDownList1, shared)
         Same(Wild.db, saved)
     end },
-    { "settings menus preserve every choice and reflect saved values in both interfaces", function()
+    { "settings canvas menus preserve every choice and reflect saved values", function()
         for _, namespace in ipairs({ "", "Native" }) do
             local Wild, _, env, _, _, Load = NewEnvironment()
             Load("Settings.lua")

@@ -155,7 +155,7 @@ end
 local function GetTarget()
     local cfg = GetConfig()
     if not cfg or not cfg.enabled or InCombatLockdown() then return nil end
-    if Wild.settingsVisible or (WildSettingsFrame and WildSettingsFrame:IsShown()) then return nil end
+    if Wild.settingsVisible then return nil end
     local popup = GetFrontPopup()
     if not popup or popup:IsForbidden() then return nil end
     if popup == LFGDungeonReadyPopup or popup == LFGInvitePopup or popup == DelvesDifficultyPickerFrame then

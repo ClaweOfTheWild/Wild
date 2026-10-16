@@ -133,14 +133,13 @@ local function NewEnvironment(saved)
     end
     local function SpeedPanel()
         Load("Settings.lua")
-        local loader = frames[#frames]
         local factory
         for index = 1, 100 do
-            local name, value = debug.getupvalue(loader.scripts.OnEvent, index)
+            local name, value = debug.getupvalue(Wild.CreateSettingsCanvas, index)
             if not name then break end
-            if name == "CreateSpeedTab" then factory = value end
+            if name == "PAGE_FACTORIES" then factory = value.Speed end
         end
-        assert(factory, "Settings loader must register the Speed tab")
+        assert(factory, "Settings must provide the Speed canvas")
         local panel = factory()
         local checkbox = frames[#frames]
         Equal(checkbox.kind, "CheckButton")

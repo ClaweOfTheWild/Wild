@@ -769,11 +769,10 @@ end
 
 function Wild.NotifySettingsChanged(key, source)
     if Wild.RefreshNativeSettings then Wild.RefreshNativeSettings(key, source) end
-    if Wild.RefreshSettings then Wild.RefreshSettings(key, source) end
 end
 
 function Wild.UpdateSettingsVisibility()
-    Wild.settingsVisible = Wild.standaloneSettingsVisible == true or Wild.nativeSettingsVisible == true
+    Wild.settingsVisible = Wild.nativeSettingsVisible == true
     if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
 end
 

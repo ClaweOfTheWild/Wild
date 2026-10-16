@@ -16,7 +16,7 @@ Wild is a World of Warcraft (Retail) quality-of-life addon written in Lua. It au
 
 - **Addon table**: `local ADDON_NAME, Wild = ...` at the top of every file. All public API and state lives on `Wild`.
 - **Saved variables**: `WildDB` is the single persistent store (declared in `Wild.toc`). Referenced as `Wild.db` after `ADDON_LOADED`. All settings read/write through `Wild.db`. Saved variables are the **source of truth** for all settings.
-- **Load order** is defined in [Wild.toc](../Wild.toc). `Core.lua` loads first (defaults, migrations), `NativeSettings.lua` registers native Settings pages, and `Settings.lua` loads last (standalone UI and shared editor factories). New feature files go **before** `Settings.lua`.
+- **Load order** is defined in [Wild.toc](../Wild.toc). `Core.lua` loads first (defaults, migrations), `NativeSettings.lua` registers native Settings pages, and `Settings.lua` loads last (canvas editor factories). New feature files go **before** `Settings.lua`.
 - **Defaults** for new settings go in the `defaults` table in `Core.lua`. Defaults are deep-merged on load via `ApplyDefaults`.
 
 ### Container Scanning
@@ -33,7 +33,7 @@ Bank scanning covers:
 
 1. **Every feature must be controllable via slash commands** (`/wild <subcommand>`). The UI is a convenience layer, not the only interface.
 2. **Every feature must be callable via the Lua API** on the `Wild` table so macros and other addons can interact programmatically.
-3. **No combat-lockdown issues.** Never use `SetAttribute` or create secure frames. The standalone settings window is a regular `DIALOG`-strata frame; the native interface uses Blizzard's Settings API and ordinary addon widgets.
+3. **No combat-lockdown issues.** Never use `SetAttribute` or create secure frames. The settings interface uses Blizzard's Settings API and ordinary addon widgets.
 4. **Minimal footprint.** Only automate what the user explicitly enables. Most features default to **off** (see defaults in `Core.lua`).
 5. **Event-driven over time-based.** Prefer WoW API events (`BAG_UPDATE_DELAYED`, `ITEM_DATA_LOAD_RESULT`, `MAIL_SEND_SUCCESS`, etc.) over `C_Timer.After`. Timers only for safety timeouts or inherently time-based logic (debounce). The intent processing queue, item pre-loading, and multi-phase operations (transfers) must all chain via events.
 6. **Reagent bag always included by default.** Use `Wild.GetPlayerBags()` to get the correct bag list.
@@ -118,7 +118,7 @@ To sell equipment whose upgrade ceiling is below your currently equipped gear, c
 Primary command: `/wild`
 
 ```
-/wild                       — Toggle settings window
+/wild                       — Open WoW Settings > AddOns > Wild
 /wild native [page]         — Open native WoW Settings; for example, /wild native speed
 /wild help                  — Print available commands
 /wild <feature> on|off      — Enable/disable a feature
@@ -147,13 +147,11 @@ Slash command parsing uses `ParseArgs` + `OnOff` helpers (see `SlashCommands.lua
 All public functions live on the `Wild` table and can be called from macros or other addons:
 
 ```lua
--- Standalone settings window (kept for comparison)
-Wild.ToggleSettings()
-Wild.OpenSettings()
-
--- Native Settings > AddOns > Wild
+-- Settings > AddOns > Wild
+Wild.OpenSettings()              -- Returns true/false; optional page name
 Wild.OpenNativeSettings()        -- Returns true/false
 Wild.OpenNativeSettings("Speed") -- Optional page name, case-insensitive
+Wild.ToggleSettings()            -- Compatibility alias; opens native Settings, never toggles it closed
 
 -- Feature toggles
 Wild.SetFeatureEnabled(feature, enabled)  -- "lfg", "circle", "repair", "loot", "bank"
@@ -187,7 +185,7 @@ Wild.GetFilterRules()        -- Returns the rules table
 Wild.GetSetting(key)
 Wild.SetSetting(key, value)
 Wild.GetDefaultSetting(key)      -- Returns a copy for table-valued defaults
-Wild.NotifySettingsChanged(key)  -- Notify both interfaces after direct table mutations
+Wild.NotifySettingsChanged(key)  -- Refresh native controls and editors after direct table mutations
 Wild.ResetSettings()
 
 -- Money display (amount in copper; follows WoW's colorblind setting)
@@ -201,29 +199,28 @@ Wild.FormatGold(copper)
 3. Add default values to the `defaults` table in `Core.lua`.
 4. Expose enable/disable and configuration via `Wild.*` functions.
 5. Add slash command handlers in `SlashCommands.lua`.
-6. Add a native page in `NativeSettings.lua`, using standard Settings controls wherever possible, and retain a standalone tab in `Settings.lua` while both interfaces are supported.
-7. All state reads/writes go through `Wild.db`. Use shared setters and notify both views after directly changing rule or actor tables.
+6. Add a native page in `NativeSettings.lua`, using standard Settings controls wherever possible. Use a canvas editor in `Settings.lua` only for richer controls.
+7. All state reads/writes go through `Wild.db`. Use shared setters and notify native controls and editors after directly changing rule or actor tables.
 
 ## UI Conventions
 
-- Keep both interfaces until the standalone version is explicitly retired. `/wild` and the existing window APIs remain standalone; `/wild native` and `Wild.OpenNativeSettings()` open `Settings > AddOns > Wild`.
+- Native `Settings > AddOns > Wild` is the only settings window. `/wild`, `/wild native [page]`, `Wild.OpenSettings()`, `Wild.OpenNativeSettings()`, and the compatibility API `Wild.ToggleSettings()` all open native Settings. Repeated calls do not close it or discard pending game settings.
 - Prefer standard Blizzard controls, layouts, search, tooltips, color pickers, and input dialogs. Native controls use proxy settings backed by `Wild.db`; do not create a second configuration store or add a settings library.
 - Pass evaluated scalar default values to `Settings.RegisterProxySetting`, never default callbacks. Blizzard evaluates callable defaults outside a secure wrapper during initialization, tainting the setting's `variable` field and subsequent native action-button settings lookups. Getter and setter callbacks remain supported.
 - Settings dropdowns use `DropdownButton` with `WowStyle1DropdownTemplate` and `SetupMenu`; actor label menus use `MenuUtil.CreateContextMenu`. Never use `UIDropDownMenuTemplate`, `UIDropDownMenu_*`, or `ToggleDropDownMenu`: their shared globals can taint Blizzard's secure action paths even when initialized in a hidden settings window.
 - Cast History leaves `UseAction` and secure action-button scripts untouched, even when disabled. Action-bar item casts use the bag/equipment spell cache and `UNIT_SPELLCAST_SENT`/`UNIT_SPELLCAST_SUCCEEDED`; the sent event preserves item metadata if a bag update removes the last stack before the success event.
 - Native pages preserve existing options and units. Sliders also offer **Enter Value** for precise input; center-circle size can exceed the slider's visual range. Native page Defaults reset configuration only, never rules, actors, or collected data. The existing explicit `/wild reset` remains separate.
-- Settings remain editable while their feature is disabled, so users can configure options before enabling automation. Parent controls group related options without blocking edits. Center-circle opacity supports **0-100%** in both interfaces.
+- Settings remain editable while their feature is disabled, so users can configure options before enabling automation. Parent controls group related options without blocking edits. Center-circle opacity supports **0-100%**.
 - The native Darkmoon Faire page retains **Show Shopping List Now**, which uses `Wild.ShowDarkmoonHelper()` independently of automatic helper visibility and location.
-- Intent Rules, Actors, Character, Dungeon Bar, and Auto-Reply use independent canvas instances for their richer editors. `Wild.CreateSettingsCanvas()` reuses the editor factories with a distinct native namespace; never move the standalone frame into the native window.
-- Standalone layout: `DIALOG`-strata `WildSettingsFrame`, sidebar (150 px), and content area. Heavy tabs use scroll wrappers (`HookScrollChildWidth`). ESC closes it through `UISpecialFrames`; its title bar remains draggable.
-- Refreshing either view must not write saved values or discard focused, unsaved text. Native proxy bindings guard against change callbacks caused by clamped slider display values; the label still shows the actual saved value. Settings visibility includes the standalone window, native Wild pages, and Wild controls displayed in native search results.
+- Intent Rules, Actors, Character, Dungeon Bar, and Auto-Reply create their richer canvas editors lazily through `Wild.CreateSettingsCanvas()`. Each native page retains its own instance. Heavy editors use scroll wrappers (`HookScrollChildWidth`).
+- Refreshing settings must not write saved values or discard focused, unsaved text. Native proxy bindings guard against change callbacks caused by clamped slider display values; the label still shows the actual saved value. Settings visibility includes native Wild pages and Wild controls displayed in native search results.
 - No global frame names on child widgets except where required by templates.
 - Dark backdrop with subtle borders. Refer to existing panels for colour values.
 - Addon chat prefix: `|cff00ccffWild:|r` (info), `|cffff6600Wild:|r` (warning/error).
 - Use `Wild.Print(message)` for chat output containing item links, including rule summaries and debug messages. It inserts a native item texture immediately before every item hyperlink without changing the link or its quality atlas. Keep saved debug messages unformatted. Use readable action labels instead of Unicode bank arrows or mail symbols, which may be missing from the chat font.
 - `PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON/OFF)` on checkbox toggles.
 - Format money amounts with `Wild.FormatGold(copper)`, which delegates to WoW's `GetMoneyString` with thousands separators. Native coin icons are used when colorblind mode is off; localized denomination text is used when it is on. Do not cache the formatted result or add a separate addon setting. Rule inputs still use their documented units (gold for hold targets, copper for sell-price conditions).
-- **Dialog Key** is opt-in (`dialogKey.enabled = false`, key `SPACE`). Configure it in either settings interface or via `/wild dialog`. Only a physical key press confirms the topmost eligible standard popup, LFG queue proposal, queue role check, or delve entry window; nothing is auto-accepted. Named native buttons use temporary click bindings. Blizzard's unnamed, unprotected `DelvesDifficultyPickerFrame.EnterDelveButton` is clicked directly and the key is consumed so it does not also jump; Wild never chooses or changes the delve tier. Resolve these load-on-demand frames when the key is pressed rather than loading Blizzard UI addons. Normal bindings and text entry are preserved. Wild does not prepare new confirmations in combat or while either Wild settings interface is open.
+- **Dialog Key** is opt-in (`dialogKey.enabled = false`, key `SPACE`). Configure it in native Settings or via `/wild dialog`. Only a physical key press confirms the topmost eligible standard popup, LFG queue proposal, queue role check, or delve entry window; nothing is auto-accepted. Named native buttons use temporary click bindings. Blizzard's unnamed, unprotected `DelvesDifficultyPickerFrame.EnterDelveButton` is clicked directly and the key is consumed so it does not also jump; Wild never chooses or changes the delve tier. Resolve these load-on-demand frames when the key is pressed rather than loading Blizzard UI addons. Normal bindings and text entry are preserved. Wild does not prepare new confirmations in combat or while Wild settings are open.
 - Item destruction is a separate opt-in (`dialogKey.destroy = false`). It covers `DELETE_ITEM`, `DELETE_QUEST_ITEM`, `DELETE_GOOD_ITEM`, and `DELETE_GOOD_QUEST_ITEM` only. On explicit confirmation, fill the edit box with localized `DELETE_ITEM_CONFIRM_STRING`, then use the normal Yes button. Never modify popup definitions or bypass other typed confirmations, disabled buttons, or confirmation delays.
 
 ## Code Style
