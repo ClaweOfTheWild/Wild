@@ -229,14 +229,13 @@ local function NewEnvironment(saved)
     end
     local function Panel()
         Load("Settings.lua")
-        local loader = frames[#frames]
         local factory
         for index = 1, 100 do
-            local name, value = debug.getupvalue(loader.scripts.OnEvent, index)
+            local name, value = debug.getupvalue(Wild.CreateSettingsCanvas, index)
             if not name then break end
-            if name == "CreateDialogKeyTab" then factory = value end
+            if name == "PAGE_FACTORIES" then factory = value["Dialog Key"] end
         end
-        assert(factory, "Settings loader must register the Dialog Key tab")
+        assert(factory, "Settings must provide the Dialog Key canvas")
         local firstIndex = #frames + 1
         local panel = factory()
         local controls = {}
@@ -567,18 +566,7 @@ local tests = {
             Equal(popup.editBox.text, "")
         end
     end },
-    { "the settings window blocks popup confirmation while configuring the key", function()
-        local Wild, state, Popup, Key, _, env = NewEnvironment()
-        Wild.SetFeatureEnabled("dialog", true)
-        Popup("TEST_CONFIRM")
-        env.WildSettingsFrame = env.CreateFrame("Frame")
-        Key("SPACE")
-        Equal(state.clicks, 0)
-        env.WildSettingsFrame:Hide()
-        Key("SPACE")
-        Equal(state.clicks, 1)
-    end },
-    { "native settings visibility blocks confirmation until both settings interfaces are closed", function()
+    { "settings visibility blocks popup confirmation while configuring the key", function()
         local Wild, state, Popup, Key = NewEnvironment()
         Wild.SetFeatureEnabled("dialog", true)
         Popup("TEST_CONFIRM")
@@ -586,12 +574,20 @@ local tests = {
         Wild.UpdateSettingsVisibility()
         Key("SPACE")
         Equal(state.clicks, 0)
-        Wild.standaloneSettingsVisible = true
         Wild.nativeSettingsVisible = false
         Wild.UpdateSettingsVisibility()
         Key("SPACE")
+        Equal(state.clicks, 1)
+    end },
+    { "native settings visibility blocks confirmation until settings close", function()
+        local Wild, state, Popup, Key = NewEnvironment()
+        Wild.SetFeatureEnabled("dialog", true)
+        Popup("TEST_CONFIRM")
+        Wild.nativeSettingsVisible = true
+        Wild.UpdateSettingsVisibility()
+        Key("SPACE")
         Equal(state.clicks, 0)
-        Wild.standaloneSettingsVisible = false
+        Wild.nativeSettingsVisible = false
         Wild.UpdateSettingsVisibility()
         Key("SPACE")
         Equal(state.clicks, 1)
@@ -670,10 +666,12 @@ local tests = {
             Key("SPACE")
             Equal(state.clicks, 0)
             state.focus = nil
-            env.WildSettingsFrame = env.CreateFrame("Frame")
+            Wild.nativeSettingsVisible = true
+            Wild.UpdateSettingsVisibility()
             Key("SPACE")
             Equal(state.clicks, 0)
-            env.WildSettingsFrame:Hide()
+            Wild.nativeSettingsVisible = false
+            Wild.UpdateSettingsVisibility()
             state.combat = true
             Fire("PLAYER_REGEN_DISABLED")
             Key("SPACE")

@@ -353,7 +353,8 @@ local tests = {
         local menu, selected
         env.MenuResponse = MenuTestHelpers.Response
         setfenv(assert(loadfile("Settings.lua")), env)("Wild", Wild)
-        local factory = GetUpvalue(state.frames[#state.frames].scripts.OnEvent, "CreateIntentRulesTab")
+        local factories = GetUpvalue(Wild.CreateSettingsCanvas, "PAGE_FACTORIES")
+        local factory = factories["Intent Rules"]
         local initialize = GetUpvalue(factory, "InitializeConditionAttributeDropdown")
         local dropdown = { SetupMenu = function(_, callback) menu = callback end }
         initialize(dropdown, function(attr) selected = attr end)

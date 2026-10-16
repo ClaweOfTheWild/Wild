@@ -1,13 +1,11 @@
--- Wild: Standalone settings window
+-- Wild: Settings canvas editors
 local ADDON_NAME, Wild = ...
 
-local mainFrame
-local currentTab
 local refreshingPanels = false
 local MENU_MAX_HEIGHT = 360
 
 local function SetSetting(key, value, source)
-    if not refreshingPanels then Wild.SetSetting(key, value, source or "standalone") end
+    if not refreshingPanels then Wild.SetSetting(key, value, source or "native") end
 end
 
 local function RefreshPanel(panel, callback)
@@ -120,303 +118,6 @@ local function InitializeConditionAttributeDropdown(dropdown, onSelect)
             end
         end
     end)
-end
-
--- ============================================================
--- Main window creation
--- ============================================================
-local function CreateMainFrame()
-    if mainFrame then return mainFrame end
-
-    local f = CreateFrame("Frame", "WildSettingsFrame", UIParent, "BackdropTemplate")
-    f:SetSize(720, 520)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:SetFrameLevel(100)
-    f:SetMovable(true)
-    f:SetResizable(true)
-    f:SetResizeBounds(520, 380, 1200, 900)
-    f:EnableMouse(true)
-    f:SetClampedToScreen(true)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    f:SetBackdropColor(0.08, 0.08, 0.10, 0.95)
-    f:SetBackdropBorderColor(0.25, 0.25, 0.30, 1)
-
-    -- Title bar
-    local titleBar = CreateFrame("Frame", nil, f)
-    titleBar:SetHeight(32)
-    titleBar:SetPoint("TOPLEFT", 0, 0)
-    titleBar:SetPoint("TOPRIGHT", 0, 0)
-    titleBar:EnableMouse(true)
-    titleBar:RegisterForDrag("LeftButton")
-    titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
-    titleBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
-
-    local titleText = titleBar:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    titleText:SetPoint("LEFT", 12, 0)
-    titleText:SetText("|cff00ccffWild|r")
-
-    local versionText = titleBar:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    versionText:SetPoint("LEFT", titleText, "RIGHT", 8, -1)
-    versionText:SetText("|cff666666v" .. (C_AddOns.GetAddOnMetadata("Wild", "Version") or "1.0.0") .. "|r")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, titleBar)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("RIGHT", -8, 0)
-    closeBtn.label = closeBtn:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    closeBtn.label:SetPoint("CENTER", 0, 0)
-    closeBtn.label:SetText("|cffaaaaaa×|r")
-    closeBtn:SetScript("OnEnter", function(self) self.label:SetText("|cffff4444×|r") end)
-    closeBtn:SetScript("OnLeave", function(self) self.label:SetText("|cffaaaaaa×|r") end)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-    -- Title bar separator
-    local titleSep = titleBar:CreateTexture(nil, "ARTWORK")
-    titleSep:SetHeight(1)
-    titleSep:SetPoint("BOTTOMLEFT", 0, 0)
-    titleSep:SetPoint("BOTTOMRIGHT", 0, 0)
-    titleSep:SetColorTexture(0.3, 0.3, 0.35, 1)
-
-    -- Sidebar
-    local sidebar = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    sidebar:SetWidth(150)
-    sidebar:SetPoint("TOPLEFT", 0, -32)
-    sidebar:SetPoint("BOTTOMLEFT", 0, 0)
-    sidebar:SetClipsChildren(true)
-    sidebar:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-    })
-    sidebar:SetBackdropColor(0.06, 0.06, 0.08, 1)
-
-    local sidebarSep = sidebar:CreateTexture(nil, "ARTWORK")
-    sidebarSep:SetWidth(1)
-    sidebarSep:SetPoint("TOPRIGHT", 0, 0)
-    sidebarSep:SetPoint("BOTTOMRIGHT", 0, 0)
-    sidebarSep:SetColorTexture(0.3, 0.3, 0.35, 1)
-
-    -- Content area
-    local content = CreateFrame("Frame", nil, f)
-    content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 0, 0)
-    content:SetPoint("BOTTOMRIGHT", 0, 0)
-
-    f.sidebar = sidebar
-    f.content = content
-    f.tabs = {}
-    f.tabButtons = {}
-    f.sidebarOrder = {}
-
-    -- Resize grip
-    local resizeGrip = CreateFrame("Button", nil, f)
-    resizeGrip:SetSize(16, 16)
-    resizeGrip:SetPoint("BOTTOMRIGHT", -2, 2)
-    resizeGrip:SetFrameLevel(f:GetFrameLevel() + 50)
-    resizeGrip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-    resizeGrip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-    resizeGrip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    resizeGrip:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
-    resizeGrip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
-
-    -- ESC to close
-    tinsert(UISpecialFrames, "WildSettingsFrame")
-
-    -- Track visibility for tooltip integration
-    f:HookScript("OnShow", function()
-        Wild.standaloneSettingsVisible = true
-        Wild.UpdateSettingsVisibility()
-    end)
-    f:HookScript("OnHide", function()
-        Wild.standaloneSettingsVisible = false
-        Wild.UpdateSettingsVisibility()
-    end)
-
-    f:Hide()
-    mainFrame = f
-    return f
-end
-
--- ============================================================
--- Tab management
--- ============================================================
-local LayoutSidebar -- forward declaration
-local function SelectTab(name)
-    if not mainFrame then return end
-    currentTab = name
-    -- Auto-expand parent group if selecting a grouped child
-    for _, btn in ipairs(mainFrame.tabButtons) do
-        if btn.tabName == name and btn.groupName and mainFrame.sidebarOrder then
-            for _, item in ipairs(mainFrame.sidebarOrder) do
-                if item.type == "group" and item.name == btn.groupName and not item.expanded then
-                    item.expanded = true
-                    if item.frame and item.frame.arrow then
-                        item.frame.arrow:SetText("|cff888888\226\128\147|r")
-                    end
-                    LayoutSidebar()
-                    break
-                end
-            end
-            break
-        end
-    end
-    for tabName, tabPanel in pairs(mainFrame.tabs) do
-        tabPanel:SetShown(tabName == name)
-    end
-    for _, btn in ipairs(mainFrame.tabButtons) do
-        if btn.tabName == name then
-            btn.bg:SetColorTexture(0.15, 0.15, 0.20, 1)
-            btn.label:SetFontObject("GameFontHighlight")
-        else
-            btn.bg:SetColorTexture(0, 0, 0, 0)
-            btn.label:SetFontObject("GameFontNormalSmall")
-        end
-    end
-end
-
-local function AddTab(name, tabPanel, indent)
-    local f = mainFrame
-    PrepareSettingsPanel(tabPanel)
-    tabPanel:SetParent(f.content)
-    tabPanel:SetAllPoints(f.content)
-    tabPanel:Hide()
-    f.tabs[name] = tabPanel
-
-    local idx = #f.tabButtons + 1
-    local btn = CreateFrame("Button", nil, f.sidebar)
-    btn:SetHeight(28)
-    btn:SetPoint("TOPLEFT", f.sidebar, "TOPLEFT", 0, 0) -- positioned by LayoutSidebar
-    btn:SetPoint("RIGHT", f.sidebar, "RIGHT", -1, 0)
-
-    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-    btn.bg:SetAllPoints()
-    btn.bg:SetColorTexture(0, 0, 0, 0)
-
-    btn.label = btn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    btn.label:SetPoint("LEFT", indent and 24 or 12, 0)
-    btn.label:SetText(name)
-
-    btn.tabName = name
-    btn.isIndented = indent
-
-    btn:SetScript("OnClick", function() SelectTab(name) end)
-    btn:SetScript("OnEnter", function(self)
-        if self.tabName ~= currentTab then
-            self.bg:SetColorTexture(0.12, 0.12, 0.16, 1)
-        end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if self.tabName ~= currentTab then
-            self.bg:SetColorTexture(0, 0, 0, 0)
-        end
-    end)
-
-    f.tabButtons[idx] = btn
-
-    -- If there's an active group being built, register as a child
-    if f._currentGroup then
-        btn.groupName = f._currentGroup
-        btn:Hide()
-    else
-        -- Top-level tab: register in sidebar order for layout
-        if not f.sidebarOrder then f.sidebarOrder = {} end
-        table.insert(f.sidebarOrder, { type = "tab", btn = btn })
-    end
-end
-
-LayoutSidebar = function()
-    local f = mainFrame
-    if not f then return end
-    local slot = 0
-    -- Layout groups first, then buttons
-    for _, item in ipairs(f.sidebarOrder) do
-        if item.type == "group" then
-            item.frame:ClearAllPoints()
-            item.frame:SetPoint("TOPLEFT", f.sidebar, "TOPLEFT", 0, -(slot * 28))
-            item.frame:SetPoint("RIGHT", f.sidebar, "RIGHT", -1, 0)
-            item.frame:Show()
-            slot = slot + 1
-            if item.expanded then
-                for _, btn in ipairs(f.tabButtons) do
-                    if btn.groupName == item.name then
-                        btn:ClearAllPoints()
-                        btn:SetPoint("TOPLEFT", f.sidebar, "TOPLEFT", 0, -(slot * 28))
-                        btn:SetPoint("RIGHT", f.sidebar, "RIGHT", -1, 0)
-                        btn:Show()
-                        slot = slot + 1
-                    end
-                end
-            else
-                for _, btn in ipairs(f.tabButtons) do
-                    if btn.groupName == item.name then
-                        btn:Hide()
-                    end
-                end
-            end
-        elseif item.type == "tab" then
-            local btn = item.btn
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", f.sidebar, "TOPLEFT", 0, -(slot * 28))
-            btn:SetPoint("RIGHT", f.sidebar, "RIGHT", -1, 0)
-            btn:Show()
-            slot = slot + 1
-        end
-    end
-end
-
-local function AddCollapsibleGroup(name)
-    local f = mainFrame
-    if not f.sidebarOrder then f.sidebarOrder = {} end
-
-    local header = CreateFrame("Button", nil, f.sidebar)
-    header:SetHeight(28)
-    header:SetPoint("TOPLEFT", 0, 0) -- positioned by LayoutSidebar
-    header:SetPoint("RIGHT", f.sidebar, "RIGHT", -1, 0)
-
-    header.bg = header:CreateTexture(nil, "BACKGROUND")
-    header.bg:SetAllPoints()
-    header.bg:SetColorTexture(0, 0, 0, 0)
-
-    header.arrow = header:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    header.arrow:SetPoint("LEFT", 4, 0)
-    header.arrow:SetText("|cff888888\194\183|r") -- collapsed: middle dot as compact indicator
-
-    header.label = header:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    header.label:SetPoint("LEFT", 14, 0)
-    header.label:SetText(name)
-
-    local groupEntry = { type = "group", name = name, frame = header, expanded = false }
-    table.insert(f.sidebarOrder, groupEntry)
-
-    local function UpdateArrow()
-        if groupEntry.expanded then
-            header.arrow:SetText("|cff888888\226\128\147|r") -- expanded: dash
-        else
-            header.arrow:SetText("|cff888888+|r") -- collapsed: plus
-        end
-    end
-    UpdateArrow()
-
-    header:SetScript("OnClick", function()
-        groupEntry.expanded = not groupEntry.expanded
-        UpdateArrow()
-        LayoutSidebar()
-    end)
-    header:SetScript("OnEnter", function(self)
-        self.bg:SetColorTexture(0.12, 0.12, 0.16, 1)
-    end)
-    header:SetScript("OnLeave", function(self)
-        self.bg:SetColorTexture(0, 0, 0, 0)
-    end)
-
-    f._currentGroup = name
-end
-
-local function EndCollapsibleGroup()
-    local f = mainFrame
-    f._currentGroup = nil
 end
 
 -- ============================================================
@@ -1082,7 +783,7 @@ end
 -- ============================================================
 local function CreateCharacterTab(namespace)
     local panel = CreateFrame("Frame")
-    local source = namespace == "Native" and "native" or "standalone"
+    local source = "native"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -1506,7 +1207,7 @@ local function CreateAuctionHouseTab()
                     cb:SetScript("OnClick", function(self)
                         local checked = self:GetChecked()
                         Wild.db.auctionHouse.filters[self.enumVal] = checked
-                        Wild.NotifySettingsChanged("auctionHouse.filters", "standalone")
+                        Wild.NotifySettingsChanged("auctionHouse.filters", "native")
                         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
                     end)
                     filterCBs[#filterCBs + 1] = cb
@@ -1669,7 +1370,7 @@ local function CreateCraftingOrdersTab()
                     cb:SetScript("OnClick", function(self)
                         local checked = self:GetChecked()
                         Wild.db.craftingOrders.filters[self.enumVal] = checked
-                        Wild.NotifySettingsChanged("craftingOrders.filters", "standalone")
+                        Wild.NotifySettingsChanged("craftingOrders.filters", "native")
                         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
                     end)
                     filterCBs[#filterCBs + 1] = cb
@@ -1864,7 +1565,7 @@ local function CreateTooltipTab(namespace)
     previewHint:SetText(
         "|cff888888Visibility modes:|r\n" ..
         "|cffffffffAlways|r |cff888888\226\128\148 show on every item tooltip|r\n" ..
-        "|cffffffffWild Settings Open|r |cff888888\226\128\148 while either Wild settings interface is visible|r\n" ..
+        "|cffffffffWild Settings Open|r |cff888888\226\128\148 while Wild's native settings are visible|r\n" ..
         "|cffffffffShift/Ctrl/Alt Held|r |cff888888\226\128\148 only while holding that modifier key|r\n" ..
         "|cffffffffNever|r |cff888888\226\128\148 line is disabled|r"
     )
@@ -1891,7 +1592,7 @@ end
 -- ============================================================
 local function CreateAutoReplyTab(namespace)
     local panel = CreateFrame("Frame")
-    local source = namespace == "Native" and "native" or "standalone"
+    local source = "native"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -2036,7 +1737,7 @@ end
 -- ============================================================
 local function CreateDungeonBarTab(namespace)
     local panel = CreateFrame("Frame")
-    local source = namespace == "Native" and "native" or "standalone"
+    local source = "native"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -2521,7 +2222,7 @@ local function CreateDialogKeyTab()
         local binding = (IsControlKeyDown() and "CTRL-" or "") ..
             (IsAltKeyDown() and "ALT-" or "") ..
             (IsShiftKeyDown() and "SHIFT-" or "") .. key
-        Wild.SetDialogKey(binding, "standalone")
+        Wild.SetDialogKey(binding, "native")
         StopCapture()
     end)
     capture:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -2920,25 +2621,6 @@ local function CreateLootTab(namespace)
 end
 
 -- ============================================================
--- Toggle / Open / Close
--- ============================================================
-function Wild.ToggleSettings()
-    local f = CreateMainFrame()
-    if f:IsShown() then
-        f:Hide()
-    else
-        f:Show()
-        if currentTab then SelectTab(currentTab) end
-    end
-end
-
-function Wild.OpenSettings()
-    local f = CreateMainFrame()
-    f:Show()
-    if currentTab then SelectTab(currentTab) end
-end
-
--- ============================================================
 -- Advanced
 -- ============================================================
 
@@ -3081,7 +2763,7 @@ end
 -- ============================================================
 local function CreateIntentRulesTab(namespace)
     local panel = CreateFrame("Frame")
-    local source = namespace == "Native" and "native" or "standalone"
+    local source = "native"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -5102,7 +4784,7 @@ end
 
 local function CreateActorsTab(namespace)
     local panel = CreateFrame("Frame")
-    local source = namespace == "Native" and "native" or "standalone"
+    local source = "native"
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
@@ -5727,19 +5409,6 @@ local PAGE_FACTORIES = {
     ["Durability"] = CreateDurabilityTab,
 }
 
-local PAGE_PREFIXES = {
-    ["LFG"] = { "lfg" }, ["Center Circle"] = { "screenCenterCircle" },
-    ["Speed"] = { "speed" }, ["Cast History"] = { "castHistory" },
-    ["Intent Rules"] = { "intents", "actors" }, ["Actors"] = { "actors" },
-    ["Advanced"] = { "advanced" }, ["Character"] = { "vendor", "reputation", "currency" },
-    ["Auction House"] = { "auctionHouse" }, ["Crafting Orders"] = { "craftingOrders" },
-    ["Mail"] = { "mail" }, ["Loot"] = { "loot" }, ["Quests"] = { "quests" },
-    ["Dialog Key"] = { "dialogKey" }, ["Gossip"] = { "gossip" },
-    ["Darkmoon Faire"] = { "darkmoonFaire" }, ["Tooltips"] = { "tooltip" },
-    ["Dungeon Bar"] = { "dungeonBar" }, ["Auto-Reply"] = { "autoReply" },
-    ["Delve"] = { "delve" }, ["Volume"] = { "volumeControl" }, ["Durability"] = { "durability" },
-}
-
 function Wild.CreateSettingsCanvas(name, namespace)
     local factory = PAGE_FACTORIES[name]
     if not factory then error("Unknown Wild settings page: " .. tostring(name)) end
@@ -5748,60 +5417,3 @@ function Wild.CreateSettingsCanvas(name, namespace)
     panel:Hide()
     return panel
 end
-
-function Wild.RefreshSettings(key, source)
-    if source == "standalone" or refreshingPanels or not mainFrame or not mainFrame:IsShown() then return end
-    local panel = mainFrame.tabs[currentTab]
-    if not panel then return end
-    if key then
-        local matches = false
-        for _, prefix in ipairs(PAGE_PREFIXES[currentTab]) do
-            if key:sub(1, #prefix) == prefix or prefix:sub(1, #key) == key then matches = true; break end
-        end
-        if not matches then return end
-    end
-    panel:OnRefresh()
-end
-
--- ============================================================
--- Initialize
--- ============================================================
-local loader = CreateFrame("Frame")
-loader:RegisterEvent("ADDON_LOADED")
-loader:SetScript("OnEvent", function(self, event, addon)
-    if addon ~= ADDON_NAME then return end
-
-    -- Build the window and tabs
-    CreateMainFrame()
-    AddTab("LFG", CreateLFGTab())
-    AddTab("Center Circle", CreateCircleTab())
-    AddTab("Speed", CreateSpeedTab())
-    AddTab("Cast History", CreateCastHistoryTab())
-    AddCollapsibleGroup("Intents")
-    AddTab("Intent Rules", CreateIntentRulesTab(), true)
-    AddTab("Actors", CreateActorsTab(), true)
-    AddTab("Advanced", CreateIntentsTab(), true)
-    EndCollapsibleGroup()
-    AddTab("Character", CreateCharacterTab())
-    AddTab("Auction House", CreateAuctionHouseTab())
-    AddTab("Crafting Orders", CreateCraftingOrdersTab())
-    AddTab("Mail", CreateMailTab())
-    AddTab("Loot", CreateLootTab())
-    AddTab("Quests", CreateQuestsTab())
-    AddTab("Dialog Key", CreateDialogKeyTab())
-    AddTab("Gossip", CreateGossipTab())
-    AddTab("Darkmoon Faire", CreateDarkmoonFaireTab())
-    AddTab("Tooltips", CreateTooltipTab())
-    AddCollapsibleGroup("Group and Raid")
-    AddTab("Dungeon Bar", CreateDungeonBarTab(), true)
-    AddTab("Auto-Reply", CreateAutoReplyTab(), true)
-    EndCollapsibleGroup()
-    AddTab("Delve", CreateDelveTab())
-    AddTab("Volume", CreateVolumeTab())
-    AddTab("Durability", CreateDurabilityTab())
-    LayoutSidebar()
-    SelectTab("LFG")
-    mainFrame:Hide()
-
-    self:UnregisterEvent("ADDON_LOADED")
-end)

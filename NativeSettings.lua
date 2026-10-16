@@ -1,4 +1,4 @@
--- Wild: Native WoW Settings alongside the standalone window
+-- Wild: Native WoW Settings
 local ADDON_NAME, Wild = ...
 
 local rootCategory
@@ -215,7 +215,7 @@ local function AddCanvas(name, prefix, defaultKeys, update)
             local focus = GetCurrentKeyBoardFocus()
             local parent = focus
             while parent do
-                if parent == frame or parent == WildSettingsFrame then
+                if parent == frame then
                     focus:ClearFocus()
                     break
                 end
@@ -508,7 +508,7 @@ local function CreateDialogKeyPage()
     local category, layout = AddPage("Dialog Key")
     AddCheckbox(category, "dialogKey.enabled", "Enable dialog key",
         "Manually confirm standard popups, queue and role checks, and delve entry with a physical key press. " ..
-        "Nothing is accepted automatically, in combat, or while either Wild settings interface is open.", "dialog")
+        "Nothing is accepted automatically, in combat, or while Wild settings are open.", "dialog")
     local function KeyOptions()
         local current = Wild.GetSetting("dialogKey.key")
         local container = Settings.CreateControlTextContainer()
@@ -581,7 +581,7 @@ local function CreateTooltipPage()
     local category, layout = AddPage("Tooltips")
     local enabled = AddCheckbox(category, "tooltip.enabled", "Enable tooltip enhancements",
         "Add item information to tooltips using the visibility modes below.", "tooltip")
-    AddHeader(layout, "Tooltip Lines", "Wild Settings Open includes either Wild settings interface.")
+    AddHeader(layout, "Tooltip Lines", "Wild Settings Open includes Wild's native pages and search results.")
     local modes = {}
     for _, mode in ipairs(Wild.TOOLTIP_VISIBILITY_MODES) do
         modes[#modes + 1] = { mode.key, mode.label }
@@ -643,6 +643,14 @@ function Wild.OpenNativeSettings(page)
     return true
 end
 
+function Wild.OpenSettings(page)
+    return Wild.OpenNativeSettings(page)
+end
+
+function Wild.ToggleSettings(page)
+    return Wild.OpenNativeSettings(page)
+end
+
 local function RefreshVisibility(selected)
     local visible = false
     if SettingsPanel:IsShown() then
@@ -666,10 +674,8 @@ local function Initialize()
     rootCategory = category
     rootCategory.layout = layout
     TrackCategory(rootCategory)
-    AddHeader(layout, "Shared settings",
-        "Native and standalone Wild settings use the same saved configuration. Changes apply immediately.")
-    AddButton(layout, "Compare interfaces", "Open Standalone Settings", function() Wild.OpenSettings() end,
-        "Keep both interfaces open to compare their controls and behavior. /wild still opens the standalone window.")
+    AddHeader(layout, "Wild settings",
+        "Choose a category to configure Wild. Changes apply immediately.")
     AddCheckbox(category, "includeReagentBag", "Include reagent bag",
         "Include your reagent bag when scanning player bags for automation rules.")
     CreateLFGPage()

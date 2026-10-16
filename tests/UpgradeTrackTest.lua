@@ -100,8 +100,8 @@ local tests = {
             return frame
         end
         setfenv(assert(loadfile("Settings.lua")), env)("Wild", Wild)
-        local loader = state.frames[#state.frames]
-        local factory = GetUpvalue(loader.scripts.OnEvent, "CreateIntentRulesTab")
+        local factories = GetUpvalue(Wild.CreateSettingsCanvas, "PAGE_FACTORIES")
+        local factory = factories["Intent Rules"]
         local success, reason = pcall(factory)
         Equal(success, false)
         Equal(reason, stop, "UI must reach the upgrade track dropdown")

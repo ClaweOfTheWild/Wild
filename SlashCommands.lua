@@ -84,7 +84,7 @@ local subcommands = {}
 -- /wild help
 subcommands.help = function()
     print("|cff00ccff--- Wild Commands ---|r")
-    Print("/wild — Toggle settings window")
+    Print("/wild - Open WoW Settings > AddOns > Wild")
     Print("/wild native [page] - Open native WoW Settings (for example: /wild native speed)")
     Print("/wild help — Show this help")
     Print("/wild status — Show all feature states")
@@ -206,7 +206,7 @@ end
 
 subcommands.native = function(args)
     local page = #args > 0 and table.concat(args, " ") or nil
-    Wild.OpenNativeSettings(page)
+    Wild.OpenSettings(page)
 end
 
 -- /wild speed [on|off]
@@ -828,7 +828,7 @@ end
 function Wild.HandleSlashCommand(msg)
     msg = strtrim(msg or "")
     if msg == "" then
-        Wild.ToggleSettings()
+        Wild.OpenSettings()
         return
     end
 
