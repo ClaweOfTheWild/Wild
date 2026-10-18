@@ -338,9 +338,23 @@ local tests = {
         frame.calculate:Click()
         assert(not frame.result:GetText():find("Suggested invite", 1, true))
         state.reputations[2711].standing = 1000
-        state.reputations[2711].maxRep = 3000
+        state.reputations[2711].maxRep = 2000
         frame.calculate:Click()
         assert(frame.result:GetText():find("scale", 1, true))
+    end },
+    { "reported standing caps above Luminary do not prevent reading real progress", function()
+        local Wild, state, _, _, Open, _, Fill = NewEnvironment()
+        for _, factionID in ipairs(FACTIONS) do state.reputations[factionID].maxRep = 42000 end
+        state.reputations[2711].standing = 2600
+        Equal(Wild.GetSoireeProgress()[2711], 2600)
+        Wild.SetFeatureEnabled("soiree", true)
+        Open()
+        local frame = Fill()
+        frame.inputs[2712].reputation[2711]:UserText("-75")
+        frame.inputs[2712].bonusFavors:UserText("1")
+        frame.calculate:Click()
+        assert(frame.result:GetText():find("+700", 1, true))
+        assert(frame.progressLabels[2711]:GetText():find("2500 -> 2500", 1, true))
     end },
     { "all Luminary progress reports completion without asking for invitation previews", function()
         local Wild, state, _, _, Open, Advisor = NewEnvironment()
@@ -430,6 +444,17 @@ local tests = {
         assert(frame.result:GetText():find("Localized faction 2711", 1, true))
         assert(not frame.result:GetText():find("9999", 1, true))
         Equal(Advisor():IsShown(), true)
+    end },
+    { "explicit show removes stale advice if the selector identity becomes unavailable", function()
+        local Wild, state, _, _, Open, Advisor, Fill = NewEnvironment()
+        Wild.SetFeatureEnabled("soiree", true)
+        Open()
+        local frame = Fill()
+        frame.calculate:Click()
+        assert(frame.result:GetText():find("Suggested invite", 1, true))
+        state.choice.objectGUID = state.secret
+        Equal(Wild.ShowSoireeAdvisor(), false)
+        Equal(Advisor():IsShown(), false)
     end },
     { "an unrelated selector cannot reuse previously entered Soiree previews", function()
         local Wild, _, _, _, Open, Advisor, Fill = NewEnvironment()

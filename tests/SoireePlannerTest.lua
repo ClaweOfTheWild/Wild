@@ -120,6 +120,21 @@ local tests = {
         Equal(plan.remaining, 0)
         Same(plan.projected, progress)
     end },
+    { "Luminary is a goal threshold rather than an assumed API standing cap", function()
+        local progress, offers = Progress(2600, 1000, 1000, 1000), Offers()
+        offers[2712].reputation[2711] = -75
+        offers[2712].bonusFavors = 1
+        local plan = assert(Wild.CalculateSoireeRecommendation(progress, offers))
+        Equal(plan.inviteFactionID, 2712)
+        Equal(plan.projected[2711], 2500)
+        Equal(plan.net[2711], 0, "Reputation above the goal can absorb an invitation loss")
+        Equal(plan.favors[2711], 0)
+        Equal(plan.gain, 700)
+        local complete = assert(Wild.CalculateSoireeRecommendation(Progress(2600, 3000, 42000, 2500)))
+        Equal(complete.complete, true)
+        Equal(complete.remaining, 0)
+        Equal(complete.gain, 0)
+    end },
     { "all four current previews are required including explicit zero effects", function()
         local progress = Progress(0, 0, 0, 0)
         for _, change in ipairs({
@@ -136,7 +151,7 @@ local tests = {
         end
     end },
     { "invalid secret fractional and non-finite inputs fail with a reason", function()
-        for _, value in ipairs({ -1, 2501, "100", 0.5, math.huge, secret, false }) do
+        for _, value in ipairs({ -1, 2147483648, "100", 0.5, math.huge, secret, false }) do
             local progress = Progress(0, 0, 0, 0)
             progress[2711] = value
             local plan, reason = Wild.CalculateSoireeRecommendation(progress, Offers())
@@ -179,8 +194,8 @@ local tests = {
         for _ = 1, 64 do
             local progress, offers, before = {}, Offers(), 0
             for _, factionID in ipairs(FACTIONS) do
-                progress[factionID] = Random(2501)
-                before = before + progress[factionID]
+                progress[factionID] = Random(3001)
+                before = before + math.min(2500, progress[factionID])
                 offers[factionID].bonusFavors = Random(2)
                 for _, targetID in ipairs(FACTIONS) do
                     offers[factionID].reputation[targetID] = (Random(11) - 5) * 25

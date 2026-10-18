@@ -13,6 +13,7 @@ local FORTIFY_REPUTATION = 300
 local FAVOR_REPUTATION = 100
 local BASE_FAVORS = 3
 local SALTHERIL_NPC_ID = 240832
+local MAX_INTEGER = 2147483647
 
 local function IsPublic(value)
     return not (issecretvalue and issecretvalue(value))
@@ -27,15 +28,16 @@ local function IsTable(value)
     return IsPublic(value) and type(value) == "table"
 end
 
-local function ClampReputation(value)
+local function ClampToLuminary(value)
     return math.min(LUMINARY_REPUTATION, math.max(0, value))
 end
 
 local function ValidateProgress(progress)
     if not IsTable(progress) then return "Reputation progress must contain all four factions." end
     for _, factionID in ipairs(FACTIONS) do
-        if not IsInteger(progress[factionID], 0, LUMINARY_REPUTATION) then
-            return "Reputation for " .. FACTION_NAMES[factionID] .. " must be an integer from 0 to 2500."
+        if not IsInteger(progress[factionID], 0, MAX_INTEGER) then
+            return "Reputation for " .. FACTION_NAMES[factionID] ..
+                " must be an integer from 0 to 2147483647."
         end
     end
 end
@@ -67,11 +69,11 @@ local function BuildPlan(progress, invitedID, base, allocation, totalFavors)
     }
     for _, factionID in ipairs(FACTIONS) do
         local count = allocation[factionID]
-        local projected = ClampReputation(base[factionID] + count * FAVOR_REPUTATION)
+        local projected = ClampToLuminary(base[factionID] + count * FAVOR_REPUTATION)
         local gap = LUMINARY_REPUTATION - projected
         plan.favors[factionID] = count
         plan.projected[factionID] = projected
-        plan.net[factionID] = projected - progress[factionID]
+        plan.net[factionID] = projected - ClampToLuminary(progress[factionID])
         plan.usedFavors = plan.usedFavors + count
         plan.remaining = plan.remaining + gap
         plan.gain = plan.gain + plan.net[factionID]
@@ -96,9 +98,10 @@ end
 local function PlanInvitation(progress, invitedID, offer)
     local base, allocation = {}, {}
     for _, factionID in ipairs(FACTIONS) do
-        base[factionID] = ClampReputation(progress[factionID] + offer.reputation[factionID])
+        -- Apply losses to the actual standing before capping useful progress at Luminary.
+        base[factionID] = ClampToLuminary(progress[factionID] + offer.reputation[factionID])
     end
-    base[invitedID] = ClampReputation(base[invitedID] + FORTIFY_REPUTATION)
+    base[invitedID] = ClampToLuminary(base[invitedID] + FORTIFY_REPUTATION)
     local totalFavors = BASE_FAVORS + offer.bonusFavors
     local best
     local function Allocate(index, remaining)
@@ -122,7 +125,9 @@ function Wild.CalculateSoireeRecommendation(progress, offers)
     local reason = ValidateProgress(progress)
     if reason then return nil, reason end
     local remaining = 0
-    for _, factionID in ipairs(FACTIONS) do remaining = remaining + LUMINARY_REPUTATION - progress[factionID] end
+    for _, factionID in ipairs(FACTIONS) do
+        remaining = remaining + LUMINARY_REPUTATION - ClampToLuminary(progress[factionID])
+    end
     if remaining == 0 then
         local allocation = {}
         for _, factionID in ipairs(FACTIONS) do allocation[factionID] = 0 end
@@ -155,14 +160,18 @@ function Wild.GetSoireeProgress()
     local progress = {}
     for _, factionID in ipairs(FACTIONS) do
         local reputation = C_GossipInfo.GetFriendshipReputation(factionID)
-        if not IsTable(reputation) or not IsInteger(reputation.friendshipFactionID, 1, 2147483647) or
-            not IsInteger(reputation.standing, 0, LUMINARY_REPUTATION) then
+        if not IsTable(reputation) or not IsInteger(reputation.friendshipFactionID, 1, MAX_INTEGER) or
+            not IsInteger(reputation.standing, 0, MAX_INTEGER) then
             return nil, "Reputation for " .. FACTION_NAMES[factionID] ..
                 " is unavailable. Unlock the Soiree and try again after reputation data loads."
         end
-        if not IsInteger(reputation.maxRep, LUMINARY_REPUTATION, LUMINARY_REPUTATION) then
+        if not IsInteger(reputation.maxRep, LUMINARY_REPUTATION, MAX_INTEGER) then
             return nil, "The reputation scale for " .. FACTION_NAMES[factionID] ..
                 " is unsupported; no recommendation can be calculated."
+        end
+        if reputation.standing > reputation.maxRep then
+            return nil, "Reputation for " .. FACTION_NAMES[factionID] ..
+                " exceeds the reported maximum; no recommendation can be calculated."
         end
         progress[factionID] = reputation.standing
     end
@@ -200,7 +209,7 @@ local function GetSelector()
     end
     local kind, _, _, _, _, npcID = strsplit("-", choice.objectGUID)
     if kind ~= "Creature" or tonumber(npcID) ~= SALTHERIL_NPC_ID or not IsTable(choice.options) or
-        #choice.options ~= #FACTIONS or not IsInteger(choice.choiceID, 1, 2147483647) then
+        #choice.options ~= #FACTIONS or not IsInteger(choice.choiceID, 1, MAX_INTEGER) then
         return nil, "Open Saltheril's four-invitation selector first."
     end
     return choice
@@ -235,7 +244,9 @@ local function RefreshAdvisor()
         plan, reason = Wild.CalculateSoireeRecommendation(progress, confirmedOffers)
     else
         local remaining = 0
-        for _, factionID in ipairs(FACTIONS) do remaining = remaining + LUMINARY_REPUTATION - progress[factionID] end
+        for _, factionID in ipairs(FACTIONS) do
+            remaining = remaining + LUMINARY_REPUTATION - ClampToLuminary(progress[factionID])
+        end
         if remaining == 0 then plan = Wild.CalculateSoireeRecommendation(progress) end
     end
     if plan and plan.complete then
@@ -264,10 +275,10 @@ local function RefreshAdvisor()
             local count = plan.favors[factionID]
             helper.progressLabels[factionID]:SetText(string.format(
                 "%s: %d -> %d / 2500 (%+d); %d Favor%s",
-                name, progress[factionID], plan.projected[factionID], plan.net[factionID],
+                name, ClampToLuminary(progress[factionID]), plan.projected[factionID], plan.net[factionID],
                 count, count == 1 and "" or "s"))
         else
-            helper.progressLabels[factionID]:SetText(name .. ": " .. progress[factionID] .. " / 2500")
+            helper.progressLabels[factionID]:SetText(name .. ": " .. ClampToLuminary(progress[factionID]) .. " / 2500")
         end
     end
 end
@@ -404,9 +415,12 @@ local function CreateHelper()
 end
 
 local function OpenAdvisor()
-    if InCombatLockdown() then return false, "Open the Soiree advisor outside combat." end
+    if InCombatLockdown() then
+        CloseSession()
+        return false, "Open the Soiree advisor outside combat."
+    end
     local choice, reason = GetSelector()
-    if not choice then return false, reason end
+    if not choice then CloseSession(); return false, reason end
     local frame = CreateHelper()
     HookSelector()
     if activeChoiceID ~= choice.choiceID or not frame:IsShown() then
