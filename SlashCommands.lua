@@ -54,6 +54,7 @@ local FEATURE_NAMES = {
     durabilitybags     = "Durability on Bag Items",
     speed              = "Speed Indicator",
     dialog             = "Dialog Key",
+    soiree             = "Soiree Reputation Advisor",
 }
 
 -- ============================================================
@@ -94,7 +95,7 @@ subcommands.help = function()
     print("    bank, bankcharacter, bankguild, reputation,")
     print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
     print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol), durability (dur), speed, dialog")
+    print("    volume (vol), durability (dur), speed, dialog, soiree")
     print(" ")
     Print("/wild lfg on|off — Toggle LFG quick apply")
     Print("/wild lfg autoconfirm on|off — Auto-confirm role")
@@ -144,6 +145,8 @@ subcommands.help = function()
     Print("/wild dialog on|off - Toggle keyboard confirmation of popups, queues, and delve entry")
     Print("/wild dialog key <key> - Set the confirmation key (SPACE, ENTER, CTRL-F2)")
     Print("/wild dialog destroy on|off - Allow item destruction without typing DELETE")
+    Print("/wild soiree on|off - Show advice when opening Saltheril's invitation selector")
+    Print("/wild soiree show|hide - Open or dismiss the advisor for the current selector")
     print(" ")
     Print("/wild dungeonbar on|off — Toggle dungeon bar")
     Print("/wild dungeonbar show|hide|toggle — Control visibility")
@@ -191,7 +194,7 @@ subcommands.status = function()
         "reputation", "delve", "tooltip",
         "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
-        "speed", "dialog",
+        "speed", "dialog", "soiree",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
@@ -213,6 +216,16 @@ end
 subcommands.speed = function(args)
     if HandleGenericFeature("speed", args) then return end
     PrintWarn("Usage: /wild speed [on|off]")
+end
+
+subcommands.soiree = function(args)
+    if #args == 1 and args[1]:lower() == "show" then
+        Wild.ShowSoireeAdvisor()
+    elseif #args == 1 and args[1]:lower() == "hide" then
+        Wild.HideSoireeAdvisor()
+    elseif not HandleGenericFeature("soiree", args) then
+        PrintWarn("Usage: /wild soiree [on|off|show|hide]")
+    end
 end
 
 -- /wild dialog [on|off|key <key>|destroy on|off]

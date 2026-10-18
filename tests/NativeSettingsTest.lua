@@ -24,7 +24,7 @@ local function NewEnvironment(saved, noFilterEnum)
     local state = {
         frames = {}, categories = {}, settings = {}, layouts = {}, messages = {},
         updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0,
-        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, combat = false,
+        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, soireeUpdates = 0, combat = false,
     }
     local env = setmetatable({
         WildDB = saved,
@@ -373,6 +373,8 @@ local function NewEnvironment(saved, noFilterEnum)
     Wild.UpdateSpeedIndicator = function() state.speedUpdates = state.speedUpdates + 1 end
     Wild.UpdateScreenCenterCircle = function() state.circleUpdates = state.circleUpdates + 1 end
     Wild.UpdateCastHistory = function() state.castUpdates = state.castUpdates + 1 end
+    Wild.UpdateSoireeAdvisor = function() state.soireeUpdates = state.soireeUpdates + 1 end
+    Wild.ShowSoireeAdvisor = function() state.soireeShows = (state.soireeShows or 0) + 1 end
     Wild.UpdateDialogKey = function() end
     Wild.CreateSettingsCanvas = function(name, namespace)
         state.creates[name] = (state.creates[name] or 0) + 1
@@ -445,8 +447,8 @@ local tests = {
     { "registers both native list and lazy canvas pages once without changing saved values", function()
         local Wild, state, _, _, Fire = NewEnvironment({ speed = { enabled = false } })
         Equal(state.root.name, "Wild")
-        Equal(#state.categories, 23)
-        for _, page in ipairs({ "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key" }) do
+        Equal(#state.categories, 24)
+        for _, page in ipairs({ "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key", "Soiree" }) do
             Equal(state.layouts[page].frame, nil, page .. " uses standard controls")
         end
         for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply" }) do
@@ -456,7 +458,7 @@ local tests = {
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        Equal(#state.categories, 23)
+        Equal(#state.categories, 24)
         Equal(state.speedUpdates, 0)
         Equal(state.circleUpdates, 0)
     end },
@@ -474,7 +476,7 @@ local tests = {
         state.root = nil
         state.settings = {}
         loader.scripts.OnEvent(loader, "PLAYER_LOGIN")
-        Equal(#state.categories, originalCount + 23)
+        Equal(#state.categories, originalCount + 24)
         Equal(loader.events.PLAYER_LOGIN, nil)
     end },
     { "native feature controls and slash commands share saved settings and update functions", function()
@@ -486,6 +488,26 @@ local tests = {
         Equal(Setting("speed.enabled"):GetValue(), false)
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
+    end },
+    { "Soiree native controls slash commands and generic setters share the opt-in setting", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        Equal(Setting("soiree.enabled"):GetDefaultValue(), false)
+        Setting("soiree.enabled"):SetValue(true)
+        Equal(Wild.IsFeatureEnabled("soiree"), true)
+        Equal(state.soireeUpdates, 1)
+        Wild.HandleSlashCommand("soiree off")
+        Equal(Setting("soiree.enabled"):GetValue(), false)
+        Equal(state.soireeUpdates, 2)
+        Wild.SetSetting("soiree.enabled", true)
+        Equal(Setting("soiree.enabled"):GetValue(), true)
+        Equal(state.soireeUpdates, 3)
+        Setting("soiree.enabled"):SetValueToDefault()
+        Equal(Wild.IsFeatureEnabled("soiree"), false)
+        Equal(state.soireeUpdates, 4)
+        for _, initializer in ipairs(state.layouts.Soiree.initializers) do
+            if initializer.data.kind == "Button" then initializer.data.buttonClick() end
+        end
+        Equal(state.soireeShows, 1)
     end },
     { "defaults come from Core and cannot be mutated through the UI", function()
         local Wild, _, _, Setting = NewEnvironment()

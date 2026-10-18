@@ -35,6 +35,9 @@ local Wild = {}
 local secret = {}
 local env = setmetatable({
     issecretvalue = function(value) return rawequal(value, secret) end,
+    CreateFrame = function()
+        return { RegisterEvent = function() end, SetScript = function() end }
+    end,
 }, { __index = _G })
 setfenv(assert(loadfile("Soiree.lua")), env)("Wild", Wild)
 

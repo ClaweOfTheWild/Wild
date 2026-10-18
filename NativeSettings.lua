@@ -577,6 +577,19 @@ local function CreateDarkmoonPage()
     end, "Open the profession shopping list regardless of your location or the automatic helper setting.")
 end
 
+local function CreateSoireePage()
+    local category, layout = AddPage("Soiree")
+    AddCheckbox(category, "soiree.enabled", "Show Soiree reputation advisor",
+        "Open advisory help with Saltheril's weekly invitation selector. Enter all four current previews " ..
+        "to compare gains, losses, Fortify, and Favor allocation toward Luminary.", "soiree")
+    AddHeader(layout, "Advice only",
+        "The advisor reads live reputation but requires manual invitation effects. It never selects an " ..
+        "invitation or spends Favors. Projections use base quest rewards, not future offers or reputation bonuses.")
+    AddButton(layout, "Current invitation selector", "Show Advisor Now", function()
+        Wild.ShowSoireeAdvisor()
+    end, "Open the advisor while Saltheril's four-invitation selector is open, even if automatic display is off.")
+end
+
 local function CreateTooltipPage()
     local category, layout = AddPage("Tooltips")
     local enabled = AddCheckbox(category, "tooltip.enabled", "Enable tooltip enhancements",
@@ -699,6 +712,7 @@ local function Initialize()
     CreateDialogKeyPage()
     CreateGossipPage()
     CreateDarkmoonPage()
+    CreateSoireePage()
     CreateTooltipPage()
     AddCanvas("Dungeon Bar", "dungeonBar", {
         "dungeonBar.enabled", "dungeonBar.autoShowInInstance", "dungeonBar.showReadyCheck",

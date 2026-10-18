@@ -28,6 +28,7 @@ AutoReply.lua
 Quests.lua
 Gossip.lua
 DarkmoonFaire.lua
+Soiree.lua
 Loot.lua
 Tooltip.lua
 VolumeControl.lua
