@@ -9,6 +9,11 @@ Open **Settings > AddOns > Wild** with `/wild`. Use `/wild help` for commands.
 Settings are stored in `WildDB`; the settings UI, slash commands, and public
 setters share that store.
 
+World-event helpers are grouped under **Wild > Events**, with separate pages
+for **Darkmoon Faire** and **Saltheril's Soiree**. `/wild native events` opens
+the group. Existing shortcuts such as `/wild native darkmoon faire` and
+`/wild native soiree` still open the event directly.
+
 ## Plan a Saltheril's Soiree week
 
 The opt-in Soiree advisor suggests an invitation and Favor allocation toward
@@ -29,12 +34,12 @@ descriptions, assume missing effects are zero, or reuse a previous week's offers
 
 ### Steps
 
-1. Enable **Wild > Soiree > Show Soiree reputation advisor**, or run
+1. Enable **Wild > Events > Saltheril's Soiree > Show Soiree reputation advisor**, or run
    `/wild soiree on`. Automatic display is off by default.
 2. Open Saltheril's invitation selector. The advisor opens with blank preview
    fields. Drag it aside to keep the native previews visible. To open it
    manually without enabling automatic display, use `/wild soiree show` or
-   **Show Advisor Now** on the native Soiree settings page.
+   **Show Advisor Now** on the event's native settings page.
 3. Copy each invitation into its row. The four reputation columns are changes
    to the named factions, not current standings. Include the minus sign for
    losses, and explicitly enter `0` for unlisted factions. Enter `0` or `1`
