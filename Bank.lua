@@ -635,22 +635,29 @@ local function HasBankProgress(pass)
     return pass.money and pass.money.confirmed > 0
 end
 
-local function HasUnconfirmedRemovals(pass)
+local function HasUnconfirmedItemChanges(pass)
     for _, batch in pairs(pass.batches) do
         local sourceAfter = batch.readSource()
+        local targetAfter = batch.readTarget()
         for _, item in ipairs(batch.entries) do
             if item.confirmed < item.count then
                 local removed = (batch.sourceBefore[item.key] or 0) - (sourceAfter[item.key] or 0)
-                if removed > (batch.confirmed[item.key] or 0) then return true end
+                local received = (targetAfter[item.key] or 0) - (batch.targetBefore[item.key] or 0)
+                local confirmed = batch.confirmed[item.key] or 0
+                if removed > confirmed or received > confirmed then return true end
             end
         end
     end
     return false
 end
 
-local function CanRetryPartialPass(pass)
-    return HasBankProgress(pass) and not HasUnconfirmedRemovals(pass)
+local function HasSettledBankEvidence(pass)
+    return not HasUnconfirmedItemChanges(pass)
         and (not pass.money or pass.money.confirmed == pass.money.count)
+end
+
+local function CanRetryPartialPass(pass)
+    return HasBankProgress(pass) and HasSettledBankEvidence(pass)
 end
 
 local function ClearConfirmationWait()
@@ -813,6 +820,18 @@ local function AdvanceIntent()
     else ScheduleStep(Wild.db.advanced.ruleDelay, ProcessQueueStep) end
 end
 
+local function FinishUnconfirmedPass(pass)
+    StorePassResults(pass, true)
+    if HasSettledBankEvidence(pass) and not GetCursorInfo() then
+        ClearConfirmationWait()
+        Wild.Print("|cffff6600Wild:|r Some bank items were not confirmed; skipped remaining items for this intent.")
+        AdvanceIntent()
+    else
+        Wild.Print("|cffff6600Wild:|r Some bank actions were not confirmed; stopped intent processing.")
+        FinishQueue()
+    end
+end
+
 local function StartTransferDeposit(entry, withdrawn)
     local pass = NewPass(entry, "transferDeposit")
     pass.withdrawn = withdrawn
@@ -827,9 +846,7 @@ local function StartTransferDeposit(entry, withdrawn)
     if HasItemRequests(pass) then
         WaitForPass(pass)
     else
-        StorePassResults(pass, true)
-        Wild.Print("|cffff6600Wild:|r Transfer deposit was not confirmed; stopped intent processing.")
-        FinishQueue()
+        FinishUnconfirmedPass(pass)
     end
 end
 
@@ -880,9 +897,7 @@ WaitForPass = function(pass)
         if CollectPassResults(pass) or CanRetryPartialPass(pass) then
             CompletePass(pass)
         else
-            StorePassResults(pass, true)
-            Wild.Print("|cffff6600Wild:|r Some bank actions were not confirmed; stopped intent processing.")
-            FinishQueue()
+            FinishUnconfirmedPass(pass)
         end
     end)
 end

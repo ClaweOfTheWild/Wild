@@ -14,6 +14,10 @@ local function Item(count, itemID)
     }
 end
 
+local function FillBag(state, bag)
+    for slot = 1, 20 do state.bags[bag][slot] = Item(200) end
+end
+
 local function NewEnvironment(...)
     local Wild = { db = {
         intents = {}, mail = { autoOpen = false }, advanced = {
@@ -235,24 +239,35 @@ local function NewEnvironment(...)
             state.money, state.bankMoney = state.money + delta, state.bankMoney - delta
             return
         end
+        if request.kind ~= "destroy" and request.kind ~= "sell" then
+            local destination = state.bags[request.target]
+            local maxStack = select(8, env.C_Item.GetItemInfo(request.item.itemID))
+            local remaining = count
+            for slot = 1, 20 do
+                local targetInfo = destination[slot]
+                if targetInfo and targetInfo.hyperlink == request.item.hyperlink then
+                    local moved = math.min(remaining, maxStack - targetInfo.stackCount)
+                    destination[slot] = Item(targetInfo.stackCount + moved, request.item.itemID)
+                    remaining = remaining - moved
+                end
+            end
+            for slot = 1, 20 do
+                if not destination[slot] and remaining > 0 then
+                    local moved = math.min(remaining, maxStack)
+                    destination[slot] = Item(moved, request.item.itemID)
+                    remaining = remaining - moved
+                end
+            end
+            count = count - remaining
+        end
         local slots = state.bags[request.bag]
         local info = slots[request.slot]
         if info then
             local remaining = info.stackCount - count
             slots[request.slot] = remaining > 0 and Item(remaining, info.itemID) or nil
         end
-        if request.kind == "destroy" then
-            state.cursor = nil
-        elseif request.kind ~= "sell" then
-            local destination = state.bags[request.target]
-            for slot = 1, 20 do
-                local targetInfo = destination[slot]
-                if not targetInfo or targetInfo.hyperlink == request.item.hyperlink then
-                    destination[slot] = Item((targetInfo and targetInfo.stackCount or 0) + count, request.item.itemID)
-                    break
-                end
-            end
-        end
+        if request.kind == "destroy" then state.cursor = nil end
+        return count
     end
     local function Tick()
         for _, frame in ipairs(state.frames) do
@@ -387,6 +402,89 @@ local tests = {
         Equal(#Messages("Deposited "), 1)
         assert(Messages("Deposited ")[1]:find(COUNT .. "8", 1, true))
     end },
+    { "full banks skip refused deposit rules and fill stacks for later rules", function()
+        for target, bag in pairs({ character = 6, warband = 12 }) do
+            local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+            FillBag(state, bag)
+            state.bags[bag][20] = Item(198, 2)
+            state.bags[0][1], state.bags[0][2] = Item(5), Item(5, 2)
+            Wild.db.intents = {
+                { action = "deposit", target = target, itemID = 1, groups = { {} } },
+                { action = "deposit", target = target, itemID = 2, groups = { {} } },
+            }
+            Wild.RunBankIntents()
+            Equal(Apply(1), 0)
+            Fire("BAG_UPDATE_DELAYED"); RunTimeouts(); RunTimers()
+            Equal(#state.requests, 2)
+            Equal(Apply(2), 2)
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
+            Equal(Apply(3), 0)
+            RunTimeouts(); RunTimers()
+            Equal(#state.requests, 3)
+            Equal(state.bags[bag][20].stackCount, 200)
+            Equal(state.bags[0][1].stackCount, 5)
+            Equal(state.bags[0][2].stackCount, 3)
+            Equal(#Messages("Deposited "), 1)
+            assert(Messages("Deposited ")[1]:find(COUNT .. "2", 1, true))
+            Equal(#Messages("skipped remaining items"), 2)
+        end
+    end },
+    { "full banks try later stacks in the same rule before advancing to the next rule", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+        FillBag(state, 12)
+        state.bags[12][20] = Item(198, 2)
+        state.bags[0][1], state.bags[0][2] = Item(5), Item(5, 2)
+        Wild.db.intents = {
+            { action = "deposit", target = "warband", groups = { {} } },
+            { action = "deposit", target = "character", itemID = 1, groups = { {} } },
+        }
+        Wild.RunBankIntents()
+        Equal(#state.requests, 2)
+        Equal(Apply(1), 0)
+        Equal(Apply(2), 2)
+        Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#state.requests, 4)
+        Equal(Apply(3), 0)
+        Equal(Apply(4), 0)
+        RunTimeouts(); RunTimers()
+        Equal(#state.requests, 5)
+        Equal(Apply(5), 5)
+        Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#Messages("Deposited "), 2)
+        assert(Messages("Deposited ")[1]:find(COUNT .. "2 to Warband bank.", 1, true))
+        assert(Messages("Deposited ")[2]:find(COUNT .. "5 to Character bank.", 1, true))
+        Equal(state.bags[0][2].stackCount, 3)
+    end },
+    { "unconfirmed removal or receipt still stops before later bank rules", function()
+        for _, removed in ipairs({ true, false }) do
+            local Wild, state, Fire, RunTimers, RunTimeouts, _, _, _, Messages = NewEnvironment("Bank.lua")
+            state.bags[0][1], state.bags[0][2] = Item(4), Item(2, 2)
+            Wild.db.intents = {
+                { action = "deposit", target = "warband", itemID = 1, groups = { {} } },
+                { action = "deposit", target = "warband", itemID = 2, groups = { {} } },
+            }
+            Wild.RunBankIntents()
+            if removed then state.bags[0][1] = nil
+            else state.bags[12][1] = Item(4) end
+            Fire("BAG_UPDATE_DELAYED"); RunTimeouts(); RunTimers()
+            Equal(#state.requests, 1)
+            Equal(#Messages("Deposited "), 0)
+            Equal(#Messages("stopped intent processing"), 1)
+        end
+    end },
+    { "an occupied cursor still stops before later bank rules", function()
+        local Wild, state, _, RunTimers, RunTimeouts, _, _, _, Messages = NewEnvironment("Bank.lua")
+        state.bags[0][1], state.bags[0][2] = Item(4), Item(2, 2)
+        Wild.db.intents = {
+            { action = "deposit", target = "warband", itemID = 1, groups = { {} } },
+            { action = "deposit", target = "warband", itemID = 2, groups = { {} } },
+        }
+        Wild.RunBankIntents()
+        state.cursor = { item = Item(4), bag = 0, slot = 1 }
+        RunTimeouts(); RunTimers()
+        Equal(#state.requests, 1)
+        Equal(#Messages("stopped intent processing"), 1)
+    end },
     { "late bank receipts during the settle delay are included exactly once", function()
         local Wild, state, Fire, RunTimers, _, Apply, _, _, Messages = NewEnvironment("Bank.lua")
         state.bags[0][1] = Item(8)
@@ -422,6 +520,32 @@ local tests = {
             Apply(1)
             Fire("BAG_UPDATE_DELAYED"); RunTimers()
             Equal(#Messages("Withdrew "), 1)
+        end
+    end },
+    { "full bags skip refused withdrawals and fill stacks for later bank rules", function()
+        for target, bag in pairs({ character = 6, warband = 12, guild = "guild" }) do
+            local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+            FillBag(state, 0); FillBag(state, 5)
+            state.bags[0][20] = Item(198, 2)
+            state.bags[bag][1], state.bags[bag][2] = Item(5), Item(5, 2)
+            Wild.db.intents = {
+                { action = "withdraw", target = target, itemID = 1, groups = { {} } },
+                { action = "withdraw", target = target, itemID = 2, groups = { {} } },
+            }
+            Wild.RunBankIntents()
+            Equal(Apply(1), 0)
+            RunTimeouts(); RunTimers()
+            Equal(#state.requests, 2)
+            Equal(Apply(2), 2)
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
+            Equal(Apply(3), 0)
+            RunTimeouts(); RunTimers()
+            Equal(#state.requests, 3)
+            Equal(state.bags[0][20].stackCount, 200)
+            Equal(state.bags[bag][1].stackCount, 5)
+            Equal(state.bags[bag][2].stackCount, 3)
+            Equal(#Messages("Withdrew "), 1)
+            assert(Messages("Withdrew ")[1]:find(COUNT .. "2", 1, true))
         end
     end },
     { "withdrawal receipts in an excluded reagent bag are still observed without enabling its rules", function()
@@ -465,6 +589,28 @@ local tests = {
         Equal(#Messages("Withdrew "), 1)
         Equal(#Messages("confirmed"), 1)
     end },
+    { "a transfer with no eligible deposit continues to later bank rules", function()
+        local Wild, state, Fire, RunTimers, _, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+        state.bags[6][1], state.bags[0][1] = Item(3), Item(2, 2)
+        local intent = { action = "transfer", source = "character", target = "warband", itemID = 1, groups = { {} } }
+        Wild.db.intents = {
+            intent,
+            { action = "deposit", target = "warband", itemID = 2, groups = { {} } },
+        }
+        Wild.RunBankIntents()
+        Apply(1)
+        intent.itemID = 2
+        Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#state.requests, 2)
+        Equal(state.requests[2].kind, "deposit")
+        Equal(state.requests[2].item.itemID, 2)
+        Apply(2); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#Messages("Transferred "), 0)
+        Equal(#Messages("Withdrew "), 1)
+        assert(Messages("Withdrew ")[1]:find(COUNT .. "3 from Character bank.", 1, true))
+        Equal(#Messages("Deposited "), 1)
+        Equal(#Messages("skipped remaining items"), 1)
+    end },
     { "partial transfer deposits retry only the remaining withdrawn quantity", function()
         local Wild, state, Fire, RunTimers, _, Apply, _, _, Messages = NewEnvironment("Bank.lua")
         state.bags[6][1] = Item(5)
@@ -482,6 +628,43 @@ local tests = {
         Equal(state.bags[0][1].stackCount, 8)
         Equal(#Messages("Withdrew "), 0)
     end },
+    { "full transfer targets still receive stackable items from later rules", function()
+        for _, banks in ipairs({
+            { source = "character", sourceBag = 6, target = "warband", targetBag = 12 },
+            { source = "warband", sourceBag = 12, target = "character", targetBag = 6 },
+        }) do
+            local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+            FillBag(state, banks.targetBag)
+            state.bags[banks.targetBag][20] = Item(198, 2)
+            state.bags[banks.sourceBag][1], state.bags[banks.sourceBag][2] = Item(5), Item(5, 2)
+            Wild.db.intents = {
+                { action = "transfer", source = banks.source, target = banks.target, itemID = 1, groups = { {} } },
+                { action = "transfer", source = banks.source, target = banks.target, itemID = 2, groups = { {} } },
+            }
+            Wild.RunBankIntents()
+            Equal(Apply(1), 5)
+            Fire("BAG_UPDATE_DELAYED")
+            Equal(Apply(2), 0)
+            RunTimeouts(); RunTimers()
+            Equal(#state.requests, 3)
+            Equal(Apply(3), 5)
+            Fire("BAG_UPDATE_DELAYED")
+            Equal(Apply(4), 2)
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
+            Equal(Apply(5), 0)
+            RunTimeouts(); RunTimers()
+            Equal(#state.requests, 5)
+            Equal(state.bags[banks.targetBag][20].stackCount, 200)
+            Equal(state.bags[0][1].stackCount, 5)
+            Equal(state.bags[0][2].stackCount, 3)
+            Equal(#Messages("Transferred "), 1)
+            assert(Messages("Transferred ")[1]:find(COUNT .. "2", 1, true))
+            Equal(#Messages("Withdrew "), 2)
+            assert(Messages("Withdrew ")[1]:find(COUNT .. "5", 1, true))
+            assert(Messages("Withdrew ")[2]:find(COUNT .. "3", 1, true))
+            Equal(#Messages("Deposited "), 0)
+        end
+    end },
     { "gold-only hold rules wait for matching player and bank balances", function()
         for _, target in ipairs({ "warband", "guild" }) do
             local Wild, state, Fire, RunTimers, _, Apply, _, _, Messages = NewEnvironment("Bank.lua")
@@ -494,6 +677,19 @@ local tests = {
             RunTimers()
             Equal(#Messages("Deposited 50000 copper"), 1)
         end
+    end },
+    { "unconfirmed gold still stops before later bank rules", function()
+        local Wild, state, _, RunTimers, RunTimeouts, _, _, _, Messages = NewEnvironment("Bank.lua")
+        state.bags[0][1] = Item(2)
+        Wild.db.intents = {
+            { action = "hold", target = "warband", gold = 5 },
+            { action = "deposit", target = "warband", groups = { {} } },
+        }
+        Wild.RunBankIntents()
+        RunTimeouts(); RunTimers()
+        Equal(#state.requests, 1)
+        Equal(#Messages("Deposited "), 0)
+        Equal(#Messages("stopped intent processing"), 1)
     end },
     { "closed banks discard unconfirmed requests and scheduled retries", function()
         local Wild, state, Fire, RunTimers, RunTimeouts, _, _, _, Messages = NewEnvironment("Bank.lua")
