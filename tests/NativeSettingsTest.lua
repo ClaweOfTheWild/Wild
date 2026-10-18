@@ -24,7 +24,7 @@ local function NewEnvironment(saved, noFilterEnum)
     local state = {
         frames = {}, categories = {}, settings = {}, layouts = {}, messages = {},
         updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0,
-        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, combat = false,
+        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, soireeUpdates = 0, combat = false,
     }
     local env = setmetatable({
         WildDB = saved,
@@ -230,10 +230,11 @@ local function NewEnvironment(saved, noFilterEnum)
         CommitFlag = { None = 0 },
     }
     local function Category(parent, name, frame)
-        local category = { name = name, parent = parent, ID = #state.categories + 1 }
+        local category = { name = name, parent = parent, ID = #state.categories + 1, subcategories = {} }
         function category:GetID() return self.ID end
         function category:GetName() return self.name end
         function category:GetParentCategory() return self.parent end
+        function category:GetSubcategories() return self.subcategories end
         function category:SetShouldSortAlphabetically() end
         local layout = { frame = frame, initializers = {} }
         function layout:AddInitializer(initializer)
@@ -244,6 +245,7 @@ local function NewEnvironment(saved, noFilterEnum)
         function layout:GetInitializers() return self.initializers end
         function layout:IsVerticalLayout() return not self.frame end
         category.layout = layout
+        if parent then parent.subcategories[#parent.subcategories + 1] = category end
         state.categories[#state.categories + 1] = category
         state.layouts[name] = layout
         return category, layout
@@ -373,6 +375,8 @@ local function NewEnvironment(saved, noFilterEnum)
     Wild.UpdateSpeedIndicator = function() state.speedUpdates = state.speedUpdates + 1 end
     Wild.UpdateScreenCenterCircle = function() state.circleUpdates = state.circleUpdates + 1 end
     Wild.UpdateCastHistory = function() state.castUpdates = state.castUpdates + 1 end
+    Wild.UpdateSoireeAdvisor = function() state.soireeUpdates = state.soireeUpdates + 1 end
+    Wild.ShowSoireeAdvisor = function() state.soireeShows = (state.soireeShows or 0) + 1 end
     Wild.UpdateDialogKey = function() end
     Wild.CreateSettingsCanvas = function(name, namespace)
         state.creates[name] = (state.creates[name] or 0) + 1
@@ -445,8 +449,11 @@ local tests = {
     { "registers both native list and lazy canvas pages once without changing saved values", function()
         local Wild, state, _, _, Fire = NewEnvironment({ speed = { enabled = false } })
         Equal(state.root.name, "Wild")
-        Equal(#state.categories, 23)
-        for _, page in ipairs({ "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key" }) do
+        Equal(#state.categories, 25)
+        for _, page in ipairs({
+            "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key",
+            "Events", "Darkmoon Faire", "Saltheril's Soiree",
+        }) do
             Equal(state.layouts[page].frame, nil, page .. " uses standard controls")
         end
         for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply" }) do
@@ -456,7 +463,7 @@ local tests = {
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        Equal(#state.categories, 23)
+        Equal(#state.categories, 25)
         Equal(state.speedUpdates, 0)
         Equal(state.circleUpdates, 0)
     end },
@@ -474,7 +481,7 @@ local tests = {
         state.root = nil
         state.settings = {}
         loader.scripts.OnEvent(loader, "PLAYER_LOGIN")
-        Equal(#state.categories, originalCount + 23)
+        Equal(#state.categories, originalCount + 25)
         Equal(loader.events.PLAYER_LOGIN, nil)
     end },
     { "native feature controls and slash commands share saved settings and update functions", function()
@@ -486,6 +493,103 @@ local tests = {
         Equal(Setting("speed.enabled"):GetValue(), false)
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
+    end },
+    { "Soiree native controls slash commands and generic setters share the opt-in setting", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        Equal(Setting("soiree.enabled"):GetDefaultValue(), false)
+        Setting("soiree.enabled"):SetValue(true)
+        Equal(Wild.IsFeatureEnabled("soiree"), true)
+        Equal(state.soireeUpdates, 1)
+        Wild.HandleSlashCommand("soiree off")
+        Equal(Setting("soiree.enabled"):GetValue(), false)
+        Equal(state.soireeUpdates, 2)
+        Wild.SetSetting("soiree.enabled", true)
+        Equal(Setting("soiree.enabled"):GetValue(), true)
+        Equal(state.soireeUpdates, 3)
+        Setting("soiree.enabled"):SetValueToDefault()
+        Equal(Wild.IsFeatureEnabled("soiree"), false)
+        Equal(state.soireeUpdates, 4)
+        for _, initializer in ipairs(state.layouts["Saltheril's Soiree"].initializers) do
+            if initializer.data.kind == "Button" then initializer.data.buttonClick() end
+        end
+        Equal(state.soireeShows, 1)
+    end },
+    { "world-event helper pages are grouped below Events without changing saved configuration", function()
+        local Wild, state, _, Setting = NewEnvironment({
+            darkmoonFaire = { showProfessionHelper = true }, soiree = { enabled = true },
+        })
+        local darkmoon = Setting("darkmoonFaire.showProfessionHelper").category
+        local soiree = Setting("soiree.enabled").category
+        local events = darkmoon:GetParentCategory()
+        Equal(events:GetName(), "Events")
+        Equal(events:GetParentCategory(), state.root)
+        Equal(soiree:GetParentCategory(), events)
+        Equal(darkmoon:GetName(), "Darkmoon Faire")
+        Equal(soiree:GetName(), "Saltheril's Soiree")
+        Equal(#events:GetSubcategories(), 2)
+        for _, category in ipairs(state.root:GetSubcategories()) do
+            assert(category ~= darkmoon and category ~= soiree, "Event helpers must not remain top-level pages")
+        end
+        Equal(Wild.db.darkmoonFaire.showProfessionHelper, true)
+        Equal(Wild.db.soiree.enabled, true)
+        Equal(state.soireeUpdates, 0, "Registering the group must not toggle a helper")
+    end },
+    { "Events offers native navigation to each event without toggling helpers or losing pending settings", function()
+        local Wild, state = NewEnvironment()
+        Equal(Wild.OpenNativeSettings("Events"), true)
+        Equal(state.selected:GetName(), "Events")
+        state.pending = "unapplied game setting"
+        local pages = {}
+        for _, initializer in ipairs(state.layouts.Events.initializers) do
+            if initializer.data.kind == "Button" then
+                initializer.data.buttonClick()
+                Equal(state.selected:GetName(), initializer.data.name)
+                Equal(state.selected:GetParentCategory():GetName(), "Events")
+                pages[state.selected:GetName()] = true
+                Equal(state.opens, 1)
+                Equal(state.pending, "unapplied game setting")
+            end
+        end
+        Equal(pages["Darkmoon Faire"], true)
+        Equal(pages["Saltheril's Soiree"], true)
+        Equal(Wild.db.darkmoonFaire.showProfessionHelper, false)
+        Equal(Wild.db.soiree.enabled, false)
+    end },
+    { "event page names and legacy short navigation work through slash commands and public APIs", function()
+        local Wild, state = NewEnvironment()
+        Wild.HandleSlashCommand("native events")
+        Equal(state.selected:GetName(), "Events")
+        Wild.HandleSlashCommand("native darkmoon faire")
+        Equal(state.selected:GetName(), "Darkmoon Faire")
+        Equal(state.selected:GetParentCategory():GetName(), "Events")
+        Wild.HandleSlashCommand("native soiree")
+        local soiree = state.selected
+        Equal(soiree:GetName(), "Saltheril's Soiree")
+        Equal(soiree:GetParentCategory():GetName(), "Events")
+        Equal(Wild.OpenNativeSettings("Soiree"), true)
+        Equal(state.selected, soiree)
+        Equal(Wild.OpenSettings("sAlThErIl'S sOiReE"), true)
+        Equal(state.selected, soiree)
+        Equal(Wild.ToggleSettings("Darkmoon Faire"), true)
+        Equal(state.selected:GetParentCategory():GetName(), "Events")
+        Equal(state.opens, 1)
+    end },
+    { "nested event controls and actions keep event search tags and Wild settings visibility", function()
+        local Wild, state, env = NewEnvironment()
+        for _, page in ipairs({ "Darkmoon Faire", "Saltheril's Soiree" }) do
+            for _, initializer in ipairs(state.layouts[page].initializers) do
+                if initializer.data.kind == "Checkbox" or initializer.data.kind == "Button" then
+                    local tags = {}
+                    for _, tag in ipairs(initializer.tags) do tags[tag] = true end
+                    Equal(tags.Events, true, page .. " is searchable as an event")
+                    Equal(tags[page], true, page .. " keeps its event name in search")
+                end
+            end
+            Equal(Wild.OpenNativeSettings(page), true)
+            Equal(Wild.settingsVisible, true)
+        end
+        env.SettingsPanel:Close()
+        Equal(Wild.settingsVisible, false)
     end },
     { "defaults come from Core and cannot be mutated through the UI", function()
         local Wild, _, _, Setting = NewEnvironment()

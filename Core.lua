@@ -127,6 +127,9 @@ local defaults = {
     darkmoonFaire = {
         showProfessionHelper = false, -- show a shopping list when entering a DMF staging area
     },
+    soiree = {
+        enabled = false,
+    },
     durability = {
         showEquipped = false,
         showEquippedTotal = false,
@@ -687,6 +690,7 @@ local FEATURES = {
     durabilitybags   = { key = "durability.showBags", onToggle = function() Wild.UpdateDurabilityOverlays() end },
     speed            = { key = "speed.enabled", onToggle = function() Wild.UpdateSpeedIndicator() end },
     dialog           = { key = "dialogKey.enabled", onToggle = function() Wild.UpdateDialogKey() end },
+    soiree           = { key = "soiree.enabled", onToggle = function() Wild.UpdateSoireeAdvisor() end },
 }
 
 Wild.FEATURES = FEATURES
@@ -783,6 +787,7 @@ function Wild.SetSetting(key, value, source)
     end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+    if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     Wild.NotifySettingsChanged(key, source)
 end
 
@@ -794,6 +799,7 @@ function Wild.ResetSettings()
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
     if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
+    if Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
     Wild.NotifySettingsChanged()
     print("|cff00ccffWild:|r All settings reset to defaults.")
