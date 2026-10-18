@@ -79,6 +79,7 @@ To sell equipment whose upgrade ceiling is below your currently equipped gear, c
 1. **Pre-load**: On `BANKFRAME_OPENED` / `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, request item data for all bank slots via `C_Item.RequestLoadItemDataByID`. Listen for `ITEM_DATA_LOAD_RESULT` for each item. Once all arrive (or a 3s safety timeout), proceed.
 2. **Queue Build**: Collect all enabled, valid, actor-matching intents whose target bank type is accessible. Order matches `Wild.db.intents` (top to bottom in Settings UI).
 3. **Transfer Two-Phase**: Transfer actions (source bank → target bank) execute as withdraw → `BAG_UPDATE_DELAYED` → deposit → `BAG_UPDATE_DELAYED` → retry. Deposit only confirmed withdrawn quantities, and retry a partial deposit before withdrawing more. Both phases are event-chained.
+4. **Blocked items**: Full destinations do not end the bank round. Try existing partial stacks even when no slots are empty. After the confirmation timeout, warn and advance past a stalled intent only when observed item changes are confirmed, gold is settled, and the cursor is empty. Unmatched source removal or destination receipt still stops the queue. Transfers report confirmed withdrawals left in player bags separately from completed transfers.
 
 ### Vendor-Specific Behaviour
 
