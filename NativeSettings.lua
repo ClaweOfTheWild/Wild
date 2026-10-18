@@ -78,6 +78,11 @@ end
 local function ConfigureInitializer(initializer, category, key, parent)
     ownedInitializers[initializer] = true
     initializer:AddSearchTags("Wild", category:GetName(), key)
+    local ancestor = category:GetParentCategory()
+    while ancestor and ancestor ~= rootCategory do
+        initializer:AddSearchTags(ancestor:GetName())
+        ancestor = ancestor:GetParentCategory()
+    end
     if parent then
         initializer:SetParentInitializer(parent)
     end
@@ -196,8 +201,8 @@ local function AddNumber(category, key, name, minimum, maximum, step, tooltip, s
     return initializer, setting
 end
 
-local function AddPage(name)
-    local category, layout = Settings.RegisterVerticalLayoutSubcategory(rootCategory, name)
+local function AddPage(name, parentCategory)
+    local category, layout = Settings.RegisterVerticalLayoutSubcategory(parentCategory or rootCategory, name)
     TrackCategory(category)
     category.layout = layout
     return category, layout
@@ -568,13 +573,44 @@ local function CreateGossipPage()
         "Hold this modifier while interacting with an NPC to bypass gossip automation.")
 end
 
-local function CreateDarkmoonPage()
-    local category, layout = AddPage("Darkmoon Faire")
+local function CreateDarkmoonPage(parentCategory)
+    local category, layout = AddPage("Darkmoon Faire", parentCategory)
     AddCheckbox(category, "darkmoonFaire.showProfessionHelper", "Show profession helper",
         "Show a profession shopping list when entering a Darkmoon Faire staging area.")
-    AddButton(layout, "Profession shopping list", "Show Shopping List Now", function()
+    local action = AddButton(layout, "Profession shopping list", "Show Shopping List Now", function()
         Wild.ShowDarkmoonHelper()
     end, "Open the profession shopping list regardless of your location or the automatic helper setting.")
+    ConfigureInitializer(action, category, "darkmoonFaire")
+    return category
+end
+
+local function CreateSoireePage(parentCategory)
+    local category, layout = AddPage("Saltheril's Soiree", parentCategory)
+    categories["soiree"] = category
+    AddCheckbox(category, "soiree.enabled", "Show Soiree reputation advisor",
+        "Open advisory help with Saltheril's weekly invitation selector. Enter all four current previews " ..
+        "to compare gains, losses, Fortify, and Favor allocation toward Luminary.", "soiree")
+    AddHeader(layout, "Advice only",
+        "The advisor reads live reputation but requires manual invitation effects. It never selects an " ..
+        "invitation or spends Favors. Projections use base quest rewards, not future offers or reputation bonuses.")
+    local action = AddButton(layout, "Current invitation selector", "Show Advisor Now", function()
+        Wild.ShowSoireeAdvisor()
+    end, "Open the advisor while Saltheril's four-invitation selector is open, even if automatic display is off.")
+    ConfigureInitializer(action, category, "soiree")
+    return category
+end
+
+local function CreateEventsPage()
+    local category, layout = AddPage("Events")
+    AddHeader(layout, "World event helpers", "Choose a recurring world event to configure its helpers.")
+    local eventPages = { CreateDarkmoonPage(category), CreateSoireePage(category) }
+    for _, eventCategory in ipairs(eventPages) do
+        local name = eventCategory:GetName()
+        local action = AddButton(layout, name, "Open Settings", function()
+            Wild.OpenNativeSettings(name)
+        end, "Configure helpers for " .. name .. ".")
+        action:AddSearchTags("Events", name)
+    end
 end
 
 local function CreateTooltipPage()
@@ -698,7 +734,7 @@ local function Initialize()
     CreateQuestsPage()
     CreateDialogKeyPage()
     CreateGossipPage()
-    CreateDarkmoonPage()
+    CreateEventsPage()
     CreateTooltipPage()
     AddCanvas("Dungeon Bar", "dungeonBar", {
         "dungeonBar.enabled", "dungeonBar.autoShowInInstance", "dungeonBar.showReadyCheck",
