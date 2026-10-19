@@ -5384,6 +5384,63 @@ local function CreateSpeedTab()
     return panel
 end
 
+local function CreateContainerListTab()
+    local panel = CreateFrame("Frame")
+    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT")
+    scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+    local sc = CreateFrame("Frame")
+    sc:SetWidth(520)
+    sc:SetHeight(300)
+    scrollFrame:SetScrollChild(sc)
+    HookScrollChildWidth(scrollFrame, sc)
+
+    local title = sc:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Container List")
+    local description = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    description:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    description:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
+    description:SetJustifyH("LEFT")
+    description:SetText("Checked containers open automatically when safe. Unchecked containers are kept. " ..
+        "Choices are saved by item ID and do not change when the discovery default changes.")
+    local add = CreateFrame("Button", nil, sc, "UIPanelButtonTemplate")
+    add:SetSize(150, 24)
+    add:SetPoint("TOPLEFT", description, "BOTTOMLEFT", 0, -12)
+    add:SetText("Add by Item ID")
+    add:SetScript("OnClick", function() StaticPopup_Show("WILD_CONTAINER_ID") end)
+    local empty = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    empty:SetPoint("TOPLEFT", add, "BOTTOMLEFT", 0, -16)
+    empty:SetText("No containers saved. Found containers are added automatically, even when auto-open is off.")
+    local rows = {}
+    panel:SetScript("OnShow", function()
+        for _, row in pairs(rows) do row:Hide() end
+        local items = Wild.GetContainers()
+        empty:SetShown(#items == 0)
+        for index, item in ipairs(items) do
+            local row = rows[item.itemID]
+            if not row then
+                row = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
+                row.itemID = item.itemID
+                row.tooltipText = "Auto-open this container when safe. Uncheck to keep it unopened."
+                row:SetScript("OnClick", function(self)
+                    local enabled = self:GetChecked() == true
+                    Wild.SetContainerAutoOpen(self.itemID, enabled)
+                    PlaySound(enabled and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+                end)
+                rows[item.itemID] = row
+            end
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", add, "BOTTOMLEFT", -2, -12 - (index - 1) * 30)
+            row.Text:SetText(item.name .. " (ID " .. item.itemID .. ")")
+            row:SetChecked(item.autoOpen)
+            row:Show()
+        end
+        sc:SetHeight(math.max(300, 180 + #items * 30))
+    end)
+    return panel
+end
+
 local PAGE_FACTORIES = {
     ["LFG"] = CreateLFGTab,
     ["Center Circle"] = CreateCircleTab,
@@ -5397,6 +5454,7 @@ local PAGE_FACTORIES = {
     ["Crafting Orders"] = CreateCraftingOrdersTab,
     ["Mail"] = CreateMailTab,
     ["Loot"] = CreateLootTab,
+    ["Container List"] = CreateContainerListTab,
     ["Quests"] = CreateQuestsTab,
     ["Dialog Key"] = CreateDialogKeyTab,
     ["Gossip"] = CreateGossipTab,

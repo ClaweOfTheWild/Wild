@@ -125,6 +125,11 @@ subcommands.help = function()
     Print("/wild repair guild on|off — Toggle guild funds")
     Print("/wild loot on|off — Toggle quick loot")
     Print("/wild loot modifier shift|ctrl|alt|none — Set auto-loot modifier key")
+    Print("/wild containers - Open container settings")
+    Print("/wild containers default on|off - Set auto-open for newly discovered containers")
+    Print("/wild containers add <itemID> [on|off] - Add an ID; disabled unless on is specified")
+    Print("/wild containers <itemID> on|off - Change a container's saved opening choice")
+    Print("/wild containers list|scan - List saved choices or rescan and retry containers")
     print(" ")
     Print("/wild bank on|off — Toggle warband bank")
     Print("/wild bank character on|off — Toggle character bank")
@@ -200,6 +205,7 @@ subcommands.status = function()
         local name = FEATURE_NAMES[feature] or feature
         Print(name .. ": " .. StatusText(Wild.IsFeatureEnabled(feature)))
     end
+    Print("New container auto-open: " .. StatusText(Wild.GetSetting("containers.autoOpenNew")))
 end
 
 -- /wild reset
@@ -210,6 +216,48 @@ end
 subcommands.native = function(args)
     local page = #args > 0 and table.concat(args, " ") or nil
     Wild.OpenSettings(page)
+end
+
+subcommands.containers = function(args)
+    if #args == 0 then Wild.OpenSettings("Containers"); return end
+    local sub = args[1]:lower()
+    if sub == "default" and #args <= 2 then
+        if #args == 1 then
+            Print("New container auto-open: " .. StatusText(Wild.GetSetting("containers.autoOpenNew")))
+            return
+        end
+        local enabled = OnOff(args[2])
+        if enabled ~= nil then
+            Wild.SetSetting("containers.autoOpenNew", enabled)
+            Print("New container auto-open " .. StatusText(enabled) .. ". Existing choices are unchanged.")
+            return
+        end
+    elseif sub == "list" and #args == 1 then
+        local items = Wild.GetContainers()
+        if #items == 0 then Print("No containers saved yet."); return end
+        for _, item in ipairs(items) do
+            Print((item.link or item.name) .. " (ID " .. item.itemID .. "): auto-open " .. StatusText(item.autoOpen))
+        end
+        return
+    elseif sub == "scan" and #args == 1 then
+        Wild.ScanContainers()
+        return
+    else
+        local itemID, enabled
+        if sub == "add" and (#args == 2 or #args == 3) then
+            itemID = args[2]
+            if #args == 2 then enabled = false else enabled = OnOff(args[3]) end
+        elseif #args == 2 then
+            itemID, enabled = args[1], OnOff(args[2])
+        end
+        if itemID and enabled ~= nil then
+            if Wild.SetContainerAutoOpen(itemID, enabled) then
+                Print("Container ID " .. tonumber(itemID) .. ": auto-open " .. StatusText(enabled))
+            end
+            return
+        end
+    end
+    PrintWarn("Usage: /wild containers [default on|off|add <itemID> [on|off]|<itemID> on|off|list|scan]")
 end
 
 -- /wild speed [on|off]

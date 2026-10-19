@@ -29,6 +29,15 @@ Bank scanning covers:
 - **Warband bank**: AccountBankTab_1–5
 - **Guild bank**: all viewable tabs × 98 slots
 
+### Bag Container Opening
+
+- `Containers.lua` discovers player-bag items with `C_Container.GetContainerItemInfo(...).hasLoot`. Discovery continues when opening is off and respects `Wild.GetPlayerBags()`.
+- `Wild.db.containers.autoOpenNew` defaults to `false`. `Wild.db.containers.items[itemID]` stores each boolean choice, including explicit `false` entries. Test for `nil` when discovering an ID; changing the discovery default must never overwrite an existing choice.
+- Manual ID additions start disabled independently of the discovery default. `Wild.SetContainerAutoOpen(itemID, enabled)` validates, saves, notifies, and applies per-ID changes. `Wild.GetContainers()` returns sorted display records, and `Wild.ScanContainers()` rescans and permits retries after an opening timeout.
+- Opening uses `C_Container.UseContainerItem` only for enabled loot containers, one at a time, after revalidating the bag slot. It waits for confirmed consumption, item data, locks, cooldowns, loot closure, and safe player/context state. Never let contextual right-click behavior sell, mail, trade, or bank a container instead.
+- Reuse the shared item-action evidence helpers, including physical bags excluded from selection. Chain through bag, item-data, loot, interaction, and player-state events; timers are confirmation safety timeouts only. Preserve synchronous completion events without reentrant item uses.
+- Native **Containers** contains the discovery default and manual ID dialog. Its **Container List** child canvas is lazy, scrollable, and preserves per-ID choices when native Defaults are used. See the [container guide](../README.md#auto-open-bag-containers) for commands and API contracts.
+
 ## Core Design Principles
 
 1. **Every feature must be controllable via slash commands** (`/wild <subcommand>`). The UI is a convenience layer, not the only interface.
@@ -129,6 +138,11 @@ Primary command: `/wild`
 /wild repair on|off         — Toggle auto-repair
 /wild repair guild on|off   — Toggle guild funds
 /wild loot on|off           — Toggle quick loot
+/wild containers            — Open container settings
+/wild containers default on|off — Set the default for newly discovered container IDs
+/wild containers add <id> [on|off] — Add an ID; disabled unless on is specified
+/wild containers <id> on|off — Change an ID's saved opening choice
+/wild containers list|scan  — List choices or rescan and retry containers
 /wild lfg on|off            — Toggle LFG quick apply
 /wild dialog on|off         — Toggle manual keyboard confirmation of popups, queues, and delve entry
 /wild dialog key SPACE      — Set a keyboard key (modifier chords such as CTRL-F2 also work)
@@ -163,6 +177,11 @@ Wild.UpdateScreenCenterCircle()
 
 -- Loot
 Wild.SetQuickLoot(enabled)
+
+-- Bag containers (discovery default is off; per-ID choices are independent)
+Wild.SetContainerAutoOpen(itemID, enabled) -- Add or update a boolean choice; returns true/false
+Wild.GetContainers()                     -- Sorted display records, not mutable settings
+Wild.ScanContainers()                    -- Rescan bags and retry timed-out IDs
 
 -- Dialog Key (standard popups, queue/role checks, and delve entry; not NPC gossip or quest windows)
 Wild.SetDialogKey("SPACE")   -- Validates and saves the key; returns true/false

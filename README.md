@@ -14,6 +14,67 @@ for **Darkmoon Faire** and **Saltheril's Soiree**. `/wild native events` opens
 the group. Existing shortcuts such as `/wild native darkmoon faire` and
 `/wild native soiree` still open the event directly.
 
+## Auto-open bag containers
+
+Open **Settings > AddOns > Wild > Containers**, or run `/wild containers`.
+**Auto-open newly discovered containers** is off by default. Wild still
+discovers loot containers in your bags and saves each item ID with auto-open
+disabled. Enable this default to save later discoveries with auto-open enabled
+and open them automatically when safe.
+
+Use **Edit Container List**, or the **Containers > Container List** child page,
+to change each item's checkbox. Checked items open; unchecked items stay
+unopened. Each saved choice applies to that item ID across characters and
+survives reloads. Changing the discovery default never changes existing choices:
+an individually enabled container still opens when the discovery default is off.
+
+**Add by Item ID** saves an ID with auto-open disabled, even if you do not own
+the container yet and the discovery default is on. This lets you configure
+exceptions before receiving an item. Only items the game identifies as loot
+containers in player bags are opened; adding an arbitrary item ID does not make
+Wild use that item.
+
+| Command | Behavior |
+| --- | --- |
+| `/wild containers default on` | Open and enable newly discovered IDs |
+| `/wild containers default off` | Discover new IDs but leave them disabled |
+| `/wild containers add 12345` | Save ID `12345` with auto-open disabled |
+| `/wild containers add 12345 on` | Add or update ID `12345` with auto-open enabled |
+| `/wild containers 12345 on` | Enable opening for that ID |
+| `/wild containers 12345 off` | Disable opening for that ID |
+| `/wild containers list` | Print saved IDs and their opening choices |
+| `/wild containers scan` | Rescan bags and retry IDs stopped by a safety timeout |
+
+Opening waits during combat, casting, channeling, other looting, NPC
+interactions, and item-transfer windows such as a merchant, bank, mailbox, or
+trade. Locked items and active cooldowns also wait. Containers open one at a
+time, with bag changes confirming consumption before another open is requested.
+Wild does not bypass game confirmations, unlock locked containers, or force
+looting when WoW's auto-loot is off. If an open cannot be confirmed within five
+seconds, Wild warns and skips that ID until a manual scan or per-item setting
+change. An open loot window can remain under your control beyond this timeout.
+The shared **Include reagent bag** setting applies to discovery and item selection.
+
+The native page's Defaults restore the discovery default without clearing the
+list or changing per-item choices. The explicit `/wild reset` clears the list
+along with Wild's other settings; later bag scans rediscover items disabled.
+
+### Container Lua API
+
+| Function | Contract |
+| --- | --- |
+| `Wild.SetContainerAutoOpen(itemID, enabled)` | Add or update an ID with a boolean choice; apply it immediately when safe; return `true`, or warn and return `false` for invalid input |
+| `Wild.GetContainers()` | Return a new array sorted by item ID, with `itemID`, `name`, `link` when available, and `autoOpen` fields |
+| `Wild.ScanContainers()` | Rescan and allow retries after a safety timeout; return the number of newly discovered IDs, or warn and return `false` before settings load |
+| `Wild.SetSetting("containers.autoOpenNew", enabled)` | Change the default for future discoveries only |
+| `Wild.GetSetting("containers.autoOpenNew")` | Read the discovery default |
+
+For example, `Wild.SetContainerAutoOpen(12345, false)` saves an exception in
+advance. `Wild.GetSetting("containers.items.12345")` reads its boolean choice;
+`Wild.SetSetting("containers.items.12345", true)` uses the same per-ID setter.
+IDs must be whole numbers from `1` to `2147483647`. Names load asynchronously;
+an unknown name is displayed as its item ID without changing the saved choice.
+
 ## Plan a Saltheril's Soiree week
 
 The opt-in Soiree advisor suggests an invitation and Favor allocation toward
@@ -128,17 +189,20 @@ Run the focused specifications with a Lua 5.1 interpreter from the repository
 root. They do not need a running WoW client or addon dependencies.
 
 ```powershell
+lua tests\ContainersTest.lua
 lua tests\SoireePlannerTest.lua
 lua tests\SoireeAdvisorTest.lua
 lua tests\NativeSettingsTest.lua
 ```
 
-The fixtures cover the supported API shapes and the manual fallback. A live
-client smoke check should confirm selector detection and layout; mock tests
-do not establish that the selector supplies complete structured reward data.
+The fixtures cover container discovery and event sequencing, plus the Soiree API
+shapes and manual fallback. A live client smoke check should confirm container
+opening, selector detection, and layout; mock tests do not establish that the
+selector supplies complete structured reward data.
 
 ## Sources
 
+- [Pinned Retail bag-container API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua)
 - [Pinned Retail Player Choice API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/PlayerChoiceDocumentation.lua)
 - [Pinned Retail friendship reputation API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/GossipInfoDocumentation.lua)
 - [Lord Saltheril, NPC 240832](https://www.wowhead.com/npc=240832/lord-saltheril)

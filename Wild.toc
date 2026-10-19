@@ -30,6 +30,7 @@ Gossip.lua
 DarkmoonFaire.lua
 Soiree.lua
 Loot.lua
+Containers.lua
 Tooltip.lua
 VolumeControl.lua
 Durability.lua

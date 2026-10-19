@@ -44,6 +44,8 @@ local function NewEnvironment(saved, noFilterEnum)
             GetItemInfo = function(id) return "Item " .. tostring(id) end,
             GetItemClassInfo = function(id) return "Class " .. id end,
             GetItemSubClassInfo = function() end,
+            IsItemDataCachedByID = function() return true end,
+            RequestLoadItemDataByID = function() end,
         },
         C_Timer = { After = function() end },
         Enum = { AuctionHouseFilter = {
@@ -391,6 +393,7 @@ local function NewEnvironment(saved, noFilterEnum)
         { key = "shift", label = "Shift Held" }, { key = "ctrl", label = "Ctrl Held" },
         { key = "alt", label = "Alt Held" }, { key = "never", label = "Never" },
     }
+    Load("Containers.lua")
     Load("SlashCommands.lua")
     Load("NativeSettings.lua")
     Fire("ADDON_LOADED", "Wild")
@@ -449,21 +452,21 @@ local tests = {
     { "registers both native list and lazy canvas pages once without changing saved values", function()
         local Wild, state, _, _, Fire = NewEnvironment({ speed = { enabled = false } })
         Equal(state.root.name, "Wild")
-        Equal(#state.categories, 25)
+        Equal(#state.categories, 27)
         for _, page in ipairs({
             "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key",
-            "Events", "Darkmoon Faire", "Saltheril's Soiree",
+            "Events", "Darkmoon Faire", "Saltheril's Soiree", "Containers",
         }) do
             Equal(state.layouts[page].frame, nil, page .. " uses standard controls")
         end
-        for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply" }) do
+        for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply", "Container List" }) do
             assert(state.layouts[page].frame, page .. " is an independent canvas")
             Equal(state.creates[page], nil)
         end
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        Equal(#state.categories, 25)
+        Equal(#state.categories, 27)
         Equal(state.speedUpdates, 0)
         Equal(state.circleUpdates, 0)
     end },
@@ -481,7 +484,7 @@ local tests = {
         state.root = nil
         state.settings = {}
         loader.scripts.OnEvent(loader, "PLAYER_LOGIN")
-        Equal(#state.categories, originalCount + 25)
+        Equal(#state.categories, originalCount + 27)
         Equal(loader.events.PLAYER_LOGIN, nil)
     end },
     { "native feature controls and slash commands share saved settings and update functions", function()
@@ -493,6 +496,91 @@ local tests = {
         Equal(Setting("speed.enabled"):GetValue(), false)
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
+    end },
+    { "container controls share persistent defaults and independent per-ID choices", function()
+        local Wild, state, _, Setting, _, Load = NewEnvironment({
+            containers = { items = { [100] = false, [200] = true } },
+        })
+        Load("Settings.lua")
+        Equal(state.layouts.Containers.frame, nil)
+        Equal(Setting("containers.autoOpenNew"):GetDefaultValue(), false)
+        Setting("containers.autoOpenNew"):SetValue(true)
+        Equal(Wild.db.containers.autoOpenNew, true)
+        Wild.OpenNativeSettings("Container List")
+        local panel = state.layouts["Container List"].frame.content
+        local function Checkbox(itemID)
+            return assert(FindChild(state, panel, function(frame)
+                return frame.kind == "CheckButton" and frame.itemID == itemID
+            end))
+        end
+        Equal(state.selected:GetParentCategory():GetName(), "Containers")
+        Equal(Checkbox(100):GetChecked(), false)
+        Equal(Checkbox(200):GetChecked(), true)
+        Checkbox(100):SetChecked(true)
+        Checkbox(100):Click()
+        Equal(Wild.db.containers.items[100], true)
+        Wild.HandleSlashCommand("containers 200 off")
+        Equal(Checkbox(200):GetChecked(), false)
+        Wild.HandleSlashCommand("containers add 300")
+        Equal(Checkbox(300):GetChecked(), false, "A visible container list includes manually added IDs")
+        local saved = Copy(Wild.db)
+        panel:OnRefresh()
+        Same(Wild.db, saved)
+    end },
+    { "the native container ID dialog adds disabled exceptions even when the default opens", function()
+        local Wild, state, env = NewEnvironment({ containers = { autoOpenNew = true } })
+        local action
+        for _, initializer in ipairs(state.layouts.Containers.initializers) do
+            if initializer.data.buttonText == "Add by Item ID" then action = initializer.data end
+        end
+        assert(action, "The native container page provides manual ID entry")
+        action.buttonClick()
+        state.popup.editBox:SetText("100")
+        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup), false)
+        Equal(Wild.db.containers.items[100], false)
+        action.buttonClick()
+        state.popup.editBox:SetText("invalid")
+        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup), true)
+        Equal(#Wild.GetContainers(), 1)
+        assert(state.messages[#state.messages]:find("ID", 1, true))
+    end },
+    { "container labels refresh loaded names without changing saved choices or focused ID input", function()
+        local Wild, state, env, _, _, Load = NewEnvironment()
+        Load("Settings.lua")
+        env.C_Item.GetItemInfo = function() end
+        Wild.SetContainerAutoOpen(100, false)
+        Wild.OpenNativeSettings("Containers")
+        local action
+        for _, initializer in ipairs(state.layouts.Containers.initializers) do
+            if initializer.data.buttonText == "Add by Item ID" then action = initializer.data end
+        end
+        action.buttonClick()
+        state.popup.editBox:SetText("234")
+        state.popup.editBox:SetFocus()
+        Wild.OpenNativeSettings("Container List")
+        local panel = state.layouts["Container List"].frame.content
+        local checkbox = assert(FindChild(state, panel, function(frame) return frame.itemID == 100 end))
+        env.C_Item.GetItemInfo = function() return "Loaded container" end
+        local saved = Copy(Wild.db)
+        Wild.NotifySettingsChanged("containers.items")
+        assert(checkbox.Text:GetText():find("Loaded container", 1, true))
+        Equal(state.popup.editBox:GetText(), "234")
+        Equal(state.popup.editBox:HasFocus(), true)
+        Same(Wild.db, saved)
+    end },
+    { "native container defaults preserve discovered IDs and never apply the opening default retroactively", function()
+        local Wild, _, _, Setting = NewEnvironment({
+            containers = { autoOpenNew = true, items = { [100] = true, [200] = false } },
+        })
+        Setting("containers.autoOpenNew"):SetValueToDefault()
+        Equal(Wild.db.containers.autoOpenNew, false)
+        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.db.containers.items[200], false)
+        Equal(#Wild.GetContainers(), 2)
+        Wild.ResetSettings()
+        Equal(#Wild.GetContainers(), 0)
+        Wild.SetContainerAutoOpen(100, false)
+        Equal(Wild.db.containers.items[100], false)
     end },
     { "Soiree native controls slash commands and generic setters share the opt-in setting", function()
         local Wild, state, _, Setting = NewEnvironment()
@@ -1041,13 +1129,13 @@ local tests = {
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         local editors = 0
-        for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply" }) do
+        for _, page in ipairs({ "Intent Rules", "Actors", "Character", "Dungeon Bar", "Auto-Reply", "Container List" }) do
             Wild.OpenNativeSettings(page)
             local panel = assert(state.layouts[page].frame.content)
             panel:OnRefresh()
             editors = editors + 1
         end
-        Equal(editors, 5)
+        Equal(editors, 6)
         local dropdowns = 0
         for _, frame in ipairs(state.frames) do
             if frame.menuGenerator then

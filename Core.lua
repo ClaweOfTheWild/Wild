@@ -45,6 +45,10 @@ local defaults = {
     lootQuickLoot = true,
     lootAutoLoot = true,
     lootAutoLootModifier = "SHIFT",
+    containers = {
+        autoOpenNew = false,
+        items = {},
+    },
     reputationCollapseMode = "off",
     reputationCollapsedHeaders = {},
     currencyCollapseMode = "off",
@@ -785,10 +789,17 @@ function Wild.SetSetting(key, value, source)
     if key == "dialogKey.key" and Wild.SetDialogKey then
         return Wild.SetDialogKey(value, source)
     end
+    local containerID = key:match("^containers%.items%.(%d+)$")
+    if containerID and Wild.SetContainerAutoOpen then
+        return Wild.SetContainerAutoOpen(containerID, value, source)
+    end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     Wild.NotifySettingsChanged(key, source)
+    if (key == "containers" or key == "containers.items" or key == "includeReagentBag") and Wild.ScanContainers then
+        Wild.ScanContainers()
+    end
 end
 
 function Wild.ResetSettings()

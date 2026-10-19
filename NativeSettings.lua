@@ -161,6 +161,33 @@ StaticPopupDialogs.WILD_NATIVE_NUMBER = {
     end,
 }
 
+local function ApplyContainerID(popup)
+    return Wild.SetContainerAutoOpen(popup:GetEditBox():GetText(), false)
+end
+
+StaticPopupDialogs.WILD_CONTAINER_ID = {
+    text = "Add a container item ID. Auto-open starts disabled for this ID.",
+    button1 = ADD or "Add",
+    button2 = CANCEL,
+    hasEditBox = true,
+    editBoxWidth = 180,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    OnShow = function(self)
+        local editBox = self:GetEditBox()
+        editBox:SetNumeric(true)
+        editBox:SetMaxLetters(10)
+        editBox:SetText("")
+        editBox:SetFocus()
+    end,
+    OnAccept = function(self) return not ApplyContainerID(self) end,
+    EditBoxOnEnterPressed = function(self)
+        local popup = self:GetParent()
+        if ApplyContainerID(popup) then popup:Hide() end
+    end,
+}
+
 local function AddNumber(category, key, name, minimum, maximum, step, tooltip, setter, update, parent, config)
     config = config or {}
     local inputMaximum = maximum
@@ -208,10 +235,10 @@ local function AddPage(name, parentCategory)
     return category, layout
 end
 
-local function AddCanvas(name, prefix, defaultKeys, update)
+local function AddCanvas(name, prefix, defaultKeys, update, parentCategory)
     local frame = CreateFrame("Frame")
     frame:Hide()
-    local category = Settings.RegisterCanvasLayoutSubcategory(rootCategory, frame, name)
+    local category = Settings.RegisterCanvasLayoutSubcategory(parentCategory or rootCategory, frame, name)
     TrackCategory(category)
     canvases[#canvases + 1] = { frame = frame, prefix = prefix }
     local defaultsButton
@@ -462,6 +489,21 @@ local function CreateLootPage()
     }, "Hold this modifier to invert WoW's normal auto-loot behavior.", Wild.SetAutoLootModifier)
     AddCheckbox(category, "lootQuickLoot", "Enable Quick Loot",
         "Speed up looting by taking eligible loot slots immediately.", "loot")
+end
+
+local function CreateContainersPage()
+    local category, layout = AddPage("Containers")
+    AddCheckbox(category, "containers.autoOpenNew", "Auto-open newly discovered containers",
+        "Save newly discovered bag containers with auto-open enabled and open them when safe. " ..
+        "Off by default: containers are still added to the list, but remain unopened. " ..
+        "Changing this default never changes saved per-item choices.")
+    AddButton(layout, "Configure a container in advance", "Add by Item ID", function()
+        StaticPopup_Show("WILD_CONTAINER_ID")
+    end, "Add a container ID with auto-open disabled, even before you receive the item.")
+    AddButton(layout, "Known containers", "Edit Container List", function()
+        Wild.OpenNativeSettings("Container List")
+    end, "Enable or disable auto-open for each discovered or manually added container ID.")
+    AddCanvas("Container List", "containers.items", nil, nil, category)
 end
 
 local PAUSE_KEYS = { { 1, NONE_KEY }, { 2, ALT_KEY }, { 3, CTRL_KEY }, { 4, SHIFT_KEY } }
@@ -731,6 +773,7 @@ local function Initialize()
     CreateFiltersPage("Crafting Orders", "craftingOrders", "craftingorders")
     CreateMailPage()
     CreateLootPage()
+    CreateContainersPage()
     CreateQuestsPage()
     CreateDialogKeyPage()
     CreateGossipPage()
