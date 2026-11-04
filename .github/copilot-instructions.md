@@ -47,6 +47,10 @@ Bank scanning covers:
 5. **Event-driven over time-based.** Prefer WoW API events (`BAG_UPDATE_DELAYED`, `ITEM_DATA_LOAD_RESULT`, `MAIL_SEND_SUCCESS`, etc.) over `C_Timer.After`. Timers only for safety timeouts or inherently time-based logic (debounce). The intent processing queue, item pre-loading, and multi-phase operations (transfers) must all chain via events.
 6. **Reagent bag always included by default.** Use `Wild.GetPlayerBags()` to get the correct bag list.
 
+The [configuration specification](../docs/configuration/spec.md) defines the
+player-facing contract for configuration, command hints, copying, and in-game
+help. Follow that contract when changing these surfaces.
+
 ## Intent / Rule Engine
 
 All automation (bank, vendor, mail, inventory destroy) uses a unified intent system stored in `Wild.db.intents`. Every intent processor follows the **retry-until-done** pattern:

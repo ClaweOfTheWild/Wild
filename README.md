@@ -183,6 +183,11 @@ The plan contains `inviteFactionID`, per-faction `favors`, goal-capped `projecte
 is already Luminary, `complete` is `true`, `inviteFactionID` is absent, and
 offers are not required. Neither function selects anything in the game.
 
+## Product specifications
+
+The [Wild specifications](docs/index.md) define the required behavior and user
+outcomes, including self-explanatory configuration and slash-command coverage.
+
 ## Developer checks
 
 Run the focused specifications with a Lua 5.1 interpreter from the repository
