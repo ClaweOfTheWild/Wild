@@ -20,11 +20,7 @@ Wild.LOCATION_GUILD   = LOCATION_GUILD
 -- Internal helpers
 -- ============================================================
 
-local function GetCharKey()
-    return UnitName("player") .. "-" .. GetRealmName()
-end
-
-Wild.GetCharKey = GetCharKey
+local GetCharKey = Wild.GetCharKey
 
 local function GetGuildKey()
     local guildName = GetGuildInfo("player")
@@ -107,40 +103,11 @@ end
 -- Bank bag indices (computed once at load time)
 -- ============================================================
 
-local CHARACTER_BANK_BAGS = {}
-if Enum.BagIndex.CharacterBankTab then
-    CHARACTER_BANK_BAGS[#CHARACTER_BANK_BAGS + 1] = Enum.BagIndex.CharacterBankTab
-end
-for i = 1, 6 do
-    local key = "CharacterBankTab_" .. i
-    if Enum.BagIndex[key] ~= nil then
-        CHARACTER_BANK_BAGS[#CHARACTER_BANK_BAGS + 1] = Enum.BagIndex[key]
-    end
-end
--- Fallback for pre-Midnight (TWW / older): use Bank + BankBag_1..7
-if #CHARACTER_BANK_BAGS == 0 then
-    if Enum.BagIndex.Bank then
-        CHARACTER_BANK_BAGS[#CHARACTER_BANK_BAGS + 1] = Enum.BagIndex.Bank
-    end
-    for i = 1, 7 do
-        local key = "BankBag_" .. i
-        if Enum.BagIndex[key] ~= nil then
-            CHARACTER_BANK_BAGS[#CHARACTER_BANK_BAGS + 1] = Enum.BagIndex[key]
-        end
-    end
-end
+local CHARACTER_BANK_BAGS = Wild.GetCharacterBankBags()
 
 local REAGENT_BANK_BAG = Enum.BagIndex.Reagentbank
 
-local ACCOUNT_BANK_TABS = {}
-if Enum and Enum.BagIndex then
-    for i = 1, 5 do
-        local key = "AccountBankTab_" .. i
-        if Enum.BagIndex[key] ~= nil then
-            ACCOUNT_BANK_TABS[#ACCOUNT_BANK_TABS + 1] = Enum.BagIndex[key]
-        end
-    end
-end
+local ACCOUNT_BANK_TABS = Wild.GetAccountBankBags()
 
 local GUILD_BANK_SLOTS_PER_TAB = 98
 
@@ -153,7 +120,7 @@ function Wild.SnapshotBags()
     local store = EnsureCharacterStore(charKey)
     if not store then return end
     local allItems = {}
-    local bags = Wild.GetPlayerBags()
+    local bags = Wild.GetPlayerStorageBags()
     for _, bagID in ipairs(bags) do
         local items = ScanContainer(bagID)
         for _, item in ipairs(items) do
@@ -169,6 +136,7 @@ end
 -- ============================================================
 
 function Wild.SnapshotBank()
+    if not C_Bank.CanViewBank(Enum.BankType.Character) then return end
     local charKey = GetCharKey()
     local store = EnsureCharacterStore(charKey)
     if not store then return end
@@ -194,6 +162,7 @@ end
 -- ============================================================
 
 function Wild.SnapshotWarbandBank()
+    if not C_Bank.CanViewBank(Enum.BankType.Account) then return end
     local ds = EnsureDatastore()
     if not ds then return end
     local allItems = {}

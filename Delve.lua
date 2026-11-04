@@ -1,6 +1,8 @@
 -- Wild: Delve auto-select power
 local ADDON_NAME, Wild = ...
 
+if Wild.isForever then return end
+
 -- ============================================================
 -- Auto-select Delve power when a PlayerChoice appears inside
 -- a Delve instance (difficulty ID 208). Picks the first option

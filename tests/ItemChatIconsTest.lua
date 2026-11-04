@@ -29,7 +29,7 @@ local function NewEnvironment(...)
         end,
         Enum = {
             BagIndex = { CharacterBankTab_1 = 6, AccountBankTab_1 = 12 },
-            BankType = { Account = 2 }, PlayerInteractionType = {},
+            BankType = { Character = 0, Account = 2 }, PlayerInteractionType = { GuildBanker = 10 },
             TooltipDataLineType = { SellPrice = 11 },
         },
         BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
@@ -39,6 +39,8 @@ local function NewEnvironment(...)
         GetTime = function() return 10 end,
         date = function() return "2026-01-01 00:00:00" end,
         GetMoneyString = function(amount) return amount .. " copper" end,
+        C_Bank = { CanUseBank = function() return true end },
+        C_PlayerInteractionManager = { IsInteractingWithNpcOfType = function() return true end },
         GetCursorInfo = function()
             if state.cursor then return "item", state.cursor.info.itemID, state.cursor.info.hyperlink end
         end,

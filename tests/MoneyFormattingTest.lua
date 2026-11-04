@@ -19,7 +19,7 @@ local function NewEnvironment()
     }
     local env = setmetatable({
         Enum = {
-            BagIndex = {}, BankType = { Account = 2 }, PlayerInteractionType = {},
+            BagIndex = {}, BankType = { Character = 0, Account = 2 }, PlayerInteractionType = { GuildBanker = 10 },
             TooltipDataLineType = { SellPrice = 11 },
         },
         BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
@@ -41,6 +41,7 @@ local function NewEnvironment()
         IsInGuild = function() return true end,
         CanGuildBankRepair = function() return true end,
         MerchantFrame = { IsShown = function() return true end },
+        C_PlayerInteractionManager = { IsInteractingWithNpcOfType = function() return true end },
         C_Timer = {
             After = function(_, callback) state.timers[#state.timers + 1] = callback end,
             NewTimer = function() return { Cancel = function() end } end,
@@ -76,6 +77,7 @@ local function NewEnvironment()
             return { IsItemDataCached = function() return true end }
         end },
         C_Bank = {
+            CanUseBank = function() return true end,
             DepositMoney = function(_, amount) state.deposited = amount; state.pendingMoney = -amount end,
             WithdrawMoney = function(_, amount) state.withdrawn = amount; state.pendingMoney = amount end,
             FetchDepositedMoney = function() return state.bankMoney end,

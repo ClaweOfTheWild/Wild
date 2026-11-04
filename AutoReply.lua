@@ -1,6 +1,8 @@
 -- Wild: Auto-reply to whispers while in Mythic+ keystones
 local ADDON_NAME, Wild = ...
 
+if Wild.isForever then return end
+
 local recentReplies = {}    -- throttle: sender → timestamp of last auto-reply
 local REPLY_COOLDOWN = 60   -- seconds before re-replying to the same person
 

@@ -27,6 +27,11 @@ local function StatusText(enabled)
     return enabled and "|cff44ff44enabled|r" or "|cffff4444disabled|r"
 end
 
+local function FeatureStatus(feature)
+    if not Wild.IsFeatureAvailable(feature) then return "|cffffaa00not available|r" end
+    return StatusText(Wild.IsFeatureEnabled(feature))
+end
+
 -- Feature display names (for readable output)
 local FEATURE_NAMES = {
     lfg              = "LFG Quick Apply",
@@ -47,6 +52,7 @@ local FEATURE_NAMES = {
     auctionhouse     = "Auction House Defaults",
     craftingorders   = "Crafting Orders Defaults",
     dungeonbar       = "Dungeon Bar",
+    autoreply        = "Mythic+ Auto-Reply",
     autoaccept       = "Quest Auto-Accept",
     autohandin       = "Quest Auto-Hand-In",
     durabilityequipped = "Durability on Equipped",
@@ -64,13 +70,12 @@ local FEATURE_NAMES = {
 local function HandleGenericFeature(feature, args)
     local name = FEATURE_NAMES[feature] or feature
     if #args == 0 then
-        Print(name .. ": " .. StatusText(Wild.IsFeatureEnabled(feature)))
+        Print(name .. ": " .. FeatureStatus(feature))
         return true
     end
     local val = OnOff(args[1])
     if val ~= nil then
-        Wild.SetFeatureEnabled(feature, val)
-        Print(name .. " " .. StatusText(val))
+        if Wild.SetFeatureEnabled(feature, val) then Print(name .. " " .. StatusText(val)) end
         return true
     end
     return false
@@ -89,6 +94,7 @@ subcommands.help = function()
     Print("/wild native [page] - Open native WoW Settings (for example: /wild native speed)")
     Print("/wild help — Show this help")
     Print("/wild status — Show all feature states")
+    Print("/wild client - Show the detected WoW client mode")
     Print("/wild <feature> on|off — Toggle a feature")
     print(" ")
     print("|cff00ccff  Features:|r lfg, circle, repair, loot, autoloot,")
@@ -103,6 +109,7 @@ subcommands.help = function()
     Print("/wild lfg filters on|off — Toggle result filters")
     Print("/wild lfg keys on|off — Toggle keystone panel")
     Print("/wild lfg anchor <position> — Set keystone panel anchor (right|left|topleft|topright|bottomleft|bottomright)")
+    Print("/wild autoreply on|off - Toggle Mythic+ whisper replies (Retail)")
     print(" ")
     Print("/wild circle on|off — Toggle center circle")
     Print("/wild circle size <n> — Set circle size")
@@ -191,21 +198,31 @@ end
 -- /wild status
 subcommands.status = function()
     print("|cff00ccff--- Wild Status ---|r")
+    Print("Client mode: " .. Wild.GetClientMode())
     -- Ordered list for predictable output
     local order = {
         "lfg", "autoconfirmrole", "autoacceptqueue", "lfgfilters",
         "circle", "casthistory", "repair", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
         "reputation", "delve", "tooltip",
-        "auctionhouse", "craftingorders", "dungeonbar", "autoaccept", "autohandin", "volume",
+        "auctionhouse", "craftingorders", "dungeonbar", "autoreply", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
         "speed", "dialog", "soiree",
     }
     for _, feature in ipairs(order) do
         local name = FEATURE_NAMES[feature] or feature
-        Print(name .. ": " .. StatusText(Wild.IsFeatureEnabled(feature)))
+        Print(name .. ": " .. FeatureStatus(feature))
     end
     Print("New container auto-open: " .. StatusText(Wild.GetSetting("containers.autoOpenNew")))
+end
+
+subcommands.client = function()
+    Print("Client mode: " .. Wild.GetClientMode())
+end
+
+subcommands.autoreply = function(args)
+    if HandleGenericFeature("autoreply", args) then return end
+    PrintWarn("Usage: /wild autoreply [on|off]")
 end
 
 -- /wild reset
@@ -360,22 +377,19 @@ subcommands.lfg = function(args)
     if sub == "autoconfirm" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg autoconfirm on|off") return end
-        Wild.SetFeatureEnabled("autoconfirmrole", v)
-        Print("Auto-Confirm Role " .. StatusText(v))
+        if Wild.SetFeatureEnabled("autoconfirmrole", v) then Print("Auto-Confirm Role " .. StatusText(v)) end
     elseif sub == "autoaccept" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg autoaccept on|off") return end
-        Wild.SetFeatureEnabled("autoacceptqueue", v)
-        Print("Auto-Accept Queue " .. StatusText(v))
+        if Wild.SetFeatureEnabled("autoacceptqueue", v) then Print("Auto-Accept Queue " .. StatusText(v)) end
     elseif sub == "filters" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg filters on|off") return end
-        Wild.SetFeatureEnabled("lfgfilters", v)
-        Print("LFG Result Filters " .. StatusText(v))
+        if Wild.SetFeatureEnabled("lfgfilters", v) then Print("LFG Result Filters " .. StatusText(v)) end
     elseif sub == "keys" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild lfg keys on|off") return end
-        Wild.SetSetting("lfg.keystoneButtons", v)
+        if not Wild.SetSetting("lfg.keystoneButtons", v) then return end
         Print("Keystone Panel " .. StatusText(v))
         if Wild.__keystonePanelRefresh then Wild.__keystonePanelRefresh() end
     elseif sub == "anchor" then
@@ -386,7 +400,7 @@ subcommands.lfg = function(args)
             Print("Current: " .. (Wild.db.lfg.keystoneAnchor or "RIGHT"))
             return
         end
-        Wild.SetSetting("lfg.keystoneAnchor", val)
+        if not Wild.SetSetting("lfg.keystoneAnchor", val) then return end
         Print("Keystone panel anchor: " .. val)
         if Wild.__keystonePanelApplyAnchor then Wild.__keystonePanelApplyAnchor() end
     else
@@ -461,7 +475,6 @@ subcommands.bank = function(args)
         Print("Guild Bank " .. StatusText(v))
     elseif sub == "run" then
         Wild.RunBankIntents()
-        Print("Bank intents executed.")
     elseif sub == "rules" then
         if not Wild.db or not Wild.db.intents then Print("No bank intents configured.") return end
         local any = false
@@ -697,7 +710,7 @@ subcommands.gossip = function(args)
     elseif sub == "delve" then
         local v = OnOff(args[2])
         if v == nil then Print("Usage: /wild gossip delve on|off") return end
-        Wild.SetSetting("gossip.autoSelectDelve", v)
+        if not Wild.SetSetting("gossip.autoSelectDelve", v) then return end
         Print("Gossip Auto-Select Delve " .. StatusText(v))
     elseif sub == "skip" then
         local v = OnOff(args[2])
@@ -710,7 +723,9 @@ subcommands.gossip = function(args)
         if val ~= nil then
             Wild.SetSetting("gossip.autoSelectSingle", val)
             Wild.SetSetting("gossip.autoSelectQuest", val)
-            Wild.SetSetting("gossip.autoSelectDelve", val)
+            if Wild.IsSettingAvailable("gossip.autoSelectDelve") then
+                Wild.SetSetting("gossip.autoSelectDelve", val)
+            end
             Wild.SetSetting("gossip.autoSkip", val)
             Print("Gossip automation " .. StatusText(val))
         else

@@ -2,12 +2,16 @@
 
 ## Overview
 
-Wild is a World of Warcraft (Retail) quality-of-life addon written in Lua. It automates repairs, banking, looting, vendor sales, mail, inventory destruction, quest accept/hand-in, gossip, and group applications.
+Wild is a World of Warcraft Retail and Forever quality-of-life addon written in Lua. It automates repairs, banking, looting, vendor sales, mail, inventory destruction, quest accept/hand-in, gossip, and Retail group applications.
 
 ## Language & Runtime
 
 - **Lua 5.1** targeting the WoW client API (no standard `io`, `os`, `require`).
 - **Retail 12.1.5 (build 70391)** uses interface `120105` in `Wild.toc`. API contracts come from the [matching UI source](https://github.com/Gethe/wow-ui-source/tree/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated).
+- **Forever 1.60.1 (build 70755)** uses interface `16001` in the same TOC. API contracts come from the [matching Forever UI source](https://github.com/Gethe/wow-ui-source/tree/17ed2c3e8471cdc3806ab0d26a082be7c67d3d7c/Interface/AddOns/Blizzard_APIDocumentationGenerated).
+- `Core.lua` owns client detection, availability, character identity, and shared container enumeration. Use `Wild.GetClientMode()`, `Wild.IsFeatureAvailable(feature)`, and `Wild.IsSettingAvailable(key)`. Preserve saved choices for unavailable features; runtime state and controls must respect availability.
+- Forever group finding remains manual. Never reinterpret Retail Quick Apply as player invitations or whispers. Retail LFG/keystone helpers, Mythic+ replies, delve automation, and Soiree advice do not run in Forever.
+- Use `Wild.GetPlayerName()` and `Wild.GetCharKey()` for player identity, retaining Forever first and last names. Do not independently construct actor or datastore keys from `UnitName`.
 - All code runs inside the WoW sandbox. Use WoW API functions (`CreateFrame`, `C_Item`, `C_Container`, `C_Bank`, `C_Item.GetItemInfo`, etc.).
 - Item queries use `C_Item.GetItemInfoInstant`, `C_Item.GetDetailedItemLevelInfo`, `C_Item.GetItemClassInfo`, `C_Item.GetItemSubClassInfo`, and `C_Item.GetItemSpell`, not their removed global aliases. Do not depend on `loadDeprecationFallbacks`.
 - No external build tools or package managers. Files are loaded by `Wild.toc` in strict order.
@@ -23,10 +27,11 @@ Wild is a World of Warcraft (Retail) quality-of-life addon written in Lua. It au
 
 All bag scanning uses `Wild.GetPlayerBags()` which dynamically includes:
 - Backpack (bag 0), numbered bags (1–4), and the reagent bag (if `Wild.db.includeReagentBag ~= false`, default `true`).
+- `Wild.GetPlayerStorageBags()` additionally includes Forever's keyring for read-only snapshots. Never select keyring items for automation. Item-action evidence also includes the keyring and excluded reagent bag.
 
 Bank scanning covers:
-- **Character bank**: main slot + BankBag_1–7
-- **Warband bank**: AccountBankTab_1–5
+- **Character bank**: `Wild.GetCharacterBankBags()` enumerates the client's character containers: six in Retail, nine in Forever. `Characterbanktab` (`-2`) is bank bag equipment, not stored items.
+- **Warband bank**: `Wild.GetAccountBankBags()` uses the client's account-container enums, whose indices differ between modes. Bank actions require `C_Bank.CanUseBank`; snapshots require `C_Bank.CanViewBank`.
 - **Guild bank**: all viewable tabs × 98 slots
 
 ### Bag Container Opening
@@ -135,6 +140,7 @@ Primary command: `/wild`
 /wild                       — Open WoW Settings > AddOns > Wild
 /wild native [page]         — Open native WoW Settings; for example, /wild native speed
 /wild help                  — Print available commands
+/wild client                — Show the detected Retail or Forever mode
 /wild <feature> on|off      — Enable/disable a feature
 /wild <feature> <setting>   — Get or set a specific setting
 /wild bank run              — Manually trigger bank filter rules (while bank is open)
@@ -148,6 +154,7 @@ Primary command: `/wild`
 /wild containers <id> on|off — Change an ID's saved opening choice
 /wild containers list|scan  — List choices or rescan and retry containers
 /wild lfg on|off            — Toggle LFG quick apply
+/wild autoreply on|off      — Toggle Mythic+ whisper replies (Retail)
 /wild dialog on|off         — Toggle manual keyboard confirmation of popups, queues, and delve entry
 /wild dialog key SPACE      — Set a keyboard key (modifier chords such as CTRL-F2 also work)
 /wild dialog destroy on|off — Allow item destruction without typing DELETE

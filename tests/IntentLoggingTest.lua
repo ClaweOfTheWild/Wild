@@ -31,12 +31,13 @@ local function NewEnvironment(...)
         bags = { [0] = {}, [5] = {}, [6] = {}, [12] = {}, guild = {} },
         money = 100000, bankMoney = 100000, merchantOpen = true,
         attachments = {}, sent = {}, cursor = nil,
+        bankTypes = { [0] = true, [2] = true }, guildBankOpen = true,
     }
     local env = setmetatable({
         print = function(message) state.messages[#state.messages + 1] = message end,
         Enum = {
             BagIndex = { ReagentBag = 5, CharacterBankTab_1 = 6, AccountBankTab_1 = 12 },
-            BankType = { Character = 0, Account = 2 }, PlayerInteractionType = {},
+            BankType = { Character = 0, Account = 2 }, PlayerInteractionType = { GuildBanker = 10 },
             TooltipDataLineType = { SellPrice = 11 },
         },
         BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0, ATTACHMENTS_MAX_SEND = 12,
@@ -138,6 +139,7 @@ local function NewEnvironment(...)
         end
     end
     env.C_Bank = {
+        CanUseBank = function(bankType) return state.bankTypes[bankType] == true end,
         DepositMoney = function(_, amount)
             state.requests[#state.requests + 1] = { kind = "goldDeposit", count = amount }
         end,
@@ -145,6 +147,9 @@ local function NewEnvironment(...)
             state.requests[#state.requests + 1] = { kind = "goldWithdraw", count = amount }
         end,
         FetchDepositedMoney = function() return state.bankMoney end,
+    }
+    env.C_PlayerInteractionManager = {
+        IsInteractingWithNpcOfType = function() return state.guildBankOpen end,
     }
     env.DepositGuildBankMoney = function(amount) env.C_Bank.DepositMoney(2, amount) end
     env.WithdrawGuildBankMoney = function(amount) env.C_Bank.WithdrawMoney(2, amount) end
@@ -351,6 +356,36 @@ local tests = {
         assert(Messages("Deposited ")[1]:find(COUNT .. "5 to Warband bank.", 1, true))
         Fire("BAG_UPDATE_DELAYED"); RunTimers()
         Equal(#Messages("Deposited "), 1)
+    end },
+    { "unavailable bank targets are skipped without blocking accessible rules", function()
+        local Wild, state = NewEnvironment("Bank.lua")
+        state.bankTypes[2], state.guildBankOpen = false, false
+        state.bags[0][1] = Item(4)
+        Wild.db.intents = {
+            { action = "deposit", target = "warband", groups = { {} } },
+            { action = "deposit", target = "character", groups = { {} } },
+        }
+        Equal(Wild.RunBankIntents(), true)
+        Equal(#state.requests, 1)
+        Equal(state.requests[1].target, 6)
+    end },
+    { "transfers do not withdraw when the destination bank is unavailable", function()
+        local Wild, state = NewEnvironment("Bank.lua")
+        state.bankTypes[2], state.guildBankOpen = false, false
+        state.bags[6][1] = Item(4)
+        Wild.db.intents = {
+            { action = "transfer", source = "character", target = "warband", groups = { {} } },
+        }
+        Wild.RunBankIntents()
+        Equal(#state.requests, 0)
+    end },
+    { "manual bank commands report a closed bank without claiming execution", function()
+        local Wild, state, _, _, _, _, _, _, _, env = NewEnvironment("Bank.lua", "SlashCommands.lua")
+        state.bankTypes[0], state.bankTypes[2], state.guildBankOpen = false, false, false
+        Equal(Wild.RunBankIntents(), false)
+        env.SlashCmdList.WILD("bank run")
+        assert(state.messages[#state.messages]:find("Open an accessible bank", 1, true))
+        Equal(#state.requests, 0)
     end },
     { "bank validation needs both source removal and destination receipt", function()
         local Wild, state, Fire, RunTimers, _, _, _, _, Messages = NewEnvironment("Bank.lua")

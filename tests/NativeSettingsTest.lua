@@ -20,13 +20,15 @@ local function Same(actual, expected)
     for key in pairs(actual) do assert(expected[key] ~= nil, "Unexpected key " .. tostring(key)) end
 end
 
-local function NewEnvironment(saved, noFilterEnum)
+local function NewEnvironment(saved, noFilterEnum, mode)
     local state = {
         frames = {}, categories = {}, settings = {}, layouts = {}, messages = {},
         updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0,
         speedUpdates = 0, circleUpdates = 0, castUpdates = 0, soireeUpdates = 0, combat = false,
     }
     local env = setmetatable({
+        WOW_PROJECT_ID = mode == "forever" and 18 or 1,
+        WOW_PROJECT_MAINLINE = 1, WOW_PROJECT_CAMELOT = 18,
         WildDB = saved,
         SlashCmdList = {},
         StaticPopupDialogs = {},
@@ -59,6 +61,7 @@ local function NewEnvironment(saved, noFilterEnum)
         GetBindingText = function(key) return key end,
         GetTime = function() return 1 end,
         UnitName = function() return "Test" end,
+        GetUnitName = function() return "Test Family" end,
         GetRealmName = function() return "Realm" end,
         GetMoneyString = function(value) return tostring(value) end,
     }, { __index = _G })
@@ -1267,6 +1270,36 @@ local tests = {
         assert(FindMenuEntry(source:GenerateMenu(), "guild")):Pick()
         Equal(source:GetText(), "Guild Bank")
         Same(Wild.db, saved)
+    end },
+    { "Forever settings explain manual group finding and omit Retail-only controls", function()
+        local Wild, state = NewEnvironment(nil, nil, "forever")
+        Equal(Wild.OpenNativeSettings("LFG"), true)
+        Equal(state.settings.WILD_lfg_quickApply, nil)
+        Equal(state.settings.WILD_lfg_keystoneButtons, nil)
+        Equal(state.settings.WILD_gossip_autoSelectDelve, nil)
+        assert(state.settings.WILD_containers_autoOpenNew)
+        for _, category in ipairs(state.categories) do
+            assert(category.name ~= "Delve")
+            assert(category.name ~= "Auto-Reply")
+            assert(category.name ~= "Saltheril's Soiree")
+        end
+        Equal(Wild.db.lfg.quickApply, true)
+        Equal(Wild.db.lfg.keystoneButtons, true)
+        Equal(Wild.OpenNativeSettings("Soiree"), false)
+        assert(state.messages[#state.messages]:find("not available", 1, true))
+    end },
+    { "Forever slash commands do not claim unavailable options were enabled", function()
+        local Wild, state, env = NewEnvironment(nil, nil, "forever")
+        for _, command in ipairs({ "lfg on", "lfg autoconfirm on", "lfg autoaccept on",
+            "lfg keys on", "lfg anchor left", "gossip delve on", "autoreply on", "soiree on" }) do
+            env.SlashCmdList.WILD(command)
+            assert(state.messages[#state.messages]:find("not available", 1, true), command)
+        end
+        Equal(Wild.db.lfg.keystoneAnchor, "RIGHT")
+        Equal(Wild.db.autoReply.enabled, false)
+        Equal(Wild.db.soiree.enabled, false)
+        env.SlashCmdList.WILD("client")
+        assert(state.messages[#state.messages]:find("forever", 1, true))
     end },
     { "actor context menus stay open for label toggles and close on stale data", function()
         for _, namespace in ipairs({ "", "Native" }) do

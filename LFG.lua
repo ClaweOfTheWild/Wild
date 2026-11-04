@@ -2,6 +2,9 @@
 -- Quick-apply, auto-confirm role, auto-accept queue, and result filtering for Premade Groups.
 local ADDON_NAME, Wild = ...
 
+-- Forever's native action invites players; it is not a group application.
+if Wild.isForever then return end
+
 local function GetConfig()
     return Wild.db and Wild.db.lfg
 end

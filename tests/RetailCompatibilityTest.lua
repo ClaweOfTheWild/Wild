@@ -26,8 +26,11 @@ local function NewEnvironment()
                 AccountBankTab_1 = 12, AccountBankTab_2 = 13, AccountBankTab_3 = 14,
                 AccountBankTab_4 = 15, AccountBankTab_5 = 16,
             },
+            BankType = { Character = 0, Account = 2 },
             PlayerInteractionType = {},
         },
+        BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
+        C_Bank = { CanViewBank = function() return true end },
         C_Item = {
             GetItemInfo = function(source)
                 assert(source == 100 or source == link, "Unexpected item query")
@@ -97,7 +100,7 @@ local function NewEnvironment()
     }) do
         Equal(env[name], nil, "Removed item globals must not be supplied by the fixture")
     end
-    for _, name in ipairs({ "Conditions.lua", "CharacterData.lua", "Tooltip.lua" }) do
+    for _, name in ipairs({ "Core.lua", "Conditions.lua", "CharacterData.lua", "Tooltip.lua" }) do
         setfenv(assert(loadfile(name)), env)("Wild", Wild)
     end
     local function Item(count)

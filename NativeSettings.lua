@@ -293,6 +293,12 @@ end
 
 local function CreateLFGPage()
     local category, layout = AddPage("LFG")
+    if Wild.isForever then
+        AddHeader(layout, "Native group finder",
+            "Group finding stays manual in WoW Forever. Retail Quick Apply, queue role checks, " ..
+            "and Mythic+ keystones are not available. Wild never turns group selection into player invitations.")
+        return
+    end
     AddHeader(layout, "Premade Groups", "Configure quick applications and role confirmation.")
     AddCheckbox(category, "lfg.quickApply", "Enable Quick Apply",
         "Apply to a group with a single click and confirm the application dialog.", "lfg")
@@ -609,7 +615,9 @@ local function CreateGossipPage()
         { "skipIfQuest", "Skip when quests are available", "Do not auto-select a lone option when the NPC also offers quests." },
         { "darkmoonTeleport", "Auto-accept Darkmoon Faire teleport", "Accept the Darkmoon Faire teleport dialog automatically." },
     }) do
-        AddCheckbox(category, "gossip." .. option[1], option[2], option[3])
+        if Wild.IsSettingAvailable("gossip." .. option[1]) then
+            AddCheckbox(category, "gossip." .. option[1], option[2], option[3])
+        end
     end
     AddDropdown(category, "gossip.toggleKey", "Pause key", Settings.VarType.Number, PAUSE_KEYS,
         "Hold this modifier while interacting with an NPC to bypass gossip automation.")
@@ -645,7 +653,8 @@ end
 local function CreateEventsPage()
     local category, layout = AddPage("Events")
     AddHeader(layout, "World event helpers", "Choose a recurring world event to configure its helpers.")
-    local eventPages = { CreateDarkmoonPage(category), CreateSoireePage(category) }
+    local eventPages = { CreateDarkmoonPage(category) }
+    if Wild.IsFeatureAvailable("soiree") then eventPages[#eventPages + 1] = CreateSoireePage(category) end
     for _, eventCategory in ipairs(eventPages) do
         local name = eventCategory:GetName()
         local action = AddButton(layout, name, "Open Settings", function()
@@ -710,7 +719,18 @@ function Wild.OpenNativeSettings(page)
         return false
     end
     local category = rootCategory
-    if page then category = categories[page:lower()] end
+    if page then
+        local name = page:lower()
+        local feature = ({
+            delve = "delve", ["auto-reply"] = "autoreply", ["auto reply"] = "autoreply",
+            soiree = "soiree", ["saltheril's soiree"] = "soiree",
+        })[name]
+        if feature then
+            local available, reason = Wild.IsFeatureAvailable(feature)
+            if not available then Warn(reason); return false end
+        end
+        category = categories[name]
+    end
     if not category then Warn("Unknown native settings page: " .. page); return false end
     -- OpenToCategory clears the native panel's pending-settings bookkeeping.
     if SettingsPanel:IsShown() then
@@ -787,11 +807,13 @@ local function Initialize()
         Wild.RebuildDungeonBar()
         if Wild.GetSetting("dungeonBar.enabled") then Wild.ShowDungeonBar() else Wild.HideDungeonBar() end
     end)
-    AddCanvas("Auto-Reply", "autoReply", {
-        "autoReply.enabled", "autoReply.message", "autoReply.replyWhispers",
-        "autoReply.replyBNetWhispers", "autoReply.onlyInProgress",
-    })
-    CreateDelvePage()
+    if Wild.IsFeatureAvailable("autoreply") then
+        AddCanvas("Auto-Reply", "autoReply", {
+            "autoReply.enabled", "autoReply.message", "autoReply.replyWhispers",
+            "autoReply.replyBNetWhispers", "autoReply.onlyInProgress",
+        })
+    end
+    if Wild.IsFeatureAvailable("delve") then CreateDelvePage() end
     CreateVolumePage()
     CreateDurabilityPage()
     Settings.RegisterAddOnCategory(rootCategory)

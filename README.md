@@ -1,18 +1,89 @@
 # Wild
 
-Wild is a World of Warcraft Retail quality-of-life addon for players who want
+Wild is a World of Warcraft Retail and Forever quality-of-life addon for players who want
 configurable interaction helpers and automation. Macro and addon authors can
-call its public functions on the `Wild` table. It targets Retail 12.1.5 and
-uses the game's Lua 5.1 environment without addon libraries.
+call its public functions on the `Wild` table. It targets Retail 12.1.5
+(`120105`) and Forever 1.60.1 (`16001`) using the game's Lua 5.1 environment
+without addon libraries.
 
 Open **Settings > AddOns > Wild** with `/wild`. Use `/wild help` for commands.
 Settings are stored in `WildDB`; the settings UI, slash commands, and public
 setters share that store.
 
-World-event helpers are grouped under **Wild > Events**, with separate pages
+World-event helpers are grouped under **Wild > Events**. Retail has separate pages
 for **Darkmoon Faire** and **Saltheril's Soiree**. `/wild native events` opens
 the group. Existing shortcuts such as `/wild native darkmoon faire` and
-`/wild native soiree` still open the event directly.
+`/wild native soiree` open the supported event directly.
+
+## Retail and Forever
+
+Client detection is automatic. `/wild client` prints `retail` or `forever`;
+`/wild status` includes the mode and marks unavailable features.
+
+Forever keeps its native group finder manual. Retail Quick Apply, queue role
+automation, keystone tracking, Mythic+ auto-reply, delve automation, and the
+Soiree advisor are unavailable in Forever. Wild does not turn a group-selection
+click into a player invitation. The native LFG settings page explains this
+instead of offering controls that cannot work.
+
+Saved choices are preserved when a feature is unavailable. `Wild.GetSetting`
+returns the saved value; `Wild.IsFeatureEnabled` returns the effective state.
+Attempts to enable an unavailable feature warn and return `false`. Explicitly
+turning one off is allowed. Retail keeps its existing defaults and behavior.
+`/wild autoreply on|off` controls the Retail Mythic+ reply feature.
+
+Bank processors and inventory snapshots share container enumeration. Retail
+uses six character-bank containers; Forever uses nine, including the base bank
+and eight bank bags. Account-bank indices come from the client's enums, not
+Retail offsets. Only banks permitted by the current interaction run rules;
+inaccessible banks do not replace saved inventory snapshots with empty data.
+
+Forever's keyring is read-only storage for Wild. Inventory snapshots include
+its items, but automation rules do not select them. Completion evidence includes
+the keyring and an excluded reagent bag, so moving an item there does not count
+as selling, destroying, or opening it. Forever character keys retain first and
+last names; Retail keeps its existing `Name-Realm` format.
+
+### Client Lua API
+
+| Function | Contract |
+| --- | --- |
+| `Wild.GetClientMode()` | Return `retail`, `forever`, or `unsupported` |
+| `Wild.IsFeatureAvailable(feature)` | Return `true`, or `false, reason`; use the feature names accepted by `Wild.SetFeatureEnabled` |
+| `Wild.IsSettingAvailable(key)` | Check a setting's availability without changing its saved value |
+| `Wild.GetPlayerName()` | Return the player's name, including Forever's last name |
+| `Wild.GetCharKey()` | Return the current character's datastore and actor key |
+| `Wild.GetPlayerBags()` | Return automation-selection bags, respecting **Include reagent bag** |
+| `Wild.GetPlayerStorageBags()` | Return snapshot bags, including Forever's read-only keyring |
+| `Wild.GetCharacterBankBags()` | Return the client's character-bank container IDs |
+| `Wild.GetAccountBankBags()` | Return the client's account-bank container IDs; availability is checked separately |
+
+For example, `Wild.IsFeatureAvailable("lfg")` returns `false` with a reason in
+Forever, while `Wild.IsFeatureAvailable("repair")` returns `true` in both modes.
+
+### One master addon folder on Windows
+
+Keep one Git checkout as the master and use a **directory junction** for the
+other client:
+
+```text
+World of Warcraft\
+  _retail_\Interface\AddOns\Wild\   master checkout
+  _forever_\Interface\AddOns\Wild\  junction to the Retail Wild folder
+```
+
+Both clients read the same physical files. Edit or update the master, then
+`/reload` in each running client to load the changes. No copying, background
+sync process, or second Git checkout is needed.
+
+Restart Forever after first creating the junction so it discovers the addon.
+Later source edits need only `/reload`.
+
+Only the addon-code folder is linked. Each client keeps its own `WildDB` saved
+variables, rules, actor records, and inventory snapshots. Do not link the
+clients' `WTF` folders or install a second Wild copy over the junction.
+Deleting or editing files through either addon path changes the master too;
+the junction is not a backup.
 
 ## Auto-open bag containers
 
@@ -195,6 +266,9 @@ root. They do not need a running WoW client or addon dependencies.
 
 ```powershell
 lua tests\ContainersTest.lua
+lua tests\ForeverCompatibilityTest.lua
+lua tests\RetailCompatibilityTest.lua
+lua tests\IntentLoggingTest.lua
 lua tests\SoireePlannerTest.lua
 lua tests\SoireeAdvisorTest.lua
 lua tests\NativeSettingsTest.lua
@@ -210,6 +284,9 @@ selector supplies complete structured reward data.
 - [Pinned Retail bag-container API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua)
 - [Pinned Retail Player Choice API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/PlayerChoiceDocumentation.lua)
 - [Pinned Retail friendship reputation API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/GossipInfoDocumentation.lua)
+- [Pinned Forever bag indices, build 70755](https://github.com/Gethe/wow-ui-source/blob/17ed2c3e8471cdc3806ab0d26a082be7c67d3d7c/Interface/AddOns/Blizzard_APIDocumentationGenerated/BagIndexConstantsDocumentation.lua)
+- [Pinned Forever bank API](https://github.com/Gethe/wow-ui-source/blob/17ed2c3e8471cdc3806ab0d26a082be7c67d3d7c/Interface/AddOns/Blizzard_APIDocumentationGenerated/BankDocumentation.lua)
+- [Pinned Forever group-finder actions](https://github.com/Gethe/wow-ui-source/blob/17ed2c3e8471cdc3806ab0d26a082be7c67d3d7c/Interface/AddOns/Blizzard_GroupFinder_VanillaStyle/Blizzard_LFGVanilla_Browse.lua)
 - [Lord Saltheril, NPC 240832](https://www.wowhead.com/npc=240832/lord-saltheril)
 - [Soiree quests, Favors, and invitation mechanics](https://warcraft.wiki.gg/wiki/Saltheril%27s_Soiree)
 - [Silvermoon Court and Fortify overview](https://www.icy-veins.com/wow/silvermoon-court-renown-guide)

@@ -5,41 +5,8 @@ local ADDON_NAME, Wild = ...
 -- Bank container indices
 -- ============================================================
 
--- Midnight (12.x): character bank uses CharacterBankTab (-2) and
--- CharacterBankTab_1..6 (indices 6-11). The old Bank (-1) and
--- BankBag_1..7 enum names no longer exist.
-local CHARACTER_BANK_BAGS = {}
-if Enum.BagIndex.CharacterBankTab then
-    table.insert(CHARACTER_BANK_BAGS, Enum.BagIndex.CharacterBankTab)
-end
-for i = 1, 6 do
-    local key = "CharacterBankTab_" .. i
-    if Enum.BagIndex[key] ~= nil then
-        table.insert(CHARACTER_BANK_BAGS, Enum.BagIndex[key])
-    end
-end
--- Fallback for pre-Midnight (TWW / older): use Bank + BankBag_1..7
-if #CHARACTER_BANK_BAGS == 0 then
-    if Enum.BagIndex.Bank then
-        table.insert(CHARACTER_BANK_BAGS, Enum.BagIndex.Bank)
-    end
-    for i = 1, 7 do
-        local key = "BankBag_" .. i
-        if Enum.BagIndex[key] ~= nil then
-            table.insert(CHARACTER_BANK_BAGS, Enum.BagIndex[key])
-        end
-    end
-end
-
-local ACCOUNT_BANK_TABS = {}
-if Enum and Enum.BagIndex then
-    for i = 1, 5 do
-        local key = "AccountBankTab_" .. i
-        if Enum.BagIndex[key] ~= nil then
-            table.insert(ACCOUNT_BANK_TABS, Enum.BagIndex[key])
-        end
-    end
-end
+local CHARACTER_BANK_BAGS = Wild.GetCharacterBankBags()
+local ACCOUNT_BANK_TABS = Wild.GetAccountBankBags()
 
 local GUILD_BANK_SLOTS_PER_TAB = 98
 
@@ -55,17 +22,15 @@ end
 -- Player bag list (respects includeReagentBag setting)
 -- ============================================================
 
-local function GetPlayerBags()
-    local bags = { BACKPACK_CONTAINER }
-    for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
-    if Enum.BagIndex.ReagentBag
-       and (not Wild.db or Wild.db.includeReagentBag ~= false) then
-        bags[#bags + 1] = Enum.BagIndex.ReagentBag
-    end
-    return bags
-end
+local GetPlayerBags = Wild.GetPlayerBags
 
-Wild.GetPlayerBags = GetPlayerBags
+local function GetAccessibleSources()
+    return {
+        character = C_Bank.CanUseBank(Enum.BankType.Character),
+        warband = C_Bank.CanUseBank(Enum.BankType.Account),
+        guild = C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.GuildBanker),
+    }
+end
 
 -- ============================================================
 -- Place cursor item into a free player bag slot
@@ -960,6 +925,11 @@ local function ProcessIntents(accessibleSources)
         BlogMsg("ProcessIntents: queue already active, skipping.")
         return
     end
+    local currentSources = GetAccessibleSources()
+    for source in pairs(currentSources) do
+        currentSources[source] = currentSources[source] and accessibleSources[source] == true
+    end
+    accessibleSources = currentSources
 
     BlogMsg("ProcessIntents: evaluating " .. #intents .. " intent(s). Accessible sources: "
         .. (accessibleSources.character and "character " or "")
@@ -1026,7 +996,7 @@ local function OnBankOpened()
 
     -- Process warband-specific auto-deposit flags (legacy convenience)
     local warbandCfg = Wild.db.bankWarband
-    if warbandCfg and warbandCfg.enabled then
+    if warbandCfg and warbandCfg.enabled and C_Bank.CanUseBank(Enum.BankType.Account) then
         if warbandCfg.depositWarbound then
             C_Timer.After(0.3, function()
                 if bankGeneration ~= generation then return end
@@ -1062,7 +1032,12 @@ local function OnBankOpened()
     -- Include player bags so deposit/hold intents have cached GetItemInfo data
     C_Timer.After(Wild.db.advanced.bankStartDelay, function()
         if bankGeneration ~= generation then return end
-        PreloadBankItemData({ CHARACTER_BANK_BAGS, ACCOUNT_BANK_TABS, GetPlayerBags() }, function()
+        local sources = GetAccessibleSources()
+        PreloadBankItemData({
+            sources.character and CHARACTER_BANK_BAGS or {},
+            sources.warband and ACCOUNT_BANK_TABS or {},
+            GetPlayerBags(),
+        }, function()
             if bankGeneration ~= generation then return end
             BlogMsg("All bank and bag item data loaded — starting intent queue.")
             ProcessIntents({ character = true, warband = true })
@@ -1144,5 +1119,11 @@ end)
 
 -- Expose for manual trigger / slash commands
 Wild.RunBankIntents = function()
-    ProcessIntents({ character = true, warband = true, guild = true })
+    local sources = GetAccessibleSources()
+    if not (sources.character or sources.warband or sources.guild) then
+        Wild.Print("|cffff6600Wild:|r Open an accessible bank before running bank rules.")
+        return false
+    end
+    ProcessIntents(sources)
+    return true
 end

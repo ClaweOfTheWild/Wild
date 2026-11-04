@@ -1104,9 +1104,7 @@ local function IntentMatchesActor(intent)
     local actors = intent.actors
     if not actors or #actors == 0 then return true end -- no filter = everyone
 
-    local name = UnitName("player")
-    local realm = GetRealmName()
-    local charKey = name .. "-" .. realm
+    local charKey = Wild.GetCharKey()
     local charLabels = Wild.GetActorLabels and Wild.GetActorLabels(charKey) or {}
 
     -- Separate includes and excludes

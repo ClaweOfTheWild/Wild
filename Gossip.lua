@@ -133,7 +133,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     end
 
     -- Auto-select delve-typed gossip option
-    if cfg.autoSelectDelve then
+    if cfg.autoSelectDelve and not Wild.isForever then
         local delveOpt = FindOptionByType(options, DELVE_OPTION_TYPES)
             or FindOptionByNamePattern(options, "delve")
         if delveOpt then

@@ -5020,7 +5020,7 @@ local function CreateActorsTab(namespace)
             keys[#keys + 1] = k
         end
         -- Sort: current character first, then by name
-        local currentFullName = UnitName("player") .. "-" .. GetRealmName()
+        local currentFullName = Wild.GetCharKey()
         table.sort(keys, function(a, b)
             if a == currentFullName then return true end
             if b == currentFullName then return false end
@@ -5035,7 +5035,7 @@ local function CreateActorsTab(namespace)
         local keys = GetSortedCharKeys()
         charEmptyText:SetShown(#keys == 0)
 
-        local currentFullName = UnitName("player") .. "-" .. GetRealmName()
+        local currentFullName = Wild.GetCharKey()
         local yOffset = 0
 
         for i, charKey in ipairs(keys) do

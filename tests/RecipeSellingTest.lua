@@ -56,6 +56,7 @@ local function NewEnvironment()
         return { lines = lines }
     end
     local env = setmetatable({
+        BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
         print = function(message) state.logs[#state.logs + 1] = message end,
         tremove = table.remove,
         SlashCmdList = {},

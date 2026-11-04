@@ -154,6 +154,9 @@ end
 
 -- Returns current absolute friendship standings, or nil, reason when any track is unavailable.
 function Wild.GetSoireeProgress()
+    if Wild.isForever then
+        return nil, "Saltheril's Soiree advisor is not available in WoW Forever."
+    end
     if not C_GossipInfo or not C_GossipInfo.GetFriendshipReputation then
         return nil, "The friendship reputation API is unavailable."
     end
@@ -184,7 +187,7 @@ local confirmedOffers
 local hookedSelector
 
 local function IsEnabled()
-    return Wild.db and Wild.db.soiree and Wild.db.soiree.enabled == true
+    return not Wild.isForever and Wild.db and Wild.db.soiree and Wild.db.soiree.enabled == true
 end
 
 local function GetFactionName(factionID)
@@ -438,6 +441,10 @@ end
 
 -- Explicit display does not enable automatic display; a current selector is still required.
 function Wild.ShowSoireeAdvisor()
+    if Wild.isForever then
+        Wild.Print("|cffff6600Wild:|r Saltheril's Soiree advisor is not available in WoW Forever.")
+        return false
+    end
     local shown, reason = OpenAdvisor()
     if not shown then Wild.Print("|cffff6600Wild:|r " .. reason) end
     return shown
@@ -455,6 +462,8 @@ function Wild.UpdateSoireeAdvisor()
         CloseSession()
     end
 end
+
+if Wild.isForever then return end
 
 local frame = CreateFrame("Frame")
 for _, event in ipairs({

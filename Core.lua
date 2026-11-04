@@ -1,6 +1,65 @@
 -- Wild: Core addon initialization
 local ADDON_NAME, Wild = ...
 
+Wild.isForever = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
+Wild.isRetail = WOW_PROJECT_MAINLINE ~= nil and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+
+function Wild.GetClientMode()
+    if Wild.isForever then return "forever" end
+    if Wild.isRetail then return "retail" end
+    return "unsupported"
+end
+
+function Wild.GetPlayerName()
+    if Wild.isForever then return GetUnitName("player") end
+    return UnitName("player")
+end
+
+function Wild.GetCharKey()
+    return Wild.GetPlayerName() .. "-" .. GetRealmName()
+end
+
+function Wild.GetPlayerBags()
+    local bags = { BACKPACK_CONTAINER }
+    for bag = 1, NUM_BAG_SLOTS do bags[#bags + 1] = bag end
+    if Enum.BagIndex.ReagentBag and (not Wild.db or Wild.db.includeReagentBag ~= false) then
+        bags[#bags + 1] = Enum.BagIndex.ReagentBag
+    end
+    return bags
+end
+
+function Wild.GetPlayerStorageBags()
+    local bags = { unpack(Wild.GetPlayerBags()) }
+    -- The keyring is read-only storage, never an automation selection.
+    if Wild.isForever and Enum.BagIndex.Keyring ~= nil then
+        bags[#bags + 1] = Enum.BagIndex.Keyring
+    end
+    return bags
+end
+
+local function GetBankBags(prefix)
+    local bags = {}
+    local index = 1
+    while Enum.BagIndex[prefix .. index] ~= nil do
+        bags[#bags + 1] = Enum.BagIndex[prefix .. index]
+        index = index + 1
+    end
+    return bags
+end
+
+function Wild.GetCharacterBankBags()
+    local bags = GetBankBags("CharacterBankTab_")
+    if #bags == 0 then
+        if Enum.BagIndex.Bank ~= nil then bags[#bags + 1] = Enum.BagIndex.Bank end
+        for _, bag in ipairs(GetBankBags("BankBag_")) do bags[#bags + 1] = bag end
+    end
+    return bags
+end
+
+function Wild.GetAccountBankBags()
+    return GetBankBags("AccountBankTab_")
+end
+
 -- Default saved variables
 local defaults = {
     includeReagentBag = true,
@@ -353,7 +412,7 @@ end)
 function Wild.CollectCurrentCharacter()
     if not Wild.db or not Wild.db.actors then return end
 
-    local name = UnitName("player")
+    local name = Wild.GetPlayerName()
     local realm = GetRealmName()
     local fullName = name .. "-" .. realm
     local _, classFile = UnitClass("player")
@@ -550,7 +609,7 @@ function Wild.CaptureBagItemCounts(bags)
 end
 
 function Wild.CapturePlayerItemCounts()
-    local bags = Wild.GetPlayerBags()
+    local bags = Wild.GetPlayerStorageBags()
     local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
     if reagentBag then
         local included = false
@@ -669,6 +728,7 @@ local FEATURES = {
     lfg              = { key = "lfg.quickApply" },
     autoconfirmrole  = { key = "lfg.autoConfirmRole" },
     autorolecheck    = { key = "lfg.autoAcceptRoleCheck" },
+    autoacceptqueue  = { key = "lfg.autoAcceptRoleCheck" },
 
     circle           = { key = "screenCenterCircle",    onToggle = function() Wild.UpdateScreenCenterCircle() end },
     casthistory      = { key = "castHistory.enabled",   onToggle = function() Wild.UpdateCastHistory() end },
@@ -685,6 +745,7 @@ local FEATURES = {
     craftingorders   = { key = "craftingOrders.enabled" },
     mail             = { key = "mail.autoOpen" },
     dungeonbar       = { key = "dungeonBar.enabled" },
+    autoreply        = { key = "autoReply.enabled" },
     autoaccept       = { key = "quests.autoAccept" },
     autohandin       = { key = "quests.autoHandIn" },
     volume           = { key = "volumeControl.enabled", onToggle = function() Wild.UpdateVolumeControl() end },
@@ -698,6 +759,32 @@ local FEATURES = {
 }
 
 Wild.FEATURES = FEATURES
+
+local RETAIL_ONLY_SETTINGS = {
+    lfg = "Retail group-finder automation and keystones",
+    autoReply = "Mythic+ auto-reply",
+    delveAutoSelectPower = "Delve power automation",
+    ["gossip.autoSelectDelve"] = "Delve gossip automation",
+    soiree = "Saltheril's Soiree advisor",
+}
+
+function Wild.IsSettingAvailable(key)
+    if type(key) ~= "string" then return false, "A setting key must be a string." end
+    if Wild.isForever then
+        for prefix, label in pairs(RETAIL_ONLY_SETTINGS) do
+            if key == prefix or key:sub(1, #prefix + 1) == prefix .. "." then
+                return false, label .. " is not available in WoW Forever."
+            end
+        end
+    end
+    return true
+end
+
+function Wild.IsFeatureAvailable(feature)
+    local info = type(feature) == "string" and FEATURES[feature:lower()]
+    if not info then return false, "Unknown feature: " .. tostring(feature) end
+    return Wild.IsSettingAvailable(info.key)
+end
 
 -- ============================================================
 -- Public API — Effective sell price
@@ -745,6 +832,7 @@ end
 
 function Wild.IsFeatureEnabled(feature)
     if not Wild.db then return false end
+    if not Wild.IsFeatureAvailable(feature) then return false end
     local info = FEATURES[feature:lower()]
     if not info then return false end
     return GetNestedValue(Wild.db, info.key) and true or false
@@ -755,11 +843,17 @@ function Wild.SetFeatureEnabled(feature, enabled, source)
     local info = FEATURES[feature:lower()]
     if not info then
         print("|cffff6600Wild:|r Unknown feature: " .. tostring(feature))
-        return
+        return false
+    end
+    local available, reason = Wild.IsFeatureAvailable(feature)
+    if enabled and not available then
+        Wild.Print("|cffff6600Wild:|r " .. reason)
+        return false
     end
     SetNestedValue(Wild.db, info.key, enabled)
     if info.onToggle then info.onToggle(enabled) end
     Wild.NotifySettingsChanged(info.key, source)
+    return true
 end
 
 -- ============================================================
@@ -786,6 +880,11 @@ end
 
 function Wild.SetSetting(key, value, source)
     if not Wild.db then return end
+    local available, reason = Wild.IsSettingAvailable(key)
+    if not available and value ~= false then
+        Wild.Print("|cffff6600Wild:|r " .. reason)
+        return false
+    end
     if key == "dialogKey.key" and Wild.SetDialogKey then
         return Wild.SetDialogKey(value, source)
     end
@@ -800,6 +899,7 @@ function Wild.SetSetting(key, value, source)
     if (key == "containers" or key == "containers.items" or key == "includeReagentBag") and Wild.ScanContainers then
         Wild.ScanContainers()
     end
+    return true
 end
 
 function Wild.ResetSettings()
