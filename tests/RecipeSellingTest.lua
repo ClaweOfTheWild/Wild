@@ -123,6 +123,8 @@ local function NewEnvironment()
         GetRealmName = function() return "Realm" end,
         GetInventoryItemLink = function() end,
         GetTime = function() return state.time end,
+        GetCursorInfo = function() end,
+        date = function() return "2026-11-04 12:00:00" end,
         GetMoneyString = function(amount) return tostring(amount) .. " copper" end,
         C_Timer = {
             After = function(_, callback) state.timers[#state.timers + 1] = callback end,
@@ -145,9 +147,9 @@ local function NewEnvironment()
     }, { __index = _G })
     Wild.GetPlayerBags = function() return { 0, 5 } end
     Wild.QueueDestroyItems = function(items) state.destroyed = items end
-    Wild.Log = function() end
     Wild.FEATURES = {}
     setfenv(assert(loadfile("Core.lua")), env)("Wild", Wild)
+    setfenv(assert(loadfile("Log.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Vendor.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("SlashCommands.lua")), env)("Wild", Wild)

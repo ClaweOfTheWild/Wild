@@ -82,6 +82,7 @@ Condition evaluation lives in `Conditions.lua` and is shared across all processo
 - Combine confirmed stacks of the same item into one result per action. Keep partial successes, but report unconfirmed work as a warning instead of claiming completion.
 - Result records retain their actual source and destination even when a saved rule is edited while its operation is pending.
 - Debug mode writes scan, condition, and queue diagnostics to `WildDB.log` without automatically printing them. `/wild log show [filter]` displays the last 20 matching entries; `/wild log clear` clears the buffer.
+- Confirmed intent actions and failures are saved even with debug off. Use `Wild.LogAction` for new confirmed quantities and `Wild.Warn` for saved warnings; keep unresolved quantities separate from successful counts. See [intent actions and logs](../README.md#intent-actions-and-logs) for the history contract.
 
 To match soulbound items with no upgrade track, put **Bind Type is Soulbound** and **Upgrade Track = None** in the same include group. Choose **Fixed value** for the upgrade-track comparison. `None` is stored as rank `0`; ranked tracks remain `1` through `6`. Use a separate **Item Type** or **Equip Slot** condition if the rule should match only equipment.
 

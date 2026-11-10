@@ -27,6 +27,7 @@ local function NewEnvironment()
         print = function(message) state.messages[#state.messages + 1] = message end,
         wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
         GetTime = function() return 10 end,
+        date = function() return "2026-11-04 12:00:00" end,
         UnitClass = function() return "Druid", "DRUID" end,
         UnitLevel = function() return 90 end,
         UnitName = function() return "Test" end,
@@ -35,6 +36,7 @@ local function NewEnvironment()
         GetInventoryItemLink = function() end,
         GetProfessions = function() end,
         GetMoney = function() return state.money end,
+        GetCursorInfo = function() end,
         CanMerchantRepair = function() return true end,
         GetRepairAllCost = function() return state.price, true end,
         RepairAllItems = function(guild) state.repaired = guild and "guild" or "personal" end,
@@ -119,9 +121,10 @@ local function NewEnvironment()
         end
         return table.concat(parts, " ")
     end
-    Wild.Log = function(_, message) state.logs[#state.logs + 1] = message end
     Wild.QueueDestroyItems = function(items) state.destroyed = items end
     setfenv(assert(loadfile("Core.lua")), env)("Wild", Wild)
+    setfenv(assert(loadfile("Log.lua")), env)("Wild", Wild)
+    Wild.Log = function(_, message) state.logs[#state.logs + 1] = message end
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Bank.lua")), env)("Wild", Wild)
     setfenv(assert(loadfile("Vendor.lua")), env)("Wild", Wild)
@@ -293,8 +296,7 @@ local tests = {
         Fire("BAG_UPDATE_DELAYED")
         RunTimers()
         Equal(state.money - 500000, 8697 * 2 + 12345 * 3)
-        HasMessage("Sold item:1 \195\1512 for " .. env.GetMoneyString(8697 * 2, true))
-        HasMessage("Sold item:1 \195\1513 for " .. env.GetMoneyString(12345 * 3, true))
+        HasMessage("Sold item:1 \195\1515 for " .. env.GetMoneyString(8697 * 2 + 12345 * 3, true))
         HasMessage("Auto-sold 5 item(s) for " .. env.GetMoneyString(state.money - 500000, true) .. ".")
     end },
     { "effective vendor prices also drive sell-price rules and tooltips", function()

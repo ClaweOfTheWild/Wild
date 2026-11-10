@@ -147,6 +147,8 @@ local function NewEnvironment()
         UnitClass = function() return "Druid", "DRUID" end,
         UnitLevel = function() return 90 end,
         GetTime = function() return 10 end,
+        GetCursorInfo = function() end,
+        date = function() return "2026-11-04 12:00:00" end,
         GetMoneyString = function(amount) return tostring(amount) .. " copper" end,
         C_Timer = {
             After = function(_, callback) state.timers[#state.timers + 1] = callback end,
@@ -160,11 +162,13 @@ local function NewEnvironment()
         MerchantFrame = { IsShown = function() return true end },
         Enum = { PlayerInteractionType = { Merchant = 5 } },
     }, { __index = _G })
+    setfenv(assert(loadfile("Core.lua")), env)("Wild", Wild)
     Wild.GetPlayerBags = function() return { 0, 5 } end
     Wild.GetEffectiveSellPrice = function() return 100 end
-    Wild.Log = function(_, message) state.messages[#state.messages + 1] = message end
     Wild.Print = env.print
     Wild.QueueDestroyItems = function() error("This sell rule must not destroy items") end
+    setfenv(assert(loadfile("Log.lua")), env)("Wild", Wild)
+    Wild.Log = function(_, message) state.messages[#state.messages + 1] = message end
     setfenv(assert(loadfile("Conditions.lua")), env)("Wild", Wild)
 
     local function Fire(event)

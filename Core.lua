@@ -622,9 +622,10 @@ function Wild.CapturePlayerItemCounts()
     return Wild.CaptureBagItemCounts(bags)
 end
 
-function Wild.CreateItemActionBatch(readSource, readTarget)
+-- Optional snapshots let overlapping batches share one physical scan.
+function Wild.CreateItemActionBatch(readSource, readTarget, sourceBefore)
     return {
-        readSource = readSource, sourceBefore = readSource(),
+        readSource = readSource, sourceBefore = sourceBefore or readSource(),
         readTarget = readTarget, targetBefore = readTarget and readTarget(),
         entries = {}, confirmed = {},
     }
@@ -638,8 +639,8 @@ function Wild.RecordItemAction(batch, info, count, unitCopper)
     }
 end
 
-function Wild.ConfirmItemActionBatch(batch)
-    local sourceAfter = batch.readSource()
+function Wild.ConfirmItemActionBatch(batch, sourceAfter)
+    sourceAfter = sourceAfter or batch.readSource()
     local targetAfter = batch.readTarget and batch.readTarget()
     local available = {}
     local results = {}
@@ -668,6 +669,19 @@ function Wild.ConfirmItemActionBatch(batch)
         if entry.confirmed < entry.count then complete = false end
     end
     return results, complete
+end
+
+function Wild.GetUnconfirmedItemActionEntries(batch)
+    local entries = {}
+    for _, entry in ipairs(batch.entries) do
+        local count = entry.count - (entry.confirmed or 0)
+        if count > 0 then
+            Wild.MergeItemActionEntries(entries, {
+                { key = entry.key or entry.link or entry.itemID, link = entry.link, itemID = entry.itemID, count = count },
+            })
+        end
+    end
+    return entries
 end
 
 function Wild.MergeItemActionEntries(results, entries)

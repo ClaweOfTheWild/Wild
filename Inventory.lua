@@ -34,6 +34,11 @@ local destroyQueueOnComplete = nil
 local pendingDestroy
 local destroyConfirmationTimer
 
+function Wild.IsDestroyItemPending(itemID, link)
+    local entry = pendingDestroy and pendingDestroy.batch.entries[1]
+    return entry ~= nil and entry.key == (link or itemID) and entry.confirmed < entry.count
+end
+
 local destroyBtnFrame = CreateFrame("Frame", "WildDestroyFrame", UIParent, "BackdropTemplate")
 destroyBtnFrame:SetSize(300, 100)
 destroyBtnFrame:SetPoint("CENTER", 0, 200)
@@ -125,13 +130,18 @@ local function ClearDestroyWait()
     pendingDestroy = nil
 end
 
+local function PrintDestroyResults()
+    for _, item in ipairs(destroyQueueEntries) do
+        Wild.Print("|cff00ccffWild:|r " .. Wild.FormatActionResult("destroy", item))
+    end
+    destroyQueueEntries = {}
+end
+
 local function FinishDestroyQueue(cancelled)
     destroyBtnFrame:Hide()
     local cb = destroyQueueOnComplete
     local count = destroyQueueRemovedCount
-    for _, item in ipairs(destroyQueueEntries) do
-        Wild.Print(string.format("|cff00ccffWild:|r Destroyed %s \195\151%d.", item.link or ("Item " .. item.itemID), item.count))
-    end
+    PrintDestroyResults()
     ClearDestroyWait()
     destroyQueueItems = {}
     destroyQueueTotalCount = 0
@@ -161,7 +171,10 @@ end
 
 local function StoreDestroyResults(request)
     Wild.MergeItemActionEntries(destroyQueueEntries, request.confirmed)
-    for _, item in ipairs(request.confirmed) do destroyQueueRemovedCount = destroyQueueRemovedCount + item.count end
+    for _, item in ipairs(request.confirmed) do
+        destroyQueueRemovedCount = destroyQueueRemovedCount + item.count
+        Wild.LogAction("Inventory", "destroy", item)
+    end
     request.confirmed = {}
 end
 
@@ -194,29 +207,50 @@ local function FailDestroy(request)
         return
     end
     StoreDestroyResults(request)
+    PrintDestroyResults()
     local cursorType, cursorItemID = GetCursorInfo()
     if cursorType == "item" and cursorItemID == request.item.itemID then ClearCursor() end
+    Wild.LogUnconfirmedItemActions("Inventory", "destroy", request.batch, {
+        source = "bags", reason = "destruction_not_confirmed",
+    })
     ClearDestroyWait()
-    Wild.Print("|cffff6600Wild:|r Item destruction was not confirmed. Check the item and try again.")
+    Wild.Warn("Inventory", "Item destruction was not confirmed. Check the item and try again.",
+        { action = "destroy", status = "unconfirmed", reason = "destruction_not_confirmed" })
     UpdateDestroyButton()
 end
 
 destroyBtn:SetScript("OnClick", function()
     if #destroyQueueItems == 0 or pendingDestroy then return end
     if GetCursorInfo() then
-        Wild.Print("|cffff6600Wild:|r Clear the cursor before destroying an item.")
+        PrintDestroyResults()
+        Wild.Warn("Inventory", "Clear the cursor before destroying an item.",
+            { action = "destroy", reason = "cursor_occupied" })
         return
     end
     local item = destroyQueueItems[1]
     local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
     if not info or info.itemID ~= item.itemID or (info.hyperlink and item.link and info.hyperlink ~= item.link) then
-        Wild.Log("Inventory", "Skipped a destroy request because its bag slot changed.")
+        PrintDestroyResults()
+        Wild.Warn("Inventory", "Queued destroy item moved; skipped this slot.", {
+            action = "destroy", status = "skipped", itemID = item.itemID, link = item.link,
+            unconfirmedCount = item.count, reason = "slot_changed",
+        })
         tremove(destroyQueueItems, 1)
         UpdateDestroyButton()
         return
     end
     if info.isLocked then
-        Wild.Print("|cffff6600Wild:|r Item is locked; try destroying it again after it unlocks.")
+        PrintDestroyResults()
+        Wild.Warn("Inventory", "Item is locked; try destroying it again after it unlocks.",
+            { action = "destroy", itemID = info.itemID, link = info.hyperlink, reason = "item_locked" })
+        return
+    end
+    if Wild.IsVendorItemPending and Wild.IsVendorItemPending(info.itemID, info.hyperlink) then
+        PrintDestroyResults()
+        Wild.Warn("Inventory", "Wait for this item's pending vendor sale before destroying it.", {
+            action = "destroy", status = "blocked", itemID = info.itemID, link = info.hyperlink,
+            unconfirmedCount = info.stackCount or 1, reason = "vendor_sale_pending",
+        })
         return
     end
     local request = { item = item, confirmed = {}, batch = Wild.CreateItemActionBatch(Wild.CapturePlayerItemCounts) }
@@ -247,6 +281,11 @@ destroyCancelBtn:SetScript("OnClick", function()
         Wild.MergeItemActionEntries(pendingDestroy.confirmed, entries)
         StoreDestroyResults(pendingDestroy)
     end
+    if pendingDestroy then
+        Wild.LogUnconfirmedItemActions("Inventory", "destroy", pendingDestroy.batch, {
+            source = "bags", status = "cancelled", reason = "player_cancelled",
+        })
+    end
     ClearDestroyWait()
     ClearCursor()
     destroyQueueItems = {}
@@ -269,7 +308,8 @@ end
 local function RunDestroyPass()
     if not destroyActive then return end
     if destroyPassNum >= MAX_DESTROY_PASSES then
-        Wild.Print("|cffff6600Wild:|r Destroy safety cap reached (" .. MAX_DESTROY_PASSES .. " passes).")
+        Wild.Warn("Inventory", "Destroy safety cap reached (" .. MAX_DESTROY_PASSES .. " passes).",
+            { action = "destroy", reason = "safety_cap" })
         if destroyTotalCount > 0 then
             Wild.Print(string.format("|cff00ccffWild:|r Auto-destroy stopped: %d item(s) removed.", destroyTotalCount))
         end
@@ -417,8 +457,11 @@ frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("BANKFRAME_OPENED")
 frame:RegisterEvent("GUILDBANKFRAME_OPENED")
 frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+frame:RegisterEvent("UI_ERROR_MESSAGE")
 frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "LOOT_CLOSED" then
+    if event == "UI_ERROR_MESSAGE" then
+        if pendingDestroy then Wild.LogClientError("Inventory", ...) end
+    elseif event == "LOOT_CLOSED" then
         OnInventoryTrigger()
     elseif event == "MERCHANT_SHOW" then
         OnInventoryTrigger()

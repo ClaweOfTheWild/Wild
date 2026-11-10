@@ -422,7 +422,7 @@ local function CreateAdvancedPage()
             delay[3], nil, nil, nil, { roundTenths = true })
     end
     AddCheckbox(category, "advanced.debug", "Enable debug mode",
-        "Save diagnostic messages without printing scans or planned actions to chat. Use /wild log show to read them.")
+        "Save extra diagnostic messages without printing scans or planned actions to chat. Confirmed intent actions and failures are always saved. Use /wild log show [filter] to read the last 20 matching entries.")
 end
 
 local FILTERS = {

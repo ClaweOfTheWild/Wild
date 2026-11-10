@@ -43,6 +43,7 @@ local function NewEnvironment(mode)
         strtrim = function(value) return value:match("^%s*(.-)%s*$") end,
         print = function(message) state.messages[#state.messages + 1] = message end,
         GetTime = function() return 100 end,
+        date = function() return "2026-11-04 12:00:00" end,
         time = function() return 100 end,
         UnitName = function() return "Test" end,
         GetUnitName = function() return "Test " .. state.surname end,
@@ -112,7 +113,7 @@ local function NewEnvironment(mode)
     end
     Load("Core.lua")
     Fire("ADDON_LOADED", "Wild")
-    Wild.Log = function() end
+    Load("Log.lua")
     Wild.UpdateSoireeAdvisor = function() end
     Load("Bank.lua")
     Load("CharacterData.lua")

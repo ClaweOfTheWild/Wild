@@ -30,6 +30,7 @@ local mailQueue = {}
 local isSending = false
 local mailPassNum = 0
 local mailTotalSent = 0
+local mailSummaryCount = 0
 local pendingMail
 local mailGeneration = 0
 local mailConfirmationTimer
@@ -39,8 +40,32 @@ local RescanMailQueue
 local rescanFrame = CreateFrame("Frame")
 local CONFIRMATION_TIMEOUT = 10
 
-local function StopMailQueue(warning, keepPending)
-    if warning then Wild.Print("|cffff6600Wild:|r " .. warning) end
+local function PrintMailSummary(complete)
+    if mailTotalSent == 0 or mailTotalSent == mailSummaryCount then return end
+    mailSummaryCount = mailTotalSent
+    Wild.Print(string.format("|cff00ccffWild:|r Mail %s: %d item(s) sent across %d pass(es).",
+        complete and "complete" or "stopped", mailTotalSent, mailPassNum))
+end
+
+local function StopMailQueue(warning, keepPending, reason)
+    if warning then
+        local status = reason == "mail_failed" and "failed" or pendingMail and "unconfirmed" or "stopped"
+        if pendingMail then
+            pendingMail.failuresLogged = pendingMail.failuresLogged or {}
+            if not pendingMail.failuresLogged[reason] then
+                Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = pendingMail.items }, {
+                    source = "bags", target = pendingMail.recipient, recipient = pendingMail.recipient,
+                    status = status, reason = reason,
+                })
+                pendingMail.failuresLogged[reason] = true
+            end
+        end
+        Wild.Warn("Mail", warning, {
+            action = "mail", status = status, reason = reason,
+            recipient = pendingMail and pendingMail.recipient,
+        })
+    end
+    PrintMailSummary(false)
     local keep = keepPending and pendingMail
     if not keep and mailConfirmationTimer then mailConfirmationTimer:Cancel(); mailConfirmationTimer = nil end
     rescanFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
@@ -129,9 +154,15 @@ end
 
 local function ProcessNextMail()
     if not isSending or pendingMail or #mailQueue == 0 then return end
-    if GetSendMailItem(1) or GetCursorInfo() then
-        StopMailQueue("Mail attachments or the cursor are already occupied; stopped mail queue.")
+    if GetCursorInfo() then
+        StopMailQueue("Mail attachments or the cursor are already occupied; stopped mail queue.", false, "cursor_occupied")
         return
+    end
+    for index = 1, MAX_ATTACHMENTS do
+        if GetSendMailItem(index) then
+            StopMailQueue("Mail attachments or the cursor are already occupied; stopped mail queue.", false, "attachments_occupied")
+            return
+        end
     end
 
     local entry = table.remove(mailQueue, 1)
@@ -144,7 +175,8 @@ local function ProcessNextMail()
     bagsUpdated = false
     for _, item in ipairs(items) do
         local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-        if info and info.itemID == item.itemID and info.hyperlink == item.link and not info.isLocked then
+        local matchesRequest = info and info.itemID == item.itemID and info.hyperlink == item.link
+        if matchesRequest and not info.isLocked then
             C_Container.PickupContainerItem(item.bag, item.slot)
             ClickSendMailItemButton(attached + 1)
             local _, itemID, _, stackCount = GetSendMailItem(attached + 1)
@@ -152,7 +184,10 @@ local function ProcessNextMail()
             if itemID ~= info.itemID or not stackCount or stackCount <= 0 or GetCursorInfo()
                 or (link and info.hyperlink and link ~= info.hyperlink) then
                 ClearCursor()
-                StopMailQueue("Mail attachment was not confirmed; stopped mail queue.")
+                local context = { source = "bags", target = recipient, recipient = recipient, reason = "attachment_not_confirmed" }
+                Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = { item } }, context)
+                Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = confirmedItems }, context)
+                StopMailQueue("Mail attachment was not confirmed; stopped mail queue.", false, "attachment_not_confirmed")
                 return
             end
             attached = attached + 1
@@ -162,7 +197,10 @@ local function ProcessNextMail()
                 itemID = itemID, count = stackCount,
             }
         else
-            Wild.Log("Mail", "Skipped a mail attachment because its bag slot changed or is locked.")
+            Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = { item } }, {
+                source = "bags", target = recipient, recipient = recipient, status = "skipped",
+                reason = matchesRequest and info.isLocked and "item_locked" or "slot_changed",
+            })
         end
     end
 
@@ -171,12 +209,14 @@ local function ProcessNextMail()
         Wild.MergeItemActionEntries(batch.items, confirmedItems)
         pendingMail = batch
         mailConfirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
-            if pendingMail == batch then StopMailQueue("Mail send was not confirmed; stopped mail queue.") end
+            if pendingMail == batch then
+                StopMailQueue("Mail send was not confirmed; stopped mail queue.", true, "confirmation_timeout")
+            end
         end)
         local subject = "Wild: " .. count .. " item(s)"
         SendMail(recipient, subject, "")
     else
-        StopMailQueue("No mail attachments could be prepared; stopped mail queue.")
+        StopMailQueue("No mail attachments could be prepared; stopped mail queue.", false, "no_attachments")
     end
 end
 
@@ -206,12 +246,10 @@ RescanMailQueue = function()
     if mailConfirmationTimer then mailConfirmationTimer:Cancel(); mailConfirmationTimer = nil end
     BuildMailQueue()
     if #mailQueue == 0 then
-        if mailTotalSent > 0 then
-            Wild.Print(string.format("|cff00ccffWild:|r Mail complete: %d item(s) sent across %d pass(es).", mailTotalSent, mailPassNum))
-        end
+        PrintMailSummary(true)
         StopMailQueue()
     elseif mailPassNum >= MAX_MAIL_PASSES then
-        StopMailQueue("Mail safety cap reached (" .. MAX_MAIL_PASSES .. " passes).")
+        StopMailQueue("Mail safety cap reached (" .. MAX_MAIL_PASSES .. " passes).", false, "safety_cap")
     else
         mailPassNum = mailPassNum + 1
         ScheduleMailStep(Wild.db.advanced.passDelay, ProcessNextMail)
@@ -226,6 +264,7 @@ local function StartMailSend()
     mailGeneration = mailGeneration + 1
     mailPassNum = 1
     mailTotalSent = 0
+    mailSummaryCount = 0
     bagsUpdated = false
     rescanFrame:RegisterEvent("BAG_UPDATE_DELAYED")
     rescanFrame:SetScript("OnEvent", function()
@@ -244,16 +283,19 @@ frame:RegisterEvent("MAIL_SHOW")
 frame:RegisterEvent("MAIL_CLOSED")
 frame:RegisterEvent("MAIL_SEND_SUCCESS")
 frame:RegisterEvent("MAIL_FAILED")
+frame:RegisterEvent("UI_ERROR_MESSAGE")
 
-frame:SetScript("OnEvent", function(self, event)
-    if event == "MAIL_SHOW" then
+frame:SetScript("OnEvent", function(self, event, ...)
+    if event == "UI_ERROR_MESSAGE" then
+        if isSending then Wild.LogClientError("Mail", ...) end
+    elseif event == "MAIL_SHOW" then
         AutoOpenMail()
         local generation = mailGeneration
         C_Timer.After(Wild.db.advanced.mailStartDelay, function()
             if mailGeneration == generation then StartMailSend() end
         end)
     elseif event == "MAIL_CLOSED" then
-        StopMailQueue(pendingMail and "Mailbox closed before the send was confirmed; stopped mail queue." or nil, true)
+        StopMailQueue(pendingMail and "Mailbox closed before the send was confirmed; stopped mail queue." or nil, true, "mailbox_closed")
     elseif event == "MAIL_SEND_SUCCESS" then
         if pendingMail then
             local batch = pendingMail
@@ -261,13 +303,15 @@ frame:SetScript("OnEvent", function(self, event)
             if mailConfirmationTimer then mailConfirmationTimer:Cancel(); mailConfirmationTimer = nil end
             mailTotalSent = mailTotalSent + batch.count
             for _, item in ipairs(batch.items) do
-                Wild.Print(string.format("|cff00ccffWild:|r Mailed %s \195\151%d to %s.", item.link or ("Item " .. item.itemID), item.count, batch.recipient))
+                item.recipient = batch.recipient
+                Wild.LogAction("Mail", "mail", item)
+                Wild.Print("|cff00ccffWild:|r " .. Wild.FormatActionResult("mail", item))
             end
-            if isSending then OnMailSendComplete() end
+            if isSending then OnMailSendComplete() else PrintMailSummary(false) end
         end
     elseif event == "MAIL_FAILED" then
         if isSending or pendingMail then
-            StopMailQueue("Mail send failed. Stopping mail queue.")
+            StopMailQueue("Mail send failed. Stopping mail queue.", false, "mail_failed")
         end
     end
 end)

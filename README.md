@@ -259,6 +259,76 @@ offers are not required. Neither function selects anything in the game.
 The [Wild specifications](docs/index.md) define the required behavior and user
 outcomes, including self-explanatory configuration and slash-command coverage.
 
+## Intent actions and logs
+
+Wild saves confirmed intent actions and failures in `WildDB.log`, even when
+Debug Mode is off. Chat reports completed quantities, not queued requests.
+Failed or unconfirmed items do not increase action totals or remove earlier
+successful results from the summary.
+
+### Processing path
+
+1. Validate enabled rules and actor filters. Match item include groups and
+   apply exclude groups through `Conditions.lua`.
+2. Read the source inventory, request the action, and retain its item variant
+   and actual bank or mail destination.
+3. Use client events and `Core.lua` evidence helpers to confirm the result.
+4. Save each newly confirmed quantity once. Combine confirmed stacks of the
+   same variant and route for chat output.
+5. Re-scan remaining items. On failure, keep confirmed results and record
+   unresolved quantities separately.
+
+| Action | Required confirmation |
+| --- | --- |
+| Vendor sale | The requested variant's total decreases across all physical player bags, with an empty cursor |
+| Bank deposit or withdrawal | The source decreases and the destination increases by matching quantities |
+| Bank transfer | Both withdrawal and deposit are confirmed; withdrawn items left in bags are reported as withdrawals, not transfers |
+| Gold synchronization | Player and bank balances show matching changes |
+| Mail | `MAIL_SEND_SUCCESS`, using actual attachment quantities and the captured recipient |
+| Destruction | Bag removal and an empty cursor after the player's hardware click |
+
+Evidence includes storage excluded from rule selection, such as the reagent
+bag and Forever keyring. Moving an item there is not a sale or deletion.
+Duplicate events do not count the same movement twice. Vendor retries retain
+late results for other pending variants without adding delays between sales.
+A transfer keeps its withdrawal evidence until its deposit and retry phases
+settle, including receipts that arrive after an earlier partial deposit.
+A failed deletion shows earlier confirmed results while the next click remains
+under player control.
+Pending vendor sales and hardware deletions do not act on the same variant
+at the same time. A blocked delete requires another click after the sale
+settles. Vendor requests wait while the cursor is occupied.
+
+Mail summaries show **complete** only on normal completion, or **stopped** when
+the queue stops after earlier successful sends. A send acknowledgment that
+arrives after a close or timeout can still update the confirmed total, but it
+does not restart the queue. An unresolved send blocks another automated mail
+run until the client reports success or failure.
+
+### Read the history
+
+Run `/wild log show` for the last 20 matching entries. For example,
+`/wild log show Vendor`, `/wild log show Bank`, `/wild log show mail`, and
+`/wild log show warning` filter the shared history. `/wild log` shows the saved
+entry count. `/wild log clear` clears actions, warnings, and diagnostics.
+
+The ring buffer retains the latest 5,000 entries across reloads. Debug Mode
+adds scan and rule diagnostics to the same buffer; it is not required for
+action history. Replay formats item icons and money when displayed.
+
+`Wild.GetLogEntries(filter)` returns chronological records. Each has `t`
+(session time), `d` (date and time), `s` (processor), `m` (stored message), and
+`kind` (`action`, `warning`, or `debug`). Confirmed action records have
+`status = "confirmed"`, `action`, item `itemID`, `link`, and `count` where
+applicable, numeric `copper`, and the actual `source`, `target`, or `recipient`.
+Each record contains a new confirmed quantity, not a running total.
+
+Unresolved warnings use `unconfirmedCount` or `unconfirmedCopper` and a
+`reason`, not completed-action counts. Native client errors retain their
+`errorType` and message with `status = "client_error"`. They identify the active
+processor, not an assumed item or cause. A timeout alone does not establish
+that a bank is full or an item cannot be sold.
+
 ## Developer checks
 
 Run the focused specifications with a Lua 5.1 interpreter from the repository

@@ -179,8 +179,8 @@ subcommands.help = function()
     Print("/wild trace filter <text> — Filter events by name")
     Print("/wild trace show — Show last 50 entries in chat")
     Print("/wild trace clear — Clear the log")
-    Print("/wild log show [filter] — Show the last 20 matching debug entries")
-    Print("/wild log clear — Clear saved debug diagnostics")
+    Print("/wild log show [filter] — Show the last 20 matching actions, warnings, or diagnostics")
+    Print("/wild log clear — Clear saved actions, warnings, and diagnostics")
     print(" ")
     Print("/wild find <name> — Search items across all characters")
     Print("/wild datastore — Show cross-character datastore status")
@@ -882,18 +882,19 @@ subcommands.log = function(args)
     local sub = args[1] and args[1]:lower() or ""
     if sub == "clear" then
         Wild.ClearLog()
-        Print("Debug log cleared.")
+        Print("Log cleared.")
     elseif sub == "show" then
         local filter = #args > 1 and table.concat(args, " ", 2) or nil
         local entries = Wild.GetLogEntries(filter)
         local start = math.max(1, #entries - 19)
-        Print(string.format("Debug log: %d matching entries.", #entries))
+        Print(string.format("Log: %d matching entries (showing the last 20).", #entries))
         for i = start, #entries do
             local entry = entries[i]
-            Wild.Print(string.format("|cff00ccffWild [%s]:|r %s %s", entry.s, entry.d, entry.m))
+            local message = entry.kind == "action" and Wild.FormatActionResult(entry.action, entry) or entry.m
+            Wild.Print(string.format("|cff00ccffWild [%s]:|r %s %s", entry.s, entry.d, message))
         end
     else
-        Print(string.format("Debug log: %d saved entries. Use /wild log show [filter] or /wild log clear.", Wild.GetLogCount()))
+        Print(string.format("Log: %d saved entries. Actions and failures are always saved; debug adds diagnostics. Use /wild log show [filter] or /wild log clear.", Wild.GetLogCount()))
     end
 end
 

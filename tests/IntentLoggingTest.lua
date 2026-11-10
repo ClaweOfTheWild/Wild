@@ -1,6 +1,7 @@
 -- Run from the repository root with Lua 5.1: lua tests\IntentLoggingTest.lua
 local LINK = "|cff1eff00|Hitem:1:0|h[Test Item]|h|r"
 local OTHER_LINK = "|cff1eff00|Hitem:2:0|h[Other Item]|h|r"
+local THIRD_LINK = "|cff1eff00|Hitem:3:0|h[Third Item]|h|r"
 local COUNT = " \195\151"
 
 local function Equal(actual, expected)
@@ -10,12 +11,20 @@ end
 local function Item(count, itemID)
     return {
         itemID = itemID or 1, stackCount = count or 1,
-        hyperlink = itemID == 2 and OTHER_LINK or LINK,
+        hyperlink = itemID == 2 and OTHER_LINK or itemID == 3 and THIRD_LINK or LINK,
     }
 end
 
 local function FillBag(state, bag)
     for slot = 1, 20 do state.bags[bag][slot] = Item(200) end
+end
+
+local function ActionEntries(Wild, action)
+    local entries = {}
+    for _, entry in ipairs(Wild.GetLogEntries()) do
+        if entry.kind == "action" and entry.action == action then entries[#entries + 1] = entry end
+    end
+    return entries
 end
 
 local function NewEnvironment(...)
@@ -217,11 +226,11 @@ local function NewEnvironment(...)
         return total
     end
     for _, file in ipairs({ ... }) do Load(file) end
-    local function Fire(event)
+    local function Fire(event, ...)
         if event == "MAIL_SEND_SUCCESS" then state.attachments = {} end
         local frames = { unpack(state.frames) }
         for _, frame in ipairs(frames) do
-            if frame.events[event] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, event) end
+            if frame.events[event] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, event, ...) end
         end
     end
     local function RunTimers()
@@ -274,9 +283,9 @@ local function NewEnvironment(...)
         if request.kind == "destroy" then state.cursor = nil end
         return count
     end
-    local function Tick()
+    local function Tick(elapsed)
         for _, frame in ipairs(state.frames) do
-            if frame.shown and frame.scripts.OnUpdate then frame.scripts.OnUpdate(frame, 1) end
+            if frame.shown and frame.scripts.OnUpdate then frame.scripts.OnUpdate(frame, elapsed or 1) end
         end
     end
     local function ClickDestroy()
@@ -924,6 +933,497 @@ local tests = {
         Equal(#Messages("Destroyed "), 0)
         Equal(state.bags[0][1].stackCount, 2)
         Equal(#Messages("confirmed"), 1)
+    end },
+    { "a late vendor confirmation survives a partially completed batch", function()
+        local Wild, state, Fire, RunTimers, _, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3, 2)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers()
+        Tick(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Tick(); Fire("BAG_UPDATE_DELAYED"); Tick(); RunTimers()
+        Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Tick(); Tick(); RunTimers()
+        Equal(#Messages("Sold "), 2)
+        Equal(#Messages("Auto-sold 5 item(s) for 500 copper."), 1)
+        Equal(#state.requests, 2)
+    end },
+    { "vendor confirmations are saved before a later refused item ends the run", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3, 2)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers()
+        Tick(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        local entries = ActionEntries(Wild, "sell")
+        Equal(#entries, 1)
+        Equal(entries[1].itemID, 1)
+        Equal(entries[1].count, 2)
+        Equal(entries[1].copper, 200)
+        Equal(entries[1].status, "confirmed")
+        Tick(); Tick(); RunTimeouts(); RunTimers()
+        Tick(); Tick(); RunTimeouts(); RunTimers()
+        Equal(#Messages("Sold "), 1)
+        Equal(#Messages("Auto-sold 2 item(s) for 200 copper."), 1)
+        Equal(#ActionEntries(Wild, "sell"), 1)
+    end },
+    { "retrying one item does not discard late confirmations for other item variants", function()
+        local Wild, state, Fire, RunTimers, _, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1], state.bags[0][2], state.bags[0][3] = Item(2), Item(3, 2), Item(4, 3)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers()
+        Tick(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Tick(); Tick(); Fire("BAG_UPDATE_DELAYED"); Tick(); RunTimers()
+        Tick()
+        Equal(#state.requests, 4)
+        Apply(3); Fire("BAG_UPDATE_DELAYED")
+        Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Tick(); Tick(); RunTimers()
+        Equal(#Messages("Sold "), 3)
+        Equal(#Messages("Auto-sold 9 item(s) for 900 copper."), 1)
+        Equal(#state.requests, 4)
+        local total = 0
+        for _, entry in ipairs(ActionEntries(Wild, "sell")) do total = total + entry.count end
+        Equal(total, 9)
+    end },
+    { "vendor requests retain the configured rate without waiting between items", function()
+        local Wild, state, Fire, RunTimers, _, _, Tick = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3, 2)
+        Wild.db.advanced.sellInterval = 0.2
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers()
+        Tick(0.01)
+        Equal(#state.requests, 1)
+        Tick(0.1)
+        Equal(#state.requests, 1)
+        Tick(0.1)
+        Equal(#state.requests, 2)
+    end },
+    { "synchronous bank completion does not wait for a confirmation timeout", function()
+        local Wild, state, Fire, RunTimers, _, Apply, _, _, Messages, env = NewEnvironment("Bank.lua")
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "deposit", target = "warband", groups = { {} } } }
+        local use = env.C_Container.UseContainerItem
+        env.C_Container.UseContainerItem = function(...)
+            use(...)
+            Apply(#state.requests)
+            Fire("BAG_UPDATE_DELAYED")
+        end
+        Wild.RunBankIntents(); RunTimers()
+        Equal(#Messages("Deposited "), 1)
+        Equal(#state.requests, 1)
+    end },
+    { "confirmed bank results and the exact refused remainder are saved without debug mode", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply = NewEnvironment("Bank.lua")
+        state.bags[0][1] = Item(8)
+        Wild.db.intents = { { action = "deposit", target = "warband", groups = { {} } } }
+        Wild.RunBankIntents()
+        Apply(1, 3); Fire("BAG_UPDATE_DELAYED")
+        local entries = ActionEntries(Wild, "deposit")
+        Equal(#entries, 1)
+        Equal(entries[1].count, 3)
+        Equal(entries[1].source, "bags")
+        Equal(entries[1].target, "warband")
+        RunTimers(); RunTimeouts()
+        Equal(#ActionEntries(Wild, "deposit"), 1)
+        local failures = {}
+        for _, entry in ipairs(Wild.GetLogEntries()) do
+            if entry.kind == "warning" and entry.itemID == 1 then failures[#failures + 1] = entry end
+        end
+        Equal(#failures, 1)
+        Equal(failures[1].action, "deposit")
+        Equal(failures[1].unconfirmedCount, 5)
+        Equal(failures[1].target, "warband")
+        Equal(failures[1].status, "unconfirmed")
+    end },
+    { "transfer history separates completed transfers from withdrawals left in bags", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply = NewEnvironment("Bank.lua")
+        state.bags[6][1] = Item(5)
+        Wild.db.intents = { { action = "transfer", source = "character", target = "warband", groups = { {} } } }
+        Wild.RunBankIntents()
+        Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Equal(#ActionEntries(Wild, "withdraw"), 0)
+        Apply(2, 2); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        RunTimeouts()
+        local transfers, withdrawals = ActionEntries(Wild, "transfer"), ActionEntries(Wild, "withdraw")
+        Equal(#transfers, 1)
+        Equal(transfers[1].count, 2)
+        Equal(transfers[1].source, "character")
+        Equal(transfers[1].target, "warband")
+        Equal(#withdrawals, 1)
+        Equal(withdrawals[1].count, 3)
+        Equal(withdrawals[1].source, "character")
+        Equal(withdrawals[1].target, "bags")
+    end },
+    { "failed mail retains the summary and history of earlier successful batches", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, Messages = NewEnvironment("Bank.lua", "Mail.lua")
+        for slot = 1, 13 do state.bags[0][slot] = Item(2) end
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Fire("BAG_UPDATE_DELAYED"); Fire("MAIL_SEND_SUCCESS"); RunTimers()
+        Equal(#state.sent, 2)
+        Fire("MAIL_FAILED"); RunTimers()
+        Equal(#Messages("Mail stopped: 24 item(s) sent"), 1)
+        Equal(#Messages("Mail complete:"), 0)
+        local entries = ActionEntries(Wild, "mail")
+        Equal(#entries, 1)
+        Equal(entries[1].count, 24)
+        Equal(entries[1].recipient, "Alt-Realm")
+    end },
+    { "a mail timeout preserves the pending acknowledgment without resuming the queue", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, _, _, _, Messages = NewEnvironment("Bank.lua", "Mail.lua")
+        for slot = 1, 13 do state.bags[0][slot] = Item(2) end
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers(); RunTimeouts()
+        Equal(#Messages("Mailed "), 0)
+        Fire("MAIL_SEND_SUCCESS"); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#Messages("Mailed "), 1)
+        Equal(#Messages("Mail stopped: 24 item(s) sent"), 1)
+        Equal(#Messages("Mail complete:"), 0)
+        Equal(#state.sent, 1)
+        Equal(ActionEntries(Wild, "mail")[1].count, 24)
+    end },
+    { "mail checks all attachment slots before preparing an automated send", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, Messages = NewEnvironment("Bank.lua", "Mail.lua")
+        state.bags[0][1], state.attachments[2] = Item(2), Item(3, 2)
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.sent, 0)
+        Equal(state.bags[0][1].stackCount, 2)
+        Equal(state.attachments[2].stackCount, 3)
+        Equal(#Messages("Mailed "), 0)
+        Equal(#Messages("already occupied"), 1)
+    end },
+    { "destroy confirmations are saved while another item still awaits a click", function()
+        local Wild, state, Fire, _, _, Apply, _, ClickDestroy = NewEnvironment("Bank.lua", "Inventory.lua")
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3, 2)
+        Wild.QueueDestroyItems({
+            { itemID = 1, bag = 0, slot = 1, link = LINK, count = 2 },
+            { itemID = 2, bag = 0, slot = 2, link = OTHER_LINK, count = 3 },
+        })
+        ClickDestroy(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        local entries = ActionEntries(Wild, "destroy")
+        Equal(#entries, 1)
+        Equal(entries[1].itemID, 1)
+        Equal(entries[1].count, 2)
+        Fire("BAG_UPDATE_DELAYED")
+        Equal(#ActionEntries(Wild, "destroy"), 1)
+    end },
+    { "saved action records do not change when the original result changes", function()
+        local Wild = NewEnvironment()
+        local result = { key = LINK, link = LINK, itemID = 1, count = 3, copper = 300 }
+        Wild.LogAction("Vendor", "sell", result)
+        result.count, result.copper = 99, 9900
+        local entries = ActionEntries(Wild, "sell")
+        Equal(#entries, 1)
+        Equal(entries[1].count, 3)
+        Equal(entries[1].copper, 300)
+        assert(not entries[1].m:find("|T", 1, true))
+        Equal(#Wild.GetLogEntries("vendor"), 1)
+        Wild.ClearLog()
+        Equal(Wild.GetLogCount(), 0)
+    end },
+    { "the shared action log retains its bounded chronological order", function()
+        local Wild = NewEnvironment()
+        for count = 1, 5002 do
+            Wild.LogAction("Inventory", "destroy", { key = LINK, link = LINK, itemID = 1, count = count })
+        end
+        local entries = Wild.GetLogEntries()
+        Equal(#entries, 5000)
+        Equal(entries[1].count, 3)
+        Equal(entries[#entries].count, 5002)
+    end },
+    { "native errors are saved for active processors without claiming an item failed or printing twice", function()
+        for _, case in ipairs({
+            { source = "Bank", files = { "Bank.lua" } },
+            { source = "Vendor", files = { "Bank.lua", "Vendor.lua" }, event = "MERCHANT_SHOW" },
+            { source = "Mail", files = { "Bank.lua", "Mail.lua" }, event = "MAIL_SHOW" },
+            { source = "Inventory", files = { "Bank.lua", "Inventory.lua" } },
+        }) do
+            local Wild, state, Fire, RunTimers, _, _, _, ClickDestroy, Messages = NewEnvironment(unpack(case.files))
+            Fire("UI_ERROR_MESSAGE", 777, "Example client error")
+            Equal(Wild.GetLogCount(), 0)
+            state.bags[0][1] = Item(3)
+            state.selling = case.source == "Vendor"
+            Wild.db.intents = {
+                { action = "deposit", target = "warband", groups = { {} } },
+                { action = "sell", groups = { {} } },
+                { action = "mail", recipient = "Alt-Realm", groups = { {} } },
+            }
+            if case.source == "Bank" then
+                Wild.RunBankIntents()
+            elseif case.source == "Inventory" then
+                Wild.QueueDestroyItems({ { itemID = 1, bag = 0, slot = 1, link = LINK, count = 3 } })
+                ClickDestroy()
+            else
+                Fire(case.event); RunTimers(); RunTimers()
+            end
+            Fire("UI_ERROR_MESSAGE", 777, "Example client error")
+            local entries = Wild.GetLogEntries("client_error")
+            Equal(#entries, 1)
+            Equal(entries[1].s, case.source)
+            Equal(entries[1].errorType, 777)
+            Equal(entries[1].m, "Example client error")
+            Equal(entries[1].itemID, nil)
+            Equal(#Messages("Example client error"), 0)
+        end
+    end },
+    { "failed mail records the actual unsent attachment quantities and recipient", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Bank.lua", "Mail.lua")
+        state.bags[0][1] = Item(3)
+        local intent = { action = "mail", recipient = "Alt-Realm", groups = { {} } }
+        Wild.db.intents = { intent }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        intent.recipient = "Different-Realm"
+        Fire("MAIL_FAILED")
+        Equal(#ActionEntries(Wild, "mail"), 0)
+        local found = false
+        for _, entry in ipairs(Wild.GetLogEntries()) do
+            if entry.itemID == 1 and entry.reason == "mail_failed" then
+                Equal(entry.kind, "warning")
+                Equal(entry.status, "failed")
+                Equal(entry.unconfirmedCount, 3)
+                Equal(entry.recipient, "Alt-Realm")
+                found = true
+            end
+        end
+        assert(found, "The unsent attachments must remain in the failure history")
+    end },
+    { "an unconfirmed gold request saves its remaining copper without a success record", function()
+        local Wild, _, _, _, RunTimeouts = NewEnvironment("Bank.lua")
+        Wild.db.intents = { { action = "hold", target = "warband", gold = 5 } }
+        Wild.RunBankIntents(); RunTimeouts()
+        Equal(#ActionEntries(Wild, "deposit"), 0)
+        local found = 0
+        for _, entry in ipairs(Wild.GetLogEntries()) do
+            if entry.unconfirmedCopper then
+                Equal(entry.status, "unconfirmed")
+                Equal(entry.unconfirmedCopper, 50000)
+                Equal(entry.target, "warband")
+                Equal(entry.reason, "confirmation_timeout")
+                found = found + 1
+            end
+        end
+        Equal(found, 1)
+    end },
+    { "a failed deletion flushes earlier confirmed chat results without recounting them on retry", function()
+        local Wild, state, Fire, _, RunTimeouts, Apply, _, ClickDestroy, Messages = NewEnvironment("Bank.lua", "Inventory.lua")
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3, 2)
+        local completed
+        Wild.QueueDestroyItems({
+            { itemID = 1, bag = 0, slot = 1, link = LINK, count = 2 },
+            { itemID = 2, bag = 0, slot = 2, link = OTHER_LINK, count = 3 },
+        }, function(count) completed = count end)
+        ClickDestroy(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        ClickDestroy(); RunTimeouts()
+        Equal(#Messages("Destroyed "), 1)
+        Equal(completed, nil)
+        ClickDestroy(); Apply(3); Fire("BAG_UPDATE_DELAYED")
+        Equal(#Messages("Destroyed "), 2)
+        Equal(completed, 5)
+        Equal(#ActionEntries(Wild, "destroy"), 2)
+    end },
+    { "action replay formats money at display time without changing saved evidence", function()
+        local Wild, _, _, _, _, _, _, _, Messages, env = NewEnvironment("SlashCommands.lua")
+        Wild.LogAction("Vendor", "sell", { itemID = 1, link = LINK, count = 3, copper = 300 })
+        env.GetMoneyString = function(amount) return "localized:" .. amount end
+        env.SlashCmdList.WILD("log show sell")
+        Equal(#Messages("Sold "), 1)
+        Equal(#Messages("localized:300"), 1)
+        Equal(ActionEntries(Wild, "sell")[1].copper, 300)
+        assert(not ActionEntries(Wild, "sell")[1].m:find("localized:", 1, true))
+    end },
+    { "successful destroy stacks remain grouped until the queue finishes", function()
+        local Wild, state, Fire, _, _, Apply, _, ClickDestroy, Messages = NewEnvironment("Bank.lua", "Inventory.lua")
+        state.bags[0][1], state.bags[0][2] = Item(2), Item(3)
+        Wild.QueueDestroyItems({
+            { itemID = 1, bag = 0, slot = 1, link = LINK, count = 2 },
+            { itemID = 1, bag = 0, slot = 2, link = LINK, count = 3 },
+        })
+        ClickDestroy(); Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Equal(#Messages("Destroyed "), 0)
+        ClickDestroy(); Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Equal(#Messages("Destroyed "), 1)
+        assert(Messages("Destroyed ")[1]:find(COUNT .. "5", 1, true))
+    end },
+    { "mixed vendor failures and event orders preserve every applied quantity and copper total", function()
+        for scenario = 1, 12 do
+            local Wild, state, Fire, RunTimers, RunTimeouts, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")
+            state.selling = true
+            state.bags[0][1], state.bags[0][2], state.bags[0][3] = Item(2), Item(3, 2), Item(4, 3)
+            Wild.db.intents = { { action = "sell", groups = { {} } } }
+            local expected = { 0, 0, 0 }
+            local seed = scenario
+            local function Next(limit)
+                seed = (seed * 25173 + 13849) % 65536
+                return seed % limit + 1
+            end
+            Fire("MERCHANT_SHOW"); RunTimers()
+            for step = 1, 60 do
+                Tick()
+                if #state.requests > 0 then
+                    local index = Next(#state.requests)
+                    local request = state.requests[index]
+                    local info = state.bags[request.bag][request.slot]
+                    if info and info.itemID == request.item.itemID and info.itemID ~= scenario % 4 then
+                        local count = Next(info.stackCount)
+                        Apply(index, count)
+                        expected[info.itemID] = expected[info.itemID] + count
+                    end
+                end
+                if Next(3) ~= 1 then Fire("BAG_UPDATE_DELAYED") end
+                if step % 2 == 0 then RunTimers() end
+            end
+            Fire("BAG_UPDATE_DELAYED"); RunTimers()
+            for _ = 1, 5 do Tick(); Tick(); Tick(); Tick(); RunTimeouts(); RunTimers() end
+            local actual, copper = { 0, 0, 0 }, 0
+            for _, entry in ipairs(ActionEntries(Wild, "sell")) do
+                actual[entry.itemID] = actual[entry.itemID] + entry.count
+                copper = copper + entry.copper
+            end
+            for itemID = 1, 3 do Equal(actual[itemID], expected[itemID]) end
+            local total = expected[1] + expected[2] + expected[3]
+            Equal(copper, total * 100)
+            Equal(#Messages("Auto-sold " .. total .. " item(s) for " .. (total * 100) .. " copper."), total > 0 and 1 or 0)
+        end
+    end },
+    { "late withdrawals join the active transfer instead of disappearing between phases", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+        state.bags[6][1], state.bags[6][2] = Item(2), Item(3, 2)
+        Wild.db.intents = { { action = "transfer", source = "character", target = "warband", groups = { {} } } }
+        Wild.RunBankIntents()
+        Apply(1); Fire("BAG_UPDATE_DELAYED"); RunTimeouts()
+        Equal(#state.requests, 3)
+        Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Apply(3); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#state.requests, 4)
+        Equal(state.requests[4].item.itemID, 2)
+        Equal(state.requests[4].count, 3)
+        Apply(4); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#Messages("Transferred "), 2)
+        Equal(#Messages("Withdrew "), 0)
+        local total = 0
+        for _, entry in ipairs(ActionEntries(Wild, "transfer")) do total = total + entry.count end
+        Equal(total, 5)
+    end },
+    { "depositing a partial withdrawal does not hide a later receipt of the same variant", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply, _, _, Messages = NewEnvironment("Bank.lua")
+        state.bags[6][1] = Item(5)
+        Wild.db.intents = { { action = "transfer", source = "character", target = "warband", groups = { {} } } }
+        Wild.RunBankIntents()
+        Apply(1, 2); Fire("BAG_UPDATE_DELAYED"); RunTimeouts()
+        Equal(state.requests[2].count, 2)
+        Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Apply(1, 3); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#state.requests, 3)
+        Equal(state.requests[3].kind, "deposit")
+        Equal(state.requests[3].count, 3)
+        Apply(3); Fire("BAG_UPDATE_DELAYED"); RunTimers()
+        Equal(#Messages("Transferred "), 1)
+        assert(Messages("Transferred ")[1]:find(COUNT .. "5", 1, true))
+        Equal(#Messages("Withdrew "), 0)
+        Equal(state.bags[12][1].stackCount, 5)
+    end },
+    { "skipped vendor slots retain their item and reason without debug or repeated warning records", function()
+        local Wild, state, Fire, RunTimers, _, _, Tick = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers()
+        state.bags[0][1].isLocked = true
+        Tick(); Tick(); RunTimers(); Tick()
+        Fire("MERCHANT_CLOSED")
+        Equal(#state.requests, 0)
+        Equal(#ActionEntries(Wild, "sell"), 0)
+        local entries = Wild.GetLogEntries("item_locked")
+        Equal(#entries, 1)
+        Equal(entries[1].itemID, 1)
+        Equal(entries[1].status, "skipped")
+        Equal(entries[1].unconfirmedCount, 3)
+    end },
+    { "a changed locked slot is not reported as the original item being locked", function()
+        for _, case in ipairs({
+            { file = "Vendor.lua", event = "MERCHANT_SHOW", action = "sell" },
+            { file = "Mail.lua", event = "MAIL_SHOW", action = "mail", recipient = "Alt-Realm" },
+        }) do
+            local Wild, state, Fire, RunTimers, _, _, Tick = NewEnvironment("Bank.lua", case.file)
+            state.bags[0][1] = Item(3)
+            Wild.db.intents = { { action = case.action, recipient = case.recipient, groups = { {} } } }
+            Fire(case.event); RunTimers()
+            state.bags[0][1] = Item(7, 2)
+            state.bags[0][1].isLocked = true
+            Tick(); RunTimers()
+            local entries = Wild.GetLogEntries("slot_changed")
+            Equal(#entries, 1)
+            Equal(entries[1].itemID, 1)
+            Equal(entries[1].status, "skipped")
+            Equal(#Wild.GetLogEntries("item_locked"), 0)
+        end
+    end },
+    { "pending vendor sales cannot also be confirmed as hardware deletions", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, Apply, Tick, ClickDestroy, Messages = NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Wild.QueueDestroyItems({ { itemID = 1, bag = 0, slot = 1, link = LINK, count = 3 } })
+        Fire("MERCHANT_SHOW"); RunTimers(); Tick(); Tick()
+        ClickDestroy()
+        Equal(#state.requests, 1)
+        RunTimeouts()
+        ClickDestroy()
+        Equal(#state.requests, 2)
+        Equal(state.requests[2].kind, "destroy")
+        Apply(2); Fire("BAG_UPDATE_DELAYED")
+        Equal(#Messages("Sold "), 0)
+        Equal(#ActionEntries(Wild, "sell"), 0)
+        Equal(ActionEntries(Wild, "destroy")[1].count, 3)
+    end },
+    { "a pending hardware deletion cannot also start a vendor sale", function()
+        local Wild, state, Fire, RunTimers, _, Apply, Tick, ClickDestroy = NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Wild.QueueDestroyItems({ { itemID = 1, bag = 0, slot = 1, link = LINK, count = 3 } })
+        ClickDestroy()
+        state.cursor = nil
+        Fire("MERCHANT_SHOW"); RunTimers(); Tick()
+        Equal(#state.requests, 1)
+        Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Tick(); Tick(); RunTimers()
+        Equal(#ActionEntries(Wild, "sell"), 0)
+        Equal(ActionEntries(Wild, "destroy")[1].count, 3)
+    end },
+    { "vendor requests wait for an occupied cursor without discarding the queued item", function()
+        local Wild, state, Fire, RunTimers, _, Apply, Tick = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1] = Item(3)
+        state.cursor = { item = Item(1, 2), bag = 0, slot = 2 }
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers(); Tick()
+        Equal(#state.requests, 0)
+        state.cursor = nil
+        Tick()
+        Equal(#state.requests, 1)
+        Apply(1); Fire("BAG_UPDATE_DELAYED")
+        Tick(); RunTimers()
+        Equal(ActionEntries(Wild, "sell")[1].count, 3)
+    end },
+    { "moving a requested sale onto the cursor is not confirmation of a sale", function()
+        local Wild, state, Fire, RunTimers, RunTimeouts, _, Tick, _, Messages, env = NewEnvironment("Bank.lua", "Vendor.lua")
+        state.selling = true
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "sell", groups = { {} } } }
+        Fire("MERCHANT_SHOW"); RunTimers(); Tick(); Tick()
+        local item = state.bags[0][1]
+        state.bags[0][1] = nil
+        state.cursor = { item = item, bag = 0, slot = 1, removed = true }
+        Fire("BAG_UPDATE_DELAYED")
+        Equal(#ActionEntries(Wild, "sell"), 0)
+        env.ClearCursor(); Fire("BAG_UPDATE_DELAYED"); RunTimeouts()
+        Equal(#Messages("Sold "), 0)
+        Equal(state.bags[0][1].stackCount, 3)
     end },
 }
 

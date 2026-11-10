@@ -500,16 +500,10 @@ end
 
 local function PrintBankResults(entry)
     local results = entry.results
-    for _, item in ipairs(results.deposit) do
-        Wild.Print(string.format("|cff00ccffWild:|r Deposited %s \195\151%d to %s.", item.link or ("Item " .. item.itemID), item.count, BANK_NAMES[item.target]))
-    end
-    for _, item in ipairs(results.withdraw) do
-        Wild.Print(string.format("|cff00ccffWild:|r Withdrew %s \195\151%d from %s.", item.link or ("Item " .. item.itemID), item.count,
-            BANK_NAMES[item.source]))
-    end
-    for _, item in ipairs(results.transfer) do
-        Wild.Print(string.format("|cff00ccffWild:|r Transferred %s \195\151%d from %s to %s.", item.link or ("Item " .. item.itemID), item.count,
-            BANK_NAMES[item.source], BANK_NAMES[item.target]))
+    for _, action in ipairs({ "deposit", "withdraw", "transfer" }) do
+        for _, item in ipairs(results[action]) do
+            Wild.Print("|cff00ccffWild:|r " .. Wild.FormatActionResult(action, item))
+        end
     end
     for bank, copper in pairs(results.goldDeposit or {}) do
         if copper > 0 then Wild.Print("|cff00ccffWild:|r Deposited " .. Wild.FormatGold(copper) .. " to " .. BANK_NAMES[bank] .. ".") end
@@ -520,14 +514,39 @@ local function PrintBankResults(entry)
     entry.results = { deposit = {}, withdraw = {}, transfer = {} }
 end
 
-local function CollectPassResults(pass)
+local CollectPassResults
+
+local function CollectTransferWithdrawals(pass)
+    local withdrawal = pass.withdrawPass
+    if not withdrawal then return end
+    if not withdrawal.complete then CollectPassResults(withdrawal) end
+    for _, item in ipairs(withdrawal.confirmed.withdraw) do
+        local count = item.count - (withdrawal.forwarded[item.key] or 0)
+        if count > 0 then
+            Wild.MergeItemActionEntries(pass.withdrawn, {
+                { key = item.key, link = item.link, itemID = item.itemID, count = count, source = item.source },
+            })
+            withdrawal.forwarded[item.key] = item.count
+        end
+    end
+end
+
+CollectPassResults = function(pass)
+    CollectTransferWithdrawals(pass)
     local complete = true
+    local deposited = false
     for action, batch in pairs(pass.batches) do
         local entries, done = Wild.ConfirmItemActionBatch(batch)
         for _, item in ipairs(entries) do
             if action == "deposit" then
                 item.target = batch.bank
-                if pass.kind == "transferDeposit" then item.source = pass.source end
+                if pass.kind == "transferDeposit" then
+                    item.source = pass.source
+                    local withdrawal = pass.withdrawPass.batches.withdraw
+                    -- Deposits consume receipts that the earlier withdrawal still needs to observe.
+                    withdrawal.targetBefore[item.key] = (withdrawal.targetBefore[item.key] or 0) - item.count
+                    deposited = true
+                end
             else
                 item.source = batch.bank
             end
@@ -535,6 +554,7 @@ local function CollectPassResults(pass)
         Wild.MergeItemActionEntries(pass.confirmed[action], entries)
         if not done then complete = false end
     end
+    if deposited then CollectTransferWithdrawals(pass) end
     local money = pass.money
     if money then
         local bankMoney = ReadBankMoney(money.target)
@@ -551,6 +571,7 @@ local function CollectPassResults(pass)
             if (deposited or 0) < item.count then complete = false end
         end
     end
+    pass.complete = complete
     return complete
 end
 
@@ -568,26 +589,61 @@ local function TransferLeftovers(pass)
     return leftovers
 end
 
+local function StoreBankEntries(results, action, entries)
+    Wild.MergeItemActionEntries(results[action], entries)
+    for _, item in ipairs(entries) do Wild.LogAction("Bank", action, item) end
+end
+
 local function StorePassResults(pass, aborted)
     local results = pass.entry.results
     if pass.kind == "transferDeposit" then
-        Wild.MergeItemActionEntries(results.transfer, pass.confirmed.deposit)
+        StoreBankEntries(results, "transfer", pass.confirmed.deposit)
         pass.confirmed.deposit = {}
         if aborted and not pass.leftoversStored then
-            Wild.MergeItemActionEntries(results.withdraw, TransferLeftovers(pass))
+            StoreBankEntries(results, "withdraw", TransferLeftovers(pass))
             pass.leftoversStored = true
         end
     elseif pass.kind ~= "transferWithdraw" or aborted then
-        Wild.MergeItemActionEntries(results.deposit, pass.confirmed.deposit)
-        Wild.MergeItemActionEntries(results.withdraw, pass.confirmed.withdraw)
+        StoreBankEntries(results, "deposit", pass.confirmed.deposit)
+        StoreBankEntries(results, "withdraw", pass.confirmed.withdraw)
         pass.confirmed = { deposit = {}, withdraw = {} }
     end
     if pass.money then
         local key = pass.money.deposit and "goldDeposit" or "goldWithdraw"
         local bank = pass.money.target
+        local copper = pass.money.confirmed - (pass.money.stored or 0)
         results[key] = results[key] or {}
-        results[key][bank] = (results[key][bank] or 0) + pass.money.confirmed - (pass.money.stored or 0)
+        results[key][bank] = (results[key][bank] or 0) + copper
         pass.money.stored = pass.money.confirmed
+        if copper > 0 then
+            Wild.LogAction("Bank", pass.money.deposit and "deposit" or "withdraw", {
+                copper = copper, source = pass.money.deposit and "bags" or bank,
+                target = pass.money.deposit and bank or "bags",
+            })
+        end
+    end
+end
+
+local function LogUnconfirmedPass(pass, reason)
+    if pass.failuresLogged then return end
+    pass.failuresLogged = true
+    if pass.withdrawPass then LogUnconfirmedPass(pass.withdrawPass, reason) end
+    for action, batch in pairs(pass.batches) do
+        local transfer = pass.kind == "transferDeposit"
+        Wild.LogUnconfirmedItemActions("Bank", transfer and "transfer" or action, batch, {
+            source = transfer and pass.source or (action == "withdraw" and batch.bank or "bags"),
+            target = action == "deposit" and batch.bank or "bags", reason = reason,
+        })
+    end
+    local money = pass.money
+    if money and money.confirmed < money.count then
+        Wild.Warn("Bank", "Gold synchronization has an unconfirmed remainder of "
+            .. Wild.FormatGold(money.count - money.confirmed) .. ".", {
+            action = money.deposit and "deposit" or "withdraw", status = "unconfirmed",
+            source = money.deposit and "bags" or money.target,
+            target = money.deposit and money.target or "bags",
+            unconfirmedCopper = money.count - money.confirmed, reason = reason,
+        })
     end
 end
 
@@ -617,8 +673,10 @@ local function HasUnconfirmedItemChanges(pass)
 end
 
 local function HasSettledBankEvidence(pass)
+    if pass.complete and (not pass.withdrawPass or pass.withdrawPass.complete) then return true end
     return not HasUnconfirmedItemChanges(pass)
         and (not pass.money or pass.money.confirmed == pass.money.count)
+        and (not pass.withdrawPass or pass.withdrawPass.complete or HasSettledBankEvidence(pass.withdrawPass))
 end
 
 local function CanRetryPartialPass(pass)
@@ -661,7 +719,8 @@ end
 
 local function RequestBankItems(pass, action, target, intent, charCtx, count, itemLimits)
     if not BANK_NAMES[target] then
-        Wild.Print("|cffff6600Wild:|r Invalid bank target: " .. tostring(target))
+        Wild.Warn("Bank", "Invalid bank target: " .. tostring(target),
+            { action = action, target = target, reason = "invalid_target" })
         return
     end
     local batch = pass.batches[action]
@@ -682,7 +741,8 @@ local function RequestBankItems(pass, action, target, intent, charCtx, count, it
     elseif WITHDRAW_FUNCS[target] then
         requested, entries = WITHDRAW_FUNCS[target](intent, charCtx, count, batch.seen)
     else
-        Wild.Print("|cffff6600Wild:|r No withdraw function for target: " .. tostring(target))
+        Wild.Warn("Bank", "No withdraw function for target: " .. tostring(target),
+            { action = action, source = target, reason = "invalid_target" })
         return
     end
     for _, item in ipairs(entries) do Wild.RecordItemAction(batch, item, item.count) end
@@ -703,7 +763,8 @@ local function RequestGoldSync(pass)
     if playerBefore < keep and pass.entry.triggerSource ~= target then return end
     local bankBefore = ReadBankMoney(target)
     if type(bankBefore) ~= "number" then
-        Wild.Print("|cffff6600Wild:|r Cannot read bank gold; skipped gold synchronization.")
+        Wild.Warn("Bank", "Cannot read bank gold; skipped gold synchronization.",
+            { action = "hold", target = target, reason = "bank_money_unavailable" })
         return
     end
     local deposit = playerBefore > keep
@@ -787,19 +848,28 @@ end
 
 local function FinishUnconfirmedPass(pass)
     StorePassResults(pass, true)
+    LogUnconfirmedPass(pass, "confirmation_timeout")
     if HasSettledBankEvidence(pass) and not GetCursorInfo() then
         ClearConfirmationWait()
-        Wild.Print("|cffff6600Wild:|r Some bank items were not confirmed; skipped remaining items for this intent.")
+        Wild.Warn("Bank", "Some bank items were not confirmed; skipped remaining items for this intent.",
+            { status = "unconfirmed", reason = "confirmation_timeout" })
         AdvanceIntent()
     else
-        Wild.Print("|cffff6600Wild:|r Some bank actions were not confirmed; stopped intent processing.")
+        Wild.Warn("Bank", "Some bank actions were not confirmed; stopped intent processing.",
+            { status = "unconfirmed", reason = "unsettled_evidence" })
         FinishQueue()
     end
 end
 
-local function StartTransferDeposit(entry, withdrawn)
+local function StartTransferDeposit(entry, withdrawn, withdrawal)
     local pass = NewPass(entry, "transferDeposit")
-    pass.withdrawn = withdrawn
+    pass.withdrawn = {}
+    Wild.MergeItemActionEntries(pass.withdrawn, withdrawn)
+    pass.withdrawPass = withdrawal
+    if not withdrawal.forwarded then
+        withdrawal.forwarded = {}
+        for _, item in ipairs(withdrawn) do withdrawal.forwarded[item.key] = item.count end
+    end
     pass.source = withdrawn[1].source
     local limits, count = {}, 0
     for _, item in ipairs(withdrawn) do
@@ -818,28 +888,17 @@ end
 CompletePass = function(pass)
     ClearConfirmationWait()
     if pass.kind == "transferWithdraw" and #pass.confirmed.withdraw > 0 then
-        StartTransferDeposit(pass.entry, pass.confirmed.withdraw)
+        StartTransferDeposit(pass.entry, pass.confirmed.withdraw, pass)
         return
     end
     StorePassResults(pass, false)
     pass.entry.settlingPass = pass
     if pass.entry.passNum >= MAX_PASSES_PER_INTENT then
         StorePassResults(pass, true)
-        Wild.Print("|cffff6600Wild:|r Bank intent safety cap reached (" .. MAX_PASSES_PER_INTENT .. " passes).")
+        LogUnconfirmedPass(pass, "safety_cap")
+        Wild.Warn("Bank", "Bank intent safety cap reached (" .. MAX_PASSES_PER_INTENT .. " passes).",
+            { reason = "safety_cap" })
         AdvanceIntent()
-    elseif pass.kind == "transferDeposit" and #TransferLeftovers(pass) > 0 then
-        ScheduleStep(Wild.db.advanced.passDelay, function()
-            CollectPassResults(pass)
-            StorePassResults(pass, false)
-            local leftovers = TransferLeftovers(pass)
-            pass.entry.settlingPass = nil
-            if #leftovers > 0 then
-                pass.entry.passNum = pass.entry.passNum + 1
-                StartTransferDeposit(pass.entry, leftovers)
-            else
-                ProcessQueueStep()
-            end
-        end)
     else
         ScheduleStep(Wild.db.advanced.passDelay, ProcessQueueStep)
     end
@@ -853,27 +912,43 @@ WaitForPass = function(pass)
         if event == "BAG_UPDATE_DELAYED" then pass.bagsUpdated = true end
         local complete = CollectPassResults(pass)
         local partial = pass.kind ~= "transferWithdraw" and CanRetryPartialPass(pass)
-        if (complete or partial) and (not HasItemRequests(pass) or pass.bagsUpdated) then
+        if ((complete and HasSettledBankEvidence(pass)) or partial) and (not HasItemRequests(pass) or pass.bagsUpdated) then
             CompletePass(pass)
         end
     end)
     confirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
         if pendingPass ~= pass then return end
-        if CollectPassResults(pass) or CanRetryPartialPass(pass) then
+        if (CollectPassResults(pass) and HasSettledBankEvidence(pass)) or CanRetryPartialPass(pass) then
             CompletePass(pass)
         else
             FinishUnconfirmedPass(pass)
         end
     end)
+    -- Some client calls complete before the event listener can be installed.
+    if CollectPassResults(pass) and HasSettledBankEvidence(pass) then CompletePass(pass) end
 end
 
 ProcessQueueStep = function()
     if not activeQueue then return end
     local entry = activeQueue[activeIndex]
     if entry.settlingPass then
-        CollectPassResults(entry.settlingPass)
-        StorePassResults(entry.settlingPass, false)
+        local pass = entry.settlingPass
+        CollectPassResults(pass)
+        StorePassResults(pass, false)
+        if not HasSettledBankEvidence(pass) then
+            WaitForPass(pass)
+            return
+        end
         entry.settlingPass = nil
+        if pass.kind == "transferDeposit" then
+            local leftovers = TransferLeftovers(pass)
+            if #leftovers > 0 then
+                entry.passNum = entry.passNum + 1
+                StartTransferDeposit(entry, leftovers, pass.withdrawPass)
+                return
+            end
+            LogUnconfirmedPass(pass.withdrawPass, "withdrawal_retry")
+        end
     end
     entry.passNum = (entry.passNum or 0) + 1
     local pass = ExecuteIntentPass(entry)
@@ -1069,7 +1144,10 @@ local function OnBankClosed()
     local unconfirmed = pendingPass and not CollectPassResults(pendingPass)
     if entry and entry.settlingPass and not CollectPassResults(entry.settlingPass) then unconfirmed = true end
     if unconfirmed then
-        Wild.Print("|cffff6600Wild:|r Bank closed before all actions were confirmed; stopped intent processing.")
+        if pendingPass then LogUnconfirmedPass(pendingPass, "bank_closed") end
+        if entry and entry.settlingPass then LogUnconfirmedPass(entry.settlingPass, "bank_closed") end
+        Wild.Warn("Bank", "Bank closed before all actions were confirmed; stopped intent processing.",
+            { status = "unconfirmed", reason = "bank_closed" })
     end
     FinishQueue()
 end
@@ -1081,10 +1159,13 @@ frame:RegisterEvent("GUILDBANKFRAME_OPENED")
 frame:RegisterEvent("GUILDBANKFRAME_CLOSED")
 frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
 frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+frame:RegisterEvent("UI_ERROR_MESSAGE")
 frame:SetScript("OnEvent", function(self, event, ...)
     local arg1 = select(1, ...)
     BlogMsg("Event: " .. event .. " args=" .. tostring(arg1))
-    if event == "BANKFRAME_OPENED" then
+    if event == "UI_ERROR_MESSAGE" then
+        if activeQueue then Wild.LogClientError("Bank", ...) end
+    elseif event == "BANKFRAME_OPENED" then
         OnBankOpened()
     elseif event == "BANKFRAME_CLOSED" then
         OnBankClosed()
@@ -1121,7 +1202,7 @@ end)
 Wild.RunBankIntents = function()
     local sources = GetAccessibleSources()
     if not (sources.character or sources.warband or sources.guild) then
-        Wild.Print("|cffff6600Wild:|r Open an accessible bank before running bank rules.")
+        Wild.Warn("Bank", "Open an accessible bank before running bank rules.", { reason = "bank_closed" })
         return false
     end
     ProcessIntents(sources)
