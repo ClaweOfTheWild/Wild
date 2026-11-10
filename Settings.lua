@@ -5223,7 +5223,7 @@ local function CreateVolumeTab()
     local enableCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
     enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
     enableCB.Text:SetText("Enable Volume Button")
-    enableCB.tooltipText = "Show a small Wild icon on screen. Click it to open volume controls."
+    enableCB.tooltipText = "Show a small Wild icon on screen. Left-click for volume controls; right-click for Wild settings. Drag to move."
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()

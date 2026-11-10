@@ -7,7 +7,7 @@ end
 local function NewEnvironment(saved, mode, addonIcon)
     local state = {
         frames = {}, timers = {}, messages = {}, now = 0, cvars = {},
-        sliderMouseDowns = 0, sliderMouseUps = 0,
+        sliderMouseDowns = 0, sliderMouseUps = 0, settingsOpens = 0,
     }
     for _, channel in ipairs({ "Master", "SFX", "Music", "Ambience", "Dialog" }) do
         state.cvars["Sound_" .. channel .. "Volume"] = "0.5"
@@ -58,7 +58,16 @@ local function NewEnvironment(saved, mode, addonIcon)
     end
     function methods:IsShown() return self.shown end
     function methods:SetShown(shown) if shown then self:Show() else self:Hide() end end
-    function methods:Click() self:RunScript("OnClick") end
+    function methods:RegisterForClicks(...)
+        self.clicks = {}
+        for _, click in ipairs({ ... }) do self.clicks[click] = true end
+    end
+    function methods:Click(mouseButton)
+        mouseButton = mouseButton or "LeftButton"
+        if not self.clicks or self.clicks[mouseButton .. "Up"] then
+            self:RunScript("OnClick", mouseButton)
+        end
+    end
     function methods:SetText(text) self.text = text end
     function methods:SetTexture(texture) self.texture = texture end
     function methods:SetTexCoord(...) self.coordinates = { ... } end
@@ -75,7 +84,7 @@ local function NewEnvironment(saved, mode, addonIcon)
         "SetSize", "SetWidth", "SetHeight", "SetFrameStrata", "SetClampedToScreen",
         "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetAllPoints",
         "SetAlpha", "SetJustifyH", "SetMovable",
-        "RegisterForDrag", "RegisterForClicks", "SetMinMaxValues", "SetValueStep",
+        "RegisterForDrag", "SetMinMaxValues", "SetValueStep",
         "SetObeyStepOnDrag", "EnableMouse", "StartMoving", "StopMovingOrSizing",
     }) do
         methods[name] = function() end
@@ -111,7 +120,13 @@ local function NewEnvironment(saved, mode, addonIcon)
         state.timers[#state.timers + 1] = timer
         return timer
     end }
-    local Wild = {}
+    local Wild = {
+        OpenSettings = function(page)
+            state.settingsOpens = state.settingsOpens + 1
+            state.settingsPage = page
+            return true
+        end,
+    }
     local function Load(path) setfenv(assert(loadfile(path)), env)("Wild", Wild) end
     local function Fire(event, ...)
         local frames = { unpack(state.frames) }
@@ -160,6 +175,47 @@ local function NewEnvironment(saved, mode, addonIcon)
 end
 
 local tests = {
+    { "right-click opens Wild settings without creating a volume panel in either client", function()
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local Wild, state, _, _, Button = NewEnvironment(nil, mode)
+            Wild.SetFeatureEnabled("volume", true)
+            local frames = #state.frames
+            Button():Click("RightButton")
+            Equal(state.settingsOpens, 1)
+            Equal(state.settingsPage, nil, "Open the Wild root page, not another settings category")
+            Equal(#state.frames, frames)
+            Equal(#state.timers, 0)
+            Equal(Wild.IsFeatureEnabled("volume"), true)
+        end
+    end },
+    { "right-click leaves an open volume panel and its timeout unchanged", function()
+        local _, state, Advance, Open, Button = NewEnvironment()
+        local panel = Open()
+        Advance(4)
+        local timers = #state.timers
+        Button():Click("RightButton")
+        Equal(state.settingsOpens, 1)
+        Equal(panel:IsShown(), true)
+        Equal(#state.timers, timers)
+        Advance(1)
+        Equal(panel:IsShown(), false)
+    end },
+    { "dragging still saves the icon position without opening volume or settings", function()
+        local Wild, state, _, _, Button = NewEnvironment()
+        Wild.SetFeatureEnabled("volume", true)
+        local button = Button()
+        local frames = #state.frames
+        button:RunScript("OnDragStart")
+        button:SetPoint("CENTER", nil, "CENTER", 20, -40)
+        button:RunScript("OnDragStop")
+        button:Click("LeftButton")
+        Equal(Wild.db.volumeControl.buttonPos[4], 20)
+        Equal(Wild.db.volumeControl.buttonPos[5], -40)
+        Equal(#state.frames, frames)
+        Equal(state.settingsOpens, 0)
+        button:Click("RightButton")
+        Equal(state.settingsOpens, 1)
+    end },
     { "the volume button and hover highlight show Wild's full declared icon in both clients", function()
         for _, mode in ipairs({ "retail", "forever" }) do
             for _, icon in ipairs({

@@ -87,8 +87,11 @@ the junction is not a backup.
 
 ## Volume panel timeout
 
-Enable the green W button with `/wild volume on`, then click it to open the
-volume panel. The default timeout is five seconds. The timer starts each time
+Enable the green W button with `/wild volume on`. Left-click it to open the
+volume panel. Right-click it to open **Settings > AddOns > Wild**, the same
+page as `/wild`.
+
+The default timeout is five seconds. The timer starts each time
 the panel opens, even if you do not change a volume. Each click or adjustment
 restarts it. While you hold a control, the timer waits until you release it.
 Hover alone does not stop the timer. Only the panel hides; the Wild icon button

@@ -706,7 +706,7 @@ end
 local function CreateVolumePage()
     local category = AddPage("Volume")
     local enabled = AddCheckbox(category, "volumeControl.enabled", "Enable Volume Button",
-        "Show a draggable Wild icon button with WoW volume controls.", "volume")
+        "Show a draggable Wild icon. Left-click for volume controls; right-click for Wild settings.", "volume")
     local timeout = AddNumber(category, "volumeControl.autoHideDelay", "Auto-hide timeout (seconds)", 0, 30, 0.5,
         "Hide the volume panel after this many seconds. Opening it starts the timer; each click or adjustment " ..
         "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. Enter Value " ..

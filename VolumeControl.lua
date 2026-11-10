@@ -189,9 +189,13 @@ local function CreateButton()
         end
     end)
 
-    b:SetScript("OnClick", function(self)
+    b:SetScript("OnClick", function(self, mouseButton)
         if dragged then
             dragged = false
+            return
+        end
+        if mouseButton == "RightButton" then
+            Wild.OpenSettings()
             return
         end
         if not panel then
@@ -209,12 +213,12 @@ local function CreateButton()
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("Wild Volume")
-        GameTooltip:AddLine("|cff888888Click to toggle volume controls.\nDrag to move.|r")
+        GameTooltip:AddLine("|cff888888Left-click to toggle volume controls.\nRight-click to open Wild settings.\nDrag to move.|r")
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    b:RegisterForClicks("LeftButtonUp")
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     return b
 end
