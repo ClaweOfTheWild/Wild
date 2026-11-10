@@ -24,7 +24,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     local state = {
         frames = {}, categories = {}, settings = {}, layouts = {}, messages = {},
         updates = {}, creates = {}, refreshes = {}, valueCallbacks = {}, opens = 0,
-        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, soireeUpdates = 0, combat = false,
+        speedUpdates = 0, circleUpdates = 0, castUpdates = 0, soireeUpdates = 0, volumeUpdates = 0, combat = false,
     }
     local env = setmetatable({
         WOW_PROJECT_ID = mode == "forever" and 18 or 1,
@@ -381,6 +381,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     Wild.UpdateScreenCenterCircle = function() state.circleUpdates = state.circleUpdates + 1 end
     Wild.UpdateCastHistory = function() state.castUpdates = state.castUpdates + 1 end
     Wild.UpdateSoireeAdvisor = function() state.soireeUpdates = state.soireeUpdates + 1 end
+    Wild.UpdateVolumeControl = function() state.volumeUpdates = state.volumeUpdates + 1 end
     Wild.ShowSoireeAdvisor = function() state.soireeShows = (state.soireeShows or 0) + 1 end
     Wild.UpdateDialogKey = function() end
     Wild.CreateSettingsCanvas = function(name, namespace)
@@ -499,6 +500,104 @@ local tests = {
         Equal(Setting("speed.enabled"):GetValue(), false)
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
+    end },
+    { "volume timeout controls share precise saved values with slash commands and API changes", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local timeout = Setting("volumeControl.autoHideDelay")
+        Equal(timeout:GetDefaultValue(), 5)
+        Equal(timeout:GetValue(), 5)
+        timeout:SetValue(2.5)
+        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 2.5)
+        Equal(state.volumeUpdates, 1)
+        local control = state.ShowSlider("volumeControl.autoHideDelay")
+        Wild.HandleSlashCommand("volume timeout 90.25")
+        Equal(timeout:GetValue(), 90.25)
+        Equal(control.label, 90.25, "Refresh must preserve values above the slider range")
+        Wild.SetSetting("volumeControl.autoHideDelay", 0)
+        Equal(timeout:GetValue(), 0)
+        timeout:SetValueToDefault()
+        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 5)
+        Equal(Wild.IsFeatureEnabled("volume"), false, "The timeout is editable before enabling volume")
+        Setting("volumeControl.enabled"):SetValue(true)
+        Equal(Wild.IsFeatureEnabled("volume"), true)
+    end },
+    { "the native volume timeout exact-value dialog accepts fractions and rejects negative input", function()
+        local Wild, state, env = NewEnvironment()
+        local entry
+        for _, initializer in ipairs(state.layouts.Volume.initializers) do
+            if initializer.data.name == "Auto-hide timeout (seconds) (exact value)" then entry = initializer.data end
+        end
+        assert(entry, "Volume timeout has precise numeric entry")
+        entry.buttonClick()
+        state.popup.editBox:SetText("90.25")
+        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data), false)
+        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 90.25)
+        entry.buttonClick()
+        state.popup.editBox:SetText("-1")
+        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data), true)
+        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 90.25)
+    end },
+    { "the volume timeout command icon offers the saved value without running it", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local command
+        for _, initializer in ipairs(state.layouts.Volume.initializers) do
+            if initializer.data.name == "Auto-hide timeout command" then command = initializer end
+        end
+        assert(command, "The volume timeout has an associated command icon")
+        Equal(command.data.buttonText, "/")
+        Setting("volumeControl.autoHideDelay"):SetValue(2.5)
+        assert(command:GetTooltip():find("/wild volume timeout 2.5", 1, true))
+        Wild.SetSetting("volumeControl.autoHideDelay", 90.25)
+        assert(command:GetTooltip():find("/wild volume timeout 90.25", 1, true))
+        local saved, messages = Copy(Wild.db), #state.messages
+        command.data.buttonClick()
+        Equal(state.popup.editBox:GetText(), "/wild volume timeout 90.25")
+        Equal(state.popup.editBox:HasFocus(), true)
+        Equal(#state.messages, messages, "Manual copying is not reported as clipboard success")
+        Same(Wild.db, saved)
+    end },
+    { "the volume canvas edits the same timeout without overwriting focused text on refresh", function()
+        local Wild, state, _, Setting, _, Load = NewEnvironment()
+        Load("Settings.lua")
+        local panel = Wild.CreateSettingsCanvas("Volume")
+        panel:OnRefresh()
+        local input = assert(FindChild(state, panel, function(frame) return frame.kind == "EditBox" end))
+        input:SetText("2.75")
+        input:SetFocus()
+        panel:OnRefresh()
+        Equal(input:GetText(), "2.75")
+        input.scripts.OnEnterPressed(input)
+        Equal(Setting("volumeControl.autoHideDelay"):GetValue(), 2.75)
+        Wild.SetSetting("volumeControl.autoHideDelay", 0)
+        panel:OnRefresh()
+        Equal(input:GetText(), "0")
+    end },
+    { "the volume canvas command icon copies saved state rather than a focused draft", function()
+        local Wild, state, env, _, _, Load = NewEnvironment()
+        local lines = {}
+        env.GameTooltip = {
+            SetOwner = function() end,
+            AddLine = function(_, line) lines[#lines + 1] = line end,
+            Show = function() end,
+            Hide = function() end,
+        }
+        Load("Settings.lua")
+        local panel = Wild.CreateSettingsCanvas("Volume")
+        panel:OnRefresh()
+        local input = assert(FindChild(state, panel, function(frame) return frame.kind == "EditBox" end))
+        local command = assert(FindChild(state, panel, function(frame)
+            return frame.kind == "Button" and frame:GetText() == "/"
+        end))
+        input:SetText("9")
+        input:SetFocus()
+        Wild.HandleSlashCommand("volume timeout 2.5")
+        panel:OnRefresh()
+        Equal(input:GetText(), "9")
+        command.scripts.OnEnter(command)
+        Equal(lines[2], "/wild volume timeout 2.5")
+        command:Click()
+        Equal(state.popup.editBox:GetText(), "/wild volume timeout 2.5")
+        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 2.5)
     end },
     { "container controls share persistent defaults and independent per-ID choices", function()
         local Wild, state, _, Setting, _, Load = NewEnvironment({
@@ -811,7 +910,7 @@ local tests = {
         Wild.db.quests.autoHandIn = false
         Wild.db.tooltip.enabled = false
         for _, page in ipairs({ "LFG", "Center Circle", "Cast History", "Auction House",
-            "Crafting Orders", "Quests", "Tooltips" }) do
+            "Crafting Orders", "Quests", "Tooltips", "Volume" }) do
             for _, initializer in ipairs(state.layouts[page].initializers) do
                 local data = initializer.data
                 if data.setting or data.buttonText == "Enter Value" then

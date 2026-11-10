@@ -161,6 +161,24 @@ StaticPopupDialogs.WILD_NATIVE_NUMBER = {
     end,
 }
 
+StaticPopupDialogs.WILD_NATIVE_COMMAND = {
+    text = "Direct clipboard copy is not available here. Press Ctrl+C to copy this command.",
+    button1 = CLOSE or "Close",
+    hasEditBox = true,
+    editBoxWidth = 300,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    OnShow = function(self, command)
+        local editBox = self:GetEditBox()
+        editBox:SetMaxLetters(0)
+        editBox:SetText(command)
+        editBox:SetFocus()
+        editBox:HighlightText()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+}
+
 local function ApplyContainerID(popup)
     return Wild.SetContainerAutoOpen(popup:GetEditBox():GetText(), false)
 end
@@ -687,8 +705,23 @@ end
 
 local function CreateVolumePage()
     local category = AddPage("Volume")
-    AddCheckbox(category, "volumeControl.enabled", "Enable Volume Button",
-        "Show a draggable speaker button with WoW volume controls.", "volume")
+    local enabled = AddCheckbox(category, "volumeControl.enabled", "Enable Volume Button",
+        "Show a draggable Wild icon button with WoW volume controls.", "volume")
+    local timeout = AddNumber(category, "volumeControl.autoHideDelay", "Auto-hide timeout (seconds)", 0, 30, 0.5,
+        "Hide the volume panel after this many seconds. Opening it starts the timer; each click or adjustment " ..
+        "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. Enter Value " ..
+        "also accepts delays above 30 seconds. Command: /wild volume timeout <seconds>.",
+        nil, nil, enabled, { allowAboveMaximum = true })
+    local function GetCommand()
+        return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")
+    end
+    local command = AddButton(category.layout, "Auto-hide timeout command", "/", function()
+        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, GetCommand())
+    end)
+    function command:GetTooltip()
+        return GetCommand() .. "\nClick / to select this command, then press Ctrl+C to copy it."
+    end
+    ConfigureInitializer(command, category, "volumeControl.autoHideDelay", timeout)
 end
 
 local function CreateDurabilityPage()

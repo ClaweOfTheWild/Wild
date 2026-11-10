@@ -208,6 +208,7 @@ local defaults = {
     },
     volumeControl = {
         enabled = false,
+        autoHideDelay = 5,
         buttonPos = nil,
     },
     intents = {},
@@ -906,9 +907,17 @@ function Wild.SetSetting(key, value, source)
     if containerID and Wild.SetContainerAutoOpen then
         return Wild.SetContainerAutoOpen(containerID, value, source)
     end
+    if key == "volumeControl.autoHideDelay" and
+       (type(value) ~= "number" or value ~= value or value < 0 or value == math.huge) then
+        Wild.Print("|cffff6600Wild:|r Volume timeout must be a finite number of seconds, 0 or greater. Use 0 to keep the panel open.")
+        return false
+    end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
+    if (key == "volumeControl" or key:match("^volumeControl%.")) and Wild.UpdateVolumeControl then
+        Wild.UpdateVolumeControl()
+    end
     Wild.NotifySettingsChanged(key, source)
     if (key == "containers" or key == "containers.items" or key == "includeReagentBag") and Wild.ScanContainers then
         Wild.ScanContainers()
@@ -923,6 +932,7 @@ function Wild.ResetSettings()
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end
+    if Wild.UpdateVolumeControl then Wild.UpdateVolumeControl() end
     if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end

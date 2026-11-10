@@ -1,7 +1,7 @@
 -- Wild: Volume control mini-button and popup panel
 local ADDON_NAME, Wild = ...
 
-local ICON_TEXTURE = 1405819 -- INV_Engineering_SonicEnvironmentEnhancer
+local ICON_TEXTURE = C_AddOns.GetAddOnMetadata(ADDON_NAME, "IconTexture")
 local BUTTON_SIZE = 28
 local ROW_HEIGHT = 22
 local LABEL_WIDTH = 56
@@ -19,6 +19,36 @@ local CHANNELS = {
 }
 
 local button, panel
+local hideTimer, activeControl
+
+local function CancelPanelHideTimer()
+    if hideTimer then
+        hideTimer:Cancel()
+        hideTimer = nil
+    end
+end
+
+local function RestartPanelHideTimer()
+    CancelPanelHideTimer()
+    if not panel or not panel:IsShown() or activeControl then return end
+    local delay = Wild.GetSetting("volumeControl.autoHideDelay")
+    if not delay or delay <= 0 then return end
+    hideTimer = C_Timer.NewTimer(delay, function()
+        hideTimer = nil
+        panel:Hide()
+    end)
+end
+
+local function WatchPanelInteraction(control)
+    control:HookScript("OnMouseDown", function(self)
+        activeControl = self
+        CancelPanelHideTimer()
+    end)
+    control:HookScript("OnMouseUp", function(self)
+        if activeControl == self then activeControl = nil end
+        RestartPanelHideTimer()
+    end)
+end
 
 -- ============================================================
 -- Panel
@@ -32,6 +62,7 @@ local function CreatePanel()
     f:SetSize(panelW, panelH)
     f:SetFrameStrata("DIALOG")
     f:SetClampedToScreen(true)
+    f:EnableMouse(true)
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -39,6 +70,7 @@ local function CreatePanel()
     })
     f:SetBackdropColor(0.08, 0.08, 0.10, 0.92)
     f:SetBackdropBorderColor(0.25, 0.25, 0.30, 1)
+    WatchPanelInteraction(f)
 
     f.rows = {}
 
@@ -63,7 +95,9 @@ local function CreatePanel()
             local enabled = GetCVar(ch.enable) == "1"
             SetCVar(ch.enable, enabled and "0" or "1")
             self.check:SetShown(not enabled)
+            RestartPanelHideTimer()
         end)
+        WatchPanelInteraction(cb)
         xOff = xOff + CB_SIZE + 2
 
         -- Channel label
@@ -84,6 +118,7 @@ local function CreatePanel()
         slider:SetObeyStepOnDrag(true)
         slider.Low:SetText("")
         slider.High:SetText("")
+        WatchPanelInteraction(slider)
         xOff = xOff + SLIDER_WIDTH + 4
 
         -- Percentage
@@ -95,6 +130,7 @@ local function CreatePanel()
         slider:SetScript("OnValueChanged", function(self, value)
             SetCVar(ch.cvar, value)
             pct:SetText(math.floor(value * 100 + 0.5) .. "%")
+            RestartPanelHideTimer()
         end)
 
         f.rows[i] = { slider = slider, pct = pct, cb = cb, cvar = ch.cvar, enable = ch.enable }
@@ -107,6 +143,11 @@ local function CreatePanel()
             r.pct:SetText(math.floor(val * 100 + 0.5) .. "%")
             r.cb.check:SetShown(GetCVar(r.enable) == "1")
         end
+        RestartPanelHideTimer()
+    end)
+    f:SetScript("OnHide", function()
+        activeControl = nil
+        CancelPanelHideTimer()
     end)
 
     f:Hide()
@@ -114,7 +155,7 @@ local function CreatePanel()
 end
 
 -- ============================================================
--- Draggable speaker button
+-- Draggable Wild button
 -- ============================================================
 
 local function CreateButton()
@@ -128,12 +169,10 @@ local function CreateButton()
     local icon = b:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
     icon:SetTexture(ICON_TEXTURE)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
     local highlight = b:CreateTexture(nil, "HIGHLIGHT")
     highlight:SetAllPoints()
     highlight:SetTexture(ICON_TEXTURE)
-    highlight:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     highlight:SetAlpha(0.3)
 
     local dragged = false
@@ -218,6 +257,7 @@ end
 function Wild.UpdateVolumeControl()
     if Wild.db and Wild.db.volumeControl and Wild.db.volumeControl.enabled then
         Wild.ShowVolumeButton()
+        RestartPanelHideTimer()
     else
         Wild.HideVolumeButton()
     end

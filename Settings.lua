@@ -5218,23 +5218,74 @@ local function CreateVolumeTab()
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888Show a small draggable speaker icon with quick volume sliders.|r")
+    desc:SetText("|cff888888Show a small draggable Wild icon with quick volume sliders.|r")
 
     local enableCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
     enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
     enableCB.Text:SetText("Enable Volume Button")
-    enableCB.tooltipText = "Show a small speaker icon on screen. Click it to open volume controls."
+    enableCB.tooltipText = "Show a small Wild icon on screen. Click it to open volume controls."
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
         SetSetting("volumeControl.enabled", checked)
         PlaySound(checked and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-        Wild.UpdateVolumeControl()
     end)
+
+    local timeoutLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    timeoutLabel:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 22, -20)
+    timeoutLabel:SetText("Auto-hide timeout (seconds)")
+
+    local timeout = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    timeout:SetSize(80, 20)
+    timeout:SetPoint("LEFT", timeoutLabel, "RIGHT", 16, 0)
+    timeout:SetAutoFocus(false)
+    timeout:SetNumeric(false)
+    timeout:SetMaxLetters(12)
+    timeout:SetScript("OnEnterPressed", function(self)
+        if Wild.SetSetting("volumeControl.autoHideDelay", tonumber(self:GetText()), "native") then
+            self:ClearFocus()
+        end
+    end)
+    local function RestoreTimeout(self)
+        self:SetText(tostring(Wild.GetSetting("volumeControl.autoHideDelay")))
+    end
+    timeout:SetScript("OnEditFocusLost", RestoreTimeout)
+    timeout:SetScript("OnEscapePressed", function(self)
+        RestoreTimeout(self)
+        self:ClearFocus()
+    end)
+
+    local function GetCommand()
+        return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")
+    end
+    local command = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    command:SetSize(24, 22)
+    command:SetPoint("LEFT", timeout, "RIGHT", 8, 0)
+    command:SetText("/")
+    command:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Saved timeout command")
+        GameTooltip:AddLine(GetCommand(), 1, 1, 1)
+        GameTooltip:AddLine("Click / to select this command, then press Ctrl+C to copy it.", nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    command:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    command:SetScript("OnClick", function()
+        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, GetCommand())
+    end)
+
+    local hint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", timeoutLabel, "BOTTOMLEFT", 0, -12)
+    hint:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("|cff888888The timer starts when the volume panel opens. Each click or adjustment restarts it. " ..
+        "It waits while you hold a control. Set 0 to keep the panel open. Press Enter to save.\n" ..
+        "/wild volume timeout <seconds>|r")
 
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.volumeControl then
             enableCB:SetChecked(Wild.db.volumeControl.enabled)
+            RestoreTimeout(timeout)
         end
     end)
 

@@ -85,6 +85,34 @@ clients' `WTF` folders or install a second Wild copy over the junction.
 Deleting or editing files through either addon path changes the master too;
 the junction is not a backup.
 
+## Volume panel timeout
+
+Enable the green W button with `/wild volume on`, then click it to open the
+volume panel. The default timeout is five seconds. The timer starts each time
+the panel opens, even if you do not change a volume. Each click or adjustment
+restarts it. While you hold a control, the timer waits until you release it.
+Hover alone does not stop the timer. Only the panel hides; the Wild icon button
+stays available. The button uses the same green W as Wild's addon-list icon.
+
+Open **Settings > AddOns > Wild > Volume** with `/wild native volume`.
+**Auto-hide timeout (seconds)** sets the delay. **Enter Value** accepts
+fractions and values above the slider's 30-second range. Set `0` to keep the
+panel open until you close it. The `/` command icon shows the command for the
+saved timeout. Click it to select the command, then press Ctrl+C to copy it.
+This does not run the command.
+
+| Command | Behavior |
+| --- | --- |
+| `/wild volume timeout` | Show the saved timeout |
+| `/wild volume timeout 2.5` | Hide the panel after 2.5 seconds without another interaction |
+| `/wild volume timeout 0` | Turn off panel auto-hide |
+
+`Wild.SetSetting("volumeControl.autoHideDelay", 2.5)` uses the same saved value
+and updates an open panel immediately. It returns `true` for a finite number
+of seconds that is `0` or greater. Invalid values warn, return `false`, and
+leave the saved value unchanged. `Wild.GetSetting("volumeControl.autoHideDelay")`
+reads the delay. Volume controls remain off by default in both clients.
+
 ## Auto-open bag containers
 
 Open **Settings > AddOns > Wild > Containers**, or run `/wild containers`.
@@ -342,12 +370,19 @@ lua tests\IntentLoggingTest.lua
 lua tests\SoireePlannerTest.lua
 lua tests\SoireeAdvisorTest.lua
 lua tests\NativeSettingsTest.lua
+lua tests\VolumeControlTest.lua
 ```
 
-The fixtures cover container discovery and event sequencing, plus the Soiree API
-shapes and manual fallback. A live client smoke check should confirm container
-opening, selector detection, and layout; mock tests do not establish that the
-selector supplies complete structured reward data.
+The fixtures cover intent confirmations, partial failures, late events, summary
+totals, history retention, and unchanged vendor intervals. They also cover
+container discovery and event sequencing, plus the Soiree API shapes and manual
+fallback. WoW APIs are simulated because they are unavailable outside the client.
+A live Retail and Forever check must confirm merchant refusals, full banks,
+mail acknowledgments, deletion prompts, and displayed results. The local
+fixtures do not establish live server behavior or complete Soiree reward data.
+Volume fixtures cover opening without adjustments, interaction resets, held
+controls, cancellation, and shared timeout settings. A live client check must
+confirm slider dragging and panel layout.
 
 ## Sources
 

@@ -164,6 +164,7 @@ subcommands.help = function()
     Print("/wild dungeonbar show|hide|toggle — Control visibility")
     print(" ")
     Print("/wild volume on|off — Toggle volume control button")
+    Print("/wild volume timeout [seconds] - Show or set the panel auto-hide timeout; 0 keeps it open")
     print(" ")
     Print("/wild durability — Show durability overlay status")
     Print("/wild durability on|off — Toggle all durability overlays")
@@ -762,9 +763,21 @@ subcommands.find = function(args)
 end
 subcommands.search = subcommands.find
 
--- /wild volume on|off — toggle volume control button
+-- /wild volume [on|off|timeout [seconds]]
 subcommands.volume = function(args)
-    HandleGenericFeature("volume", args)
+    if #args <= 1 and HandleGenericFeature("volume", args) then return end
+    if args[1] and args[1]:lower() == "timeout" and #args <= 2 then
+        if not Wild.db then PrintWarn("Volume settings have not loaded yet."); return end
+        if args[2] and not Wild.SetSetting("volumeControl.autoHideDelay", tonumber(args[2])) then return end
+        local seconds = Wild.GetSetting("volumeControl.autoHideDelay")
+        if seconds == 0 then
+            Print("Volume panel auto-hide is off (timeout 0 seconds).")
+        else
+            Print("Volume panel auto-hide timeout: " .. seconds .. " seconds.")
+        end
+        return
+    end
+    PrintWarn("Usage: /wild volume on|off|timeout [seconds]. Use 0 to keep the panel open.")
 end
 subcommands.vol = subcommands.volume
 

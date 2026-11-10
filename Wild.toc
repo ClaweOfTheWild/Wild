@@ -4,7 +4,7 @@
 ## Author: Clawe of the Wild
 ## Version: 1.0.0
 ## SavedVariables: WildDB
-## IconTexture: Interface\Icons\ability_druid_flourish
+## IconTexture: Interface\AddOns\Wild\Media\Wild.tga
 ## Category: Miscellaneous
 
 Core.lua
