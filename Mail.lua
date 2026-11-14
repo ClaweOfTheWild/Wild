@@ -164,6 +164,15 @@ local function ProcessNextMail()
             return
         end
     end
+    if not SendMailFrame or not MailFrameTab_OnClick or not SendMailNameEditBox
+        or not SendMailSubjectEditBox or not SendMailBodyEditBox then
+        StopMailQueue("Mail send controls are unavailable; stopped mail queue.", false, "mail_ui_unavailable")
+        return
+    end
+
+    if not SendMailFrame:IsShown() or SendMailFrame.sendMode == "reply" then
+        MailFrameTab_OnClick(nil, 2)
+    end
 
     local entry = table.remove(mailQueue, 1)
     local recipient = entry.recipient
@@ -205,6 +214,10 @@ local function ProcessNextMail()
     end
 
     if attached > 0 then
+        local subject = "Wild: " .. count .. " item(s)"
+        SendMailNameEditBox:SetText(recipient)
+        SendMailSubjectEditBox:SetText(subject)
+        SendMailBodyEditBox:SetText("")
         local batch = { recipient = recipient, items = {}, count = count }
         Wild.MergeItemActionEntries(batch.items, confirmedItems)
         pendingMail = batch
@@ -213,7 +226,6 @@ local function ProcessNextMail()
                 StopMailQueue("Mail send was not confirmed; stopped mail queue.", true, "confirmation_timeout")
             end
         end)
-        local subject = "Wild: " .. count .. " item(s)"
         SendMail(recipient, subject, "")
     else
         StopMailQueue("No mail attachments could be prepared; stopped mail queue.", false, "no_attachments")

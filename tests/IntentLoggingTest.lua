@@ -1,4 +1,5 @@
 -- Run from the repository root with Lua 5.1: lua tests\IntentLoggingTest.lua
+-- WoW mail controls are simulated; these tests do not establish live server behavior.
 local LINK = "|cff1eff00|Hitem:1:0|h[Test Item]|h|r"
 local OTHER_LINK = "|cff1eff00|Hitem:2:0|h[Other Item]|h|r"
 local THIRD_LINK = "|cff1eff00|Hitem:3:0|h[Third Item]|h|r"
@@ -176,6 +177,20 @@ local function NewEnvironment(...)
     env.GetSendMailItemLink = function(index)
         local info = state.attachments[index]
         return info and info.hyperlink
+    end
+    local function MailEditBox()
+        local editBox = { text = "" }
+        function editBox:SetText(text) self.text = text end
+        function editBox:GetText() return self.text end
+        return editBox
+    end
+    env.SendMailNameEditBox = MailEditBox()
+    env.SendMailSubjectEditBox = MailEditBox()
+    env.SendMailBodyEditBox = MailEditBox()
+    env.SendMailFrame = { IsShown = function() return state.mailTab == 2 end }
+    env.MailFrameTab_OnClick = function(_, tabID)
+        state.mailTab = tabID
+        env.SendMailFrame.sendMode = tabID == 2 and "send" or nil
     end
     env.SendMail = function(recipient, subject)
         state.sent[#state.sent + 1] = recipient
@@ -838,6 +853,78 @@ local tests = {
         Equal(#Messages("Mailed "), 1)
         assert(Messages("Mailed ")[1]:find(COUNT .. "5 to Alt-Realm.", 1, true))
         Equal(#Messages("Mail complete: 5 item(s)"), 1)
+    end },
+    { "mail prepares the native send tab and preserves full recipient names in both clients", function()
+        for _, case in ipairs({
+            { forever = true, recipient = "Alt Family" },
+            { forever = true, recipient = "Alt Family-Realm", reply = true },
+            { forever = false, recipient = "Alt-Realm" },
+        }) do
+            local Wild, state, Fire, RunTimers, _, _, _, _, _, env = NewEnvironment("Bank.lua", "Mail.lua")
+            Wild.isForever, Wild.isRetail = case.forever, not case.forever
+            state.bags[0][1] = Item(3)
+            local intent = { action = "mail", recipient = case.recipient, groups = { {} } }
+            Wild.db.intents = { intent }
+            env.SendMailSubjectEditBox:SetText("Old subject")
+            env.SendMailBodyEditBox:SetText("Old body")
+            if case.reply then
+                state.mailTab = 2
+                env.SendMailFrame.sendMode = "reply"
+            end
+            local send = env.SendMail
+            env.SendMail = function(recipient, subject, body)
+                Equal(state.mailTab, 2)
+                Equal(env.SendMailFrame.sendMode, "send")
+                Equal(env.SendMailNameEditBox:GetText(), case.recipient)
+                Equal(env.SendMailSubjectEditBox:GetText(), "Wild: 3 item(s)")
+                Equal(env.SendMailBodyEditBox:GetText(), "")
+                Equal(recipient, case.recipient)
+                Equal(subject, env.SendMailSubjectEditBox:GetText())
+                Equal(body, env.SendMailBodyEditBox:GetText())
+                send(recipient, subject)
+            end
+            Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+            Equal(#state.sent, 1)
+            Equal(intent.recipient, case.recipient)
+            Equal(#ActionEntries(Wild, "mail"), 0)
+            Fire("MAIL_SEND_SUCCESS")
+            Equal(ActionEntries(Wild, "mail")[1].recipient, case.recipient)
+        end
+    end },
+    { "each mail batch restores native fields after the client clears them", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, _, env = NewEnvironment("Bank.lua", "Mail.lua")
+        for slot = 1, 13 do state.bags[0][slot] = Item(2) end
+        Wild.db.intents = { { action = "mail", recipient = "Alt Family", groups = { {} } } }
+        local send = env.SendMail
+        env.SendMail = function(recipient, subject, body)
+            Equal(state.mailTab, 2)
+            Equal(env.SendMailNameEditBox:GetText(), "Alt Family")
+            Equal(env.SendMailSubjectEditBox:GetText(), subject)
+            Equal(env.SendMailBodyEditBox:GetText(), body)
+            send(recipient, subject)
+        end
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.sent, 1)
+        Fire("MAIL_SEND_SUCCESS")
+        env.SendMailNameEditBox:SetText("")
+        env.SendMailSubjectEditBox:SetText("")
+        env.SendMailBodyEditBox:SetText("")
+        env.MailFrameTab_OnClick(nil, 1)
+        RunTimers()
+        Equal(#state.sent, 2)
+        Equal(state.subject, "Wild: 2 item(s)")
+    end },
+    { "missing native mail controls stop the queue before moving items", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, Messages, env = NewEnvironment("Bank.lua", "Mail.lua")
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "mail", recipient = "Alt Family", groups = { {} } } }
+        env.SendMailNameEditBox = nil
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.sent, 0)
+        Equal(state.bags[0][1].stackCount, 3)
+        Equal(next(state.attachments), nil)
+        Equal(#ActionEntries(Wild, "mail"), 0)
+        Equal(#Messages("Mail send controls are unavailable"), 1)
     end },
     { "failed or refused mail produces no success log and cannot resume later", function()
         for _, refuse in ipairs({ false, true }) do

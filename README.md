@@ -346,6 +346,12 @@ Pending vendor sales and hardware deletions do not act on the same variant
 at the same time. A blocked delete requires another click after the sale
 settles. Vendor requests wait while the cursor is occupied.
 
+For a **Mail** intent, set **Recipient** to the address you use for manual
+mail. Keep the space in Forever's full character name, such as `Alt Family`.
+Realm-qualified names, such as `Alt Family-Realm`, also keep that space.
+Wild selects **Send Mail**, fills **To** and **Subject**, and clears **Body**
+before each batch. It does not rewrite the saved recipient.
+
 Mail summaries show **complete** only on normal completion, or **stopped** when
 the queue stops after earlier successful sends. A send acknowledgment that
 arrives after a close or timeout can still update the confirmed total, but it
@@ -396,7 +402,8 @@ lua tests\SpeedIndicatorTest.lua
 The fixtures cover intent confirmations, partial failures, late events, summary
 totals, history retention, and unchanged vendor intervals. They also cover
 container discovery and event sequencing, plus the Soiree API shapes and manual
-fallback. WoW APIs are simulated because they are unavailable outside the client.
+fallback. Mail fixtures cover native send-field preparation and full Forever
+recipient names. WoW APIs are simulated because they are unavailable outside the client.
 A live Retail and Forever check must confirm merchant refusals, full banks,
 mail acknowledgments, deletion prompts, and displayed results. The local
 fixtures do not establish live server behavior or complete Soiree reward data.
@@ -409,6 +416,8 @@ both clients.
 
 ## Sources
 
+- [Pinned Retail native mail preparation](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_MailFrame/MailFrame.lua)
+- [Pinned Forever native mail preparation](https://github.com/Gethe/wow-ui-source/blob/17ed2c3e8471cdc3806ab0d26a082be7c67d3d7c/Interface/AddOns/Blizzard_MailFrame/MailFrame.lua)
 - [Pinned Retail bag-container API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua)
 - [Pinned Retail Player Choice API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/PlayerChoiceDocumentation.lua)
 - [Pinned Retail friendship reputation API](https://github.com/Gethe/wow-ui-source/blob/18c6d677b605b312f3d813d498404631fb941977/Interface/AddOns/Blizzard_APIDocumentationGenerated/GossipInfoDocumentation.lua)

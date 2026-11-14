@@ -92,6 +92,11 @@ local function NewEnvironment(...)
             local info = state.attachments[index]
             return info and info.hyperlink
         end,
+        SendMailFrame = { IsShown = function() return true end },
+        MailFrameTab_OnClick = function() end,
+        SendMailNameEditBox = { SetText = function() end },
+        SendMailSubjectEditBox = { SetText = function() end },
+        SendMailBodyEditBox = { SetText = function() end },
         SendMail = function(recipient) state.recipient = recipient end,
     }, { __index = _G })
     env.C_Container = {
