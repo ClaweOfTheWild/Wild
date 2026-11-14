@@ -126,6 +126,9 @@ Durability percentages change smoothly from green at 100%, through yellow at 50%
 and orange at 25%, to red at 0%. Equipped items, bag items, and the total
 equipped-durability overlay use the same gradient.
 
+When enabled, the total overlay appears as equipment data becomes available at
+login or after `/reload`. You do not need to open the character panel.
+
 Use `/wild durability on` to show all three overlays. Configure each overlay in
 **Settings > AddOns > Wild > Durability**.
 

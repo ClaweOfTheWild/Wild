@@ -292,6 +292,7 @@ end
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 eventFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
@@ -311,6 +312,10 @@ eventFrame:SetScript("OnEvent", function(self, event)
         self:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
         self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
         self:RegisterEvent("BAG_UPDATE_DELAYED")
+    end
+
+    if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
+        Wild.UpdateDurabilityOverlays()
         return
     end
 

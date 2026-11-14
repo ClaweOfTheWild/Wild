@@ -323,6 +323,38 @@ local tests = {
         Wild.SetFeatureEnabled("speed", true)
         Equal(frame.width, width, "Re-enabling must retain the fixed width")
     end },
+    { "saved durability total appears at login without opening the character panel", function()
+        local _, _, Fire, _, Overlay = NewEnvironment({
+            durability = {
+                showEquippedTotal = true,
+                totalPosition = { point = "CENTER", relPoint = "CENTER", x = 120, y = -150 },
+            },
+        })
+        Equal(Overlay("WildDurabilityTotal"), nil)
+        Fire("PLAYER_LOGIN")
+        local frame = assert(Overlay("WildDurabilityTotal"), "Durability must appear at login")
+        Equal(frame.shown, true)
+        Equal(frame.text.value, "100%")
+        Equal(frame.point[4], 120)
+        Equal(frame.point[5], -150)
+    end },
+    { "durability refreshes on world entry when equipment data is unavailable at login", function()
+        local Wild, state, Fire, _, Overlay = NewEnvironment({
+            durability = { showEquippedTotal = true },
+        })
+        state.equipment = {}
+        Fire("PLAYER_LOGIN")
+        local frame = Overlay("WildDurabilityTotal")
+        assert(not frame or not frame.shown, "Missing durability data must not show a total")
+        state.equipment[1] = { 75, 100 }
+        Fire("PLAYER_ENTERING_WORLD")
+        frame = assert(Overlay("WildDurabilityTotal"), "Durability must appear on world entry")
+        Equal(frame.shown, true)
+        Equal(frame.text.value, "75%")
+        Wild.SetFeatureEnabled("durabilitytotal", false)
+        Fire("PLAYER_ENTERING_WORLD")
+        Equal(frame.shown, false)
+    end },
     { "durability matches speed width and alignment while retaining colors and position", function()
         local Wild, state, Fire, _, Overlay = NewEnvironment()
         Fire("PLAYER_LOGIN")
