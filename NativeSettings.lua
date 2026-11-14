@@ -120,46 +120,82 @@ local function AddDropdown(category, key, name, kind, entries, tooltip, setter, 
     return ConfigureInitializer(initializer, category, key, parent), setting
 end
 
-local function ApplyNumberPopup(popup, data)
-    local value = tonumber(popup:GetEditBox():GetText())
-    if not value or value ~= value or value == math.huge or value == -math.huge then
-        Warn("Enter a finite number.")
-        return false
+local function RefreshNumberInput(input)
+    if input.setting and not input:HasFocus() then
+        local value = input.setting:GetValue()
+        input:SetText(input.format and input.format(value) or tostring(value))
     end
-    if value < data.minimum or (data.maximum and value > data.maximum) then
-        local range = data.maximum and (data.minimum .. " to " .. data.maximum) or
-            (data.minimum .. " or greater")
-        Warn("Enter a number in the range " .. range .. ".")
-        return false
-    end
-    data.setting:SetValue(value)
-    return true
 end
 
-StaticPopupDialogs.WILD_NATIVE_NUMBER = {
-    text = "Set %s",
-    button1 = ACCEPT,
-    button2 = CANCEL,
-    hasEditBox = true,
-    editBoxWidth = 180,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    OnShow = function(self, data)
-        local editBox = self:GetEditBox()
-        editBox:SetMaxLetters(12)
-        editBox:SetText(tostring(data.setting:GetValue()))
-        editBox:SetFocus()
-        editBox:HighlightText()
-    end,
-    OnAccept = function(self, data)
-        return not ApplyNumberPopup(self, data)
-    end,
-    EditBoxOnEnterPressed = function(self)
-        local popup = self:GetParent()
-        if ApplyNumberPopup(popup, popup.data) then popup:Hide() end
-    end,
-}
+local function ApplyNumberInput(input)
+    local value = tonumber(input:GetText())
+    if not value or value ~= value or value == math.huge or value == -math.huge then
+        Warn("Enter a finite number.")
+        return
+    end
+    if value < input.minimum or (input.maximum and value > input.maximum) then
+        local range = input.maximum and (input.minimum .. " to " .. input.maximum) or
+            (input.minimum .. " or greater")
+        Warn("Enter a number in the range " .. range .. ".")
+        return
+    end
+    -- Let native callbacks read the saved value, not echo an unrounded or scaled input.
+    input.setValue(value)
+    input:ClearFocus()
+end
+
+local function AddNumberInput(initializer, setting, minimum, maximum, format, setValue)
+    hooksecurefunc(initializer, "InitFrame", function(_, frame)
+        local slider = frame.SliderWithSteppers
+        local input = frame.WildNumberInput
+        if not input then
+            input = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+            frame.WildNumberInput = input
+            input:SetSize(80, 20)
+            input:SetPoint("LEFT", slider.RightText, "LEFT", 0, 0)
+            input:SetAutoFocus(false)
+            input:SetNumeric(false)
+            input:SetMaxLetters(0)
+            input:SetFontObject("GameFontNormal")
+            input:SetJustifyH("LEFT")
+            input:SetTextInsets(0, 0, 0, 0)
+            input:SetScript("OnEditFocusGained", function(self)
+                self:SetText(tostring(self.setting:GetValue()))
+                self:HighlightText()
+            end)
+            input:SetScript("OnEnterPressed", ApplyNumberInput)
+            input:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+            input:SetScript("OnEditFocusLost", RefreshNumberInput)
+            input:SetScript("OnHide", function(self) self:ClearFocus() end)
+            for _, event in ipairs({ "OnEnter", "OnLeave" }) do
+                local script = event
+                input:SetScript(script, function()
+                    local callback = slider.Slider:GetScript(script)
+                    if callback then callback(slider.Slider) end
+                end)
+            end
+            hooksecurefunc(slider, "FormatValue", function() RefreshNumberInput(input) end)
+            hooksecurefunc(slider, "SetEnabled", function(_, enabled)
+                input:SetEnabled(enabled)
+                if not enabled then input:ClearFocus() end
+            end)
+        end
+        input.setting, input.minimum, input.maximum, input.format = setting, minimum, maximum, format
+        input.setValue = setValue
+        -- Keep the native label for narration; only the inline input is visible.
+        slider.RightText:SetAlpha(0)
+        input:SetEnabled(slider:IsSliderEnabled())
+        RefreshNumberInput(input)
+        input:Show()
+    end)
+    hooksecurefunc(initializer, "Resetter", function(_, frame)
+        local input = frame.WildNumberInput
+        input:ClearFocus()
+        input:Hide()
+        input.setting = nil
+        frame.SliderWithSteppers.RightText:SetAlpha(1)
+    end)
+end
 
 StaticPopupDialogs.WILD_NATIVE_COMMAND = {
     text = "Direct clipboard copy is not available here. Press Ctrl+C to copy this command.",
@@ -232,17 +268,11 @@ local function AddNumber(category, key, name, minimum, maximum, step, tooltip, s
     options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
         return config.format and config.format(value) or tostring(value)
     end)
-    local initializer = Settings.CreateSlider(category, setting, options, tooltip)
+    local initializer = Settings.CreateSlider(category, setting, options,
+        tooltip .. "\nClick the number to edit it. Press Enter to save. Press Escape to cancel.")
     initializer.reinitializeOnValueChanged = true
     ConfigureInitializer(initializer, category, key, parent)
-    local button = AddButton(category.layout, name .. " (exact value)", "Enter Value", function()
-        StaticPopup_Show("WILD_NATIVE_NUMBER", name, nil, {
-            setting = setting, minimum = minimum, maximum = inputMaximum,
-        })
-    end, tooltip)
-    if parent then
-        button:SetParentInitializer(parent)
-    end
+    AddNumberInput(initializer, setting, minimum, inputMaximum, config.format, SetValue)
     return initializer, setting
 end
 
@@ -341,7 +371,7 @@ local function CreateCirclePage()
     local enabled = AddCheckbox(category, "screenCenterCircle", "Enable Center Circle",
         "Draw a circle at the center of the screen.", "circle")
     AddNumber(category, "screenCenterCircleSize", "Size", 1, 200, 1,
-        "Circle diameter in pixels. Enter Value also accepts sizes above the slider's 200-pixel range.",
+        "Circle diameter in pixels. The number field also accepts sizes above the slider's 200-pixel range.",
         nil, RefreshCircle, enabled, { allowAboveMaximum = true })
     AddNumber(category, "screenCenterCircleThickness", "Thickness", 1, 50, 1,
         "Circle line thickness in pixels.", nil, RefreshCircle, enabled)
@@ -399,7 +429,7 @@ local function CreateCastHistoryPage()
     AddNumber(category, "castHistory.historyLength", "History Length", 1, 20, 1,
         "Maximum entries retained separately for GCD and non-GCD tracks.", Wild.SetCastHistoryLength, nil, enabled)
     AddNumber(category, "castHistory.fadeAfter", "Fade After", 1, 30, 0.5,
-        "Seconds before a cast fades. Enter Value supports precise fractional seconds.",
+        "Seconds before a cast fades. The number field accepts precise fractional seconds.",
         Wild.SetCastHistoryFadeAfter, nil, enabled)
     AddDropdown(category, "castHistory.direction", "Slide Direction", Settings.VarType.String, {
         { "LEFT", "Left" }, { "RIGHT", "Right" }, { "UP", "Up" }, { "DOWN", "Down" },
@@ -709,8 +739,8 @@ local function CreateVolumePage()
         "Show a draggable Wild icon. Left-click for volume controls; right-click for Wild settings.", "volume")
     local timeout = AddNumber(category, "volumeControl.autoHideDelay", "Auto-hide timeout (seconds)", 0, 30, 0.5,
         "Hide the volume panel after this many seconds. Opening it starts the timer; each click or adjustment " ..
-        "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. Enter Value " ..
-        "also accepts delays above 30 seconds. Command: /wild volume timeout <seconds>.",
+        "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. The number " ..
+        "field also accepts delays above 30 seconds. Command: /wild volume timeout <seconds>.",
         nil, nil, enabled, { allowAboveMaximum = true })
     local function GetCommand()
         return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")

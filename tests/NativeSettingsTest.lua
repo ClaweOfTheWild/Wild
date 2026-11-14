@@ -96,6 +96,8 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     function methods:SetSize(width, height) self.width, self.height = width, height end
     function methods:SetWidth(width) self.width = width end
     function methods:SetHeight(height) self.height = height end
+    function methods:SetAlpha(alpha) self.alpha = alpha end
+    function methods:GetAlpha() return self.alpha or 1 end
     function methods:GetWidth() return self.width or 520 end
     function methods:GetHeight() return self.height or 400 end
     function methods:GetTop() return 400 end
@@ -144,7 +146,12 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     function methods:SetEnabled(enabled) self.enabled = enabled end
     function methods:IsEnabled() return self.enabled ~= false end
     function methods:Click() if self.scripts.OnClick then self.scripts.OnClick(self) end end
-    function methods:SetFocus() state.focus = self end
+    function methods:SetFocus()
+        if state.focus == self then return end
+        if state.focus then state.focus:ClearFocus() end
+        state.focus = self
+        if self.scripts.OnEditFocusGained then self.scripts.OnEditFocusGained(self) end
+    end
     function methods:HasFocus() return state.focus == self end
     function methods:ClearFocus()
         if state.focus == self then
@@ -215,6 +222,8 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     local function Initializer(data)
         local initializer = { data = data, tags = {}, predicates = {} }
         function initializer:GetData() return self.data end
+        function initializer:InitFrame(frame) frame:Init(self) end
+        function initializer:Resetter(frame) frame:Release() end
         function initializer:AddSearchTags(...) for _, tag in ipairs({ ... }) do self.tags[#self.tags + 1] = tag end end
         function initializer:AddModifyPredicate(predicate) self.predicates[#self.predicates + 1] = predicate end
         function initializer:AddShownPredicate(predicate) self.predicates[#self.predicates + 1] = predicate end
@@ -301,7 +310,9 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         if setting then setting:NotifyUpdate() end
     end
     env.Settings.CreateSliderOptions = function(minimum, maximum, step)
-        return { minValue = minimum, maxValue = maximum, step = step, SetLabelFormatter = function() end }
+        local options = { minValue = minimum, maxValue = maximum, step = step, formatters = {} }
+        function options:SetLabelFormatter(label, formatter) self.formatters[label] = formatter end
+        return options
     end
     env.Settings.CreateControlTextContainer = function()
         local container = { data = {} }
@@ -404,29 +415,69 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     local function Setting(key)
         return assert(state.settings["WILD_" .. key:gsub("[^%w]", "_")], "Missing setting " .. key)
     end
-    function state.ShowSlider(key)
-        local setting = Setting(key)
+    function state.ShowSlider(key, control)
+        local setting = type(key) == "table" and key or Setting(key)
         local initializer
         for _, entry in ipairs(setting.category.layout.initializers) do
             if entry.data.kind == "Slider" and entry.data.setting == setting then initializer = entry; break end
         end
-        assert(initializer, "Missing native slider " .. key)
-        local options = initializer.data.options
-        local slider = env.CreateFrame("Slider")
-        slider:SetMinMaxValues(options.minValue, options.maxValue)
-        slider:SetValue(setting:GetValue())
-        local control = { slider = slider, label = setting:GetValue() }
-        slider:SetScript("OnValueChanged", function(_, value)
-            control.label = value
-            setting:SetValue(value)
-        end)
-        local callbacks = state.valueCallbacks[setting:GetVariable()] or {}
-        state.valueCallbacks[setting:GetVariable()] = callbacks
-        callbacks[#callbacks + 1] = function(_, value)
-            slider:SetValue(value)
-            if initializer.reinitializeOnValueChanged then control.label = setting:GetValue() end
+        assert(initializer, "Missing native slider " .. tostring(key))
+        if not control then
+            control = env.CreateFrame("Frame")
+            local sliderWithSteppers = env.CreateFrame("Frame", nil, control)
+            control.SliderWithSteppers = sliderWithSteppers
+            control.slider = env.CreateFrame("Slider", nil, sliderWithSteppers)
+            sliderWithSteppers.Slider = control.slider
+            sliderWithSteppers.RightText = sliderWithSteppers:CreateFontString()
+            function sliderWithSteppers:FormatValue(value)
+                control.label = value
+                self.RightText:SetText(self.formatter(value))
+                self.RightText:Show()
+            end
+            function sliderWithSteppers:SetEnabled(enabled)
+                self.sliderEnabled = enabled
+                self.Slider:SetEnabled(enabled)
+            end
+            function sliderWithSteppers:IsSliderEnabled() return self.sliderEnabled ~= false end
+            function control:Init(entry)
+                self.initializer, self.setting = entry, entry.data.setting
+                local options = entry.data.options
+                sliderWithSteppers.formatter = options.formatters[env.MinimalSliderWithSteppersMixin.Label.Right]
+                self.slider:SetMinMaxValues(options.minValue, options.maxValue)
+                self.slider:SetValue(self.setting:GetValue())
+                sliderWithSteppers:FormatValue(self.setting:GetValue())
+                sliderWithSteppers:SetEnabled(entry:EvaluateModifyPredicates())
+                self.slider:SetScript("OnValueChanged", function(_, value)
+                    sliderWithSteppers:FormatValue(value)
+                    self.setting:SetValue(value)
+                end)
+                local callbacks = state.valueCallbacks[self.setting:GetVariable()] or {}
+                state.valueCallbacks[self.setting:GetVariable()] = callbacks
+                self.valueCallback = function(_, value)
+                    self.slider:SetValue(value)
+                    if self.initializer.reinitializeOnValueChanged then
+                        sliderWithSteppers:FormatValue(self.setting:GetValue())
+                    end
+                end
+                callbacks[#callbacks + 1] = self.valueCallback
+            end
+            function control:Release()
+                local callbacks = state.valueCallbacks[self.setting:GetVariable()]
+                for index, callback in ipairs(callbacks) do
+                    if callback == self.valueCallback then table.remove(callbacks, index); break end
+                end
+                self.slider:SetScript("OnValueChanged", nil)
+                sliderWithSteppers.RightText:Hide()
+                self.setting = nil
+            end
         end
+        initializer:InitFrame(control)
+        control:Show()
         return control
+    end
+    function state.ReleaseSlider(control)
+        control.initializer:Resetter(control)
+        control:Hide()
     end
     return Wild, state, env, Setting, Fire, Load
 end
@@ -521,21 +572,25 @@ local tests = {
         Setting("volumeControl.enabled"):SetValue(true)
         Equal(Wild.IsFeatureEnabled("volume"), true)
     end },
-    { "the native volume timeout exact-value dialog accepts fractions and rejects negative input", function()
-        local Wild, state, env = NewEnvironment()
-        local entry
-        for _, initializer in ipairs(state.layouts.Volume.initializers) do
-            if initializer.data.name == "Auto-hide timeout (seconds) (exact value)" then entry = initializer.data end
-        end
-        assert(entry, "Volume timeout has precise numeric entry")
-        entry.buttonClick()
-        state.popup.editBox:SetText("90.25")
-        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data), false)
+    { "the native volume timeout saves inline fractions and rejects negative input", function()
+        local Wild, state = NewEnvironment()
+        local control = state.ShowSlider("volumeControl.autoHideDelay")
+        local input = assert(FindChild(state, control, function(frame) return frame.kind == "EditBox" end),
+            "The slider value is editable in place")
+        input:SetFocus()
+        input:SetText("90.25")
+        input.scripts.OnEnterPressed(input)
         Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 90.25)
-        entry.buttonClick()
-        state.popup.editBox:SetText("-1")
-        Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data), true)
+        Equal(control.slider:GetValue(), 30)
+        Equal(input:GetText(), "90.25")
+        Equal(input:HasFocus(), false)
+        Equal(state.popup, nil, "Editing a slider must not open a dialog")
+        input:SetFocus()
+        input:SetText("-1")
+        input.scripts.OnEnterPressed(input)
         Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 90.25)
+        Equal(input:HasFocus(), true)
+        assert(state.messages[#state.messages]:find("0 or greater", 1, true))
     end },
     { "the volume timeout command icon offers the saved value without running it", function()
         local Wild, state, _, Setting = NewEnvironment()
@@ -913,7 +968,7 @@ local tests = {
             "Crafting Orders", "Quests", "Tooltips", "Volume" }) do
             for _, initializer in ipairs(state.layouts[page].initializers) do
                 local data = initializer.data
-                if data.setting or data.buttonText == "Enter Value" then
+                if data.setting then
                     Equal(initializer:EvaluateModifyPredicates(), true,
                         "Configure " .. (data.name or data.setting:GetName()) .. " before enabling its feature")
                 end
@@ -972,26 +1027,173 @@ local tests = {
         Equal(shows, 1)
         Equal(Wild.db.darkmoonFaire.showProfessionHelper, false)
     end },
-    { "numeric entry uses a standard popup and rejects invalid values explicitly", function()
-        local Wild, state, env = NewEnvironment()
-        local native = state.ShowSlider("screenCenterCircleSize")
-        local entry
-        for _, initializer in ipairs(state.layouts["Center Circle"].initializers) do
-            local data = initializer.data
-            if data.kind == "Button" and data.name == "Size (exact value)" then entry = data end
+    { "every native slider edits its value in place without an extra action row", function()
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local Wild, state = NewEnvironment(nil, nil, mode)
+            local count = 0
+            for _, category in ipairs(state.categories) do
+                for _, initializer in ipairs(category.layout.initializers) do
+                    local data = initializer.data
+                    assert(data.buttonText ~= "Enter Value", "Exact input must not add another settings row")
+                    if data.kind == "Slider" then
+                        count = count + 1
+                        local control = state.ShowSlider(data.setting)
+                        local input = assert(FindChild(state, control, function(frame)
+                            return frame.kind == "EditBox"
+                        end), "Missing inline numeric entry for " .. data.setting:GetVariable())
+                        Equal(input:IsShown(), true)
+                        Equal(input:HasFocus(), false)
+                        Equal(input:IsEnabled(), true, "Values remain editable with their feature off")
+                        Equal(input:GetText(), control.SliderWithSteppers.RightText:GetText())
+                        input:SetFocus()
+                        input:SetText(tostring(data.options.minValue))
+                        input.scripts.OnEnterPressed(input)
+                        Equal(data.setting:GetValue(), data.options.minValue)
+                        Equal(input:HasFocus(), false)
+                        Equal(state.popup, nil)
+                    end
+                end
+            end
+            assert(count > 0, "No native sliders were exercised")
+            Equal(Wild.IsFeatureEnabled("circle"), false)
         end
-        assert(entry, "Circle size keeps an exact-value input")
-        entry.buttonClick()
-        state.popup.editBox:SetText("450")
-        env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data)
+    end },
+    { "inline values preserve large sizes and report invalid input without saving", function()
+        local Wild, state = NewEnvironment()
+        local control = state.ShowSlider("screenCenterCircleSize")
+        local input = assert(FindChild(state, control, function(frame) return frame.kind == "EditBox" end))
+        input:SetFocus()
+        input:SetText("450")
+        input.scripts.OnEnterPressed(input)
         Equal(Wild.db.screenCenterCircleSize, 450)
-        Equal(native.label, 450)
-        Equal(native.slider:GetValue(), 200)
-        entry.buttonClick()
-        state.popup.editBox:SetText("invalid")
-        env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup, state.popup.data)
+        Equal(control.label, 450)
+        Equal(control.slider:GetValue(), 200)
+        Equal(input:GetText(), "450")
+        for _, text in ipairs({ "invalid", "", "1e309", "-1e309", "0" }) do
+            local saved, messages = Copy(Wild.db), #state.messages
+            input:SetFocus()
+            input:SetText(text)
+            input.scripts.OnEnterPressed(input)
+            Same(Wild.db, saved)
+            Equal(input:HasFocus(), true)
+            Equal(input:GetText(), text)
+            Equal(#state.messages, messages + 1)
+            assert(state.messages[#state.messages]:find("number", 1, true))
+        end
+    end },
+    { "inline input keeps percent units rounding and slider updates consistent", function()
+        local Wild, state = NewEnvironment()
+        local opacity = state.ShowSlider("screenCenterCircleColor.a")
+        local input = assert(FindChild(state, opacity, function(frame) return frame.kind == "EditBox" end))
+        Equal(input:GetText(), "70%")
+        input:SetFocus()
+        Equal(input:GetText(), "70", "Focus selects the numeric part without its unit")
+        input:SetText("37")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.screenCenterCircleColor.a, 0.37)
+        Equal(opacity.slider:GetValue(), 37)
+        Equal(input:GetText(), "37%")
+        input:SetFocus()
+        input:SetText("28")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.screenCenterCircleColor.a, 0.28)
+        Equal(input:GetText(), "28%")
+        opacity.slider:SetValue(100)
+        Equal(input:GetText(), "100%")
+        input:SetFocus()
+        input:SetText("101")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.screenCenterCircleColor.a, 1)
+        assert(state.messages[#state.messages]:find("0 to 100", 1, true))
+        input.scripts.OnEscapePressed(input)
+        local delay = state.ShowSlider("advanced.ruleDelay")
+        input = assert(FindChild(state, delay, function(frame) return frame.kind == "EditBox" end))
+        input:SetFocus()
+        input:SetText("0.34")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.advanced.ruleDelay, 0.3)
+        Equal(input:GetText(), "0.3")
+        local offset = state.ShowSlider("screenCenterCircleOffsetX")
+        input = assert(FindChild(state, offset, function(frame) return frame.kind == "EditBox" end))
+        input:SetFocus()
+        input:SetText("-123.6")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.screenCenterCircleOffsetX, -124)
+        Equal(input:GetText(), "-124")
+    end },
+    { "native refresh preserves drafts and cancelling shows the current saved value", function()
+        local Wild, state = NewEnvironment()
+        local control = state.ShowSlider("screenCenterCircleSize")
+        local input = assert(FindChild(state, control, function(frame) return frame.kind == "EditBox" end))
+        input:SetFocus()
+        input:SetText("120")
+        Wild.SetSetting("screenCenterCircleSize", 450)
+        Equal(input:GetText(), "120")
+        Equal(input:HasFocus(), true)
         Equal(Wild.db.screenCenterCircleSize, 450)
-        assert(state.messages[#state.messages]:find("number", 1, true))
+        input.scripts.OnEscapePressed(input)
+        Equal(input:GetText(), "450")
+        Equal(input:HasFocus(), false)
+        Equal(Wild.db.screenCenterCircleSize, 450)
+        input:SetFocus()
+        input:SetText("150")
+        input:ClearFocus()
+        Equal(input:GetText(), "450", "Focus loss cancels a draft instead of saving it")
+        Equal(Wild.db.screenCenterCircleSize, 450)
+        input:SetFocus()
+        input:SetText("175")
+        input:Hide()
+        Equal(input:HasFocus(), false)
+        Equal(input:GetText(), "450")
+        Equal(Wild.db.screenCenterCircleSize, 450)
+    end },
+    { "recycled native rows discard drafts and bind only their current setting", function()
+        local Wild, state, env = NewEnvironment()
+        local control = state.ShowSlider("screenCenterCircleSize")
+        local input = assert(FindChild(state, control, function(frame) return frame.kind == "EditBox" end))
+        local size = Wild.db.screenCenterCircleSize
+        input:SetFocus()
+        input:SetText("450")
+        state.ReleaseSlider(control)
+        Equal(input:HasFocus(), false)
+        Equal(input:IsShown(), false)
+        Equal(control.SliderWithSteppers.RightText:GetAlpha(), 1)
+        Equal(Wild.db.screenCenterCircleSize, size)
+        state.ShowSlider("screenCenterCircleColor.a", control)
+        Equal(input:GetText(), "70%")
+        Wild.SetSetting("screenCenterCircleSize", 600)
+        Equal(input:GetText(), "70%", "Released settings cannot update the recycled row")
+        input:SetFocus()
+        input:SetText("25")
+        input.scripts.OnEnterPressed(input)
+        Equal(Wild.db.screenCenterCircleColor.a, 0.25)
+        Equal(Wild.db.screenCenterCircleSize, 600)
+        input:SetFocus()
+        input:SetText("99")
+        control.SliderWithSteppers:SetEnabled(false)
+        Equal(input:IsEnabled(), false)
+        Equal(input:HasFocus(), false)
+        Equal(input:GetText(), "25%")
+        control.SliderWithSteppers:SetEnabled(true)
+        Equal(input:IsEnabled(), true)
+        state.ReleaseSlider(control)
+        local gameValue = 5
+        local gameSetting = env.Settings.RegisterProxySetting(state.root, "GAME_SLIDER", "number",
+            "Game slider", 5, function() return gameValue end, function(value) gameValue = value end)
+        local options = env.Settings.CreateSliderOptions(1, 10, 1)
+        options:SetLabelFormatter(env.MinimalSliderWithSteppersMixin.Label.Right, tostring)
+        local initializer = env.Settings.CreateSlider(state.root, gameSetting, options)
+        initializer:InitFrame(control)
+        Equal(input:IsShown(), false, "Wild's input stays hidden on a game setting")
+        Equal(control.SliderWithSteppers.RightText:GetAlpha(), 1)
+        control.slider:SetValue(7)
+        Equal(gameValue, 7)
+        Equal(control.SliderWithSteppers.RightText:GetText(), "7")
+        Equal(Wild.db.screenCenterCircleColor.a, 0.25)
+        state.ReleaseSlider(control)
+        state.ShowSlider("screenCenterCircleSize", control)
+        Equal(input:IsShown(), true)
+        Equal(input:GetText(), "600")
     end },
     { "unconfigured auction and crafting filters preserve their different defaults", function()
         local Wild, _, env, Setting = NewEnvironment()

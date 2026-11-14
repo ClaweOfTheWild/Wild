@@ -10,6 +10,10 @@ Open **Settings > AddOns > Wild** with `/wild`. Use `/wild help` for commands.
 Settings are stored in `WildDB`; the settings UI, slash commands, and public
 setters share that store.
 
+Click the number beside a slider to enter an exact value. Press Enter to save,
+or press Escape to cancel. If the field loses focus before you press Enter,
+the saved value does not change.
+
 World-event helpers are grouped under **Wild > Events**. Retail has separate pages
 for **Darkmoon Faire** and **Saltheril's Soiree**. `/wild native events` opens
 the group. Existing shortcuts such as `/wild native darkmoon faire` and
@@ -98,7 +102,7 @@ Hover alone does not stop the timer. Only the panel hides; the Wild icon button
 stays available. The button uses the same green W as Wild's addon-list icon.
 
 Open **Settings > AddOns > Wild > Volume** with `/wild native volume`.
-**Auto-hide timeout (seconds)** sets the delay. **Enter Value** accepts
+**Auto-hide timeout (seconds)** sets the delay. Its number field accepts
 fractions and values above the slider's 30-second range. Set `0` to keep the
 panel open until you close it. The `/` command icon shows the command for the
 saved timeout. Click it to select the command, then press Ctrl+C to copy it.
@@ -386,6 +390,9 @@ fixtures do not establish live server behavior or complete Soiree reward data.
 Volume fixtures cover opening without adjustments, interaction resets, held
 controls, cancellation, and shared timeout settings. A live client check must
 confirm slider dragging and panel layout.
+Native settings fixtures cover inline numeric entry, limits, units, draft
+cancellation, and row reuse. Check number-field placement and scrolling in
+both clients.
 
 ## Sources
 
