@@ -33,13 +33,8 @@ local function GetDurabilityPercent(current, maximum)
 end
 
 local function ColorForPercent(pct)
-    if pct <= 25 then
-        return 1, 0.2, 0.2
-    elseif pct <= 50 then
-        return 1, 0.6, 0
-    else
-        return 0.2, 1, 0.2
-    end
+    pct = math.max(0, math.min(100, pct))
+    return math.min(1, (100 - pct) / 50), math.min(1, pct / 50), 0
 end
 
 -- ============================================================

@@ -120,6 +120,15 @@ of seconds that is `0` or greater. Invalid values warn, return `false`, and
 leave the saved value unchanged. `Wild.GetSetting("volumeControl.autoHideDelay")`
 reads the delay. Volume controls remain off by default in both clients.
 
+## Durability colors
+
+Durability percentages change smoothly from green at 100%, through yellow at 50%
+and orange at 25%, to red at 0%. Equipped items, bag items, and the total
+equipped-durability overlay use the same gradient.
+
+Use `/wild durability on` to show all three overlays. Configure each overlay in
+**Settings > AddOns > Wild > Durability**.
+
 ## Auto-open bag containers
 
 Open **Settings > AddOns > Wild > Containers**, or run `/wild containers`.
@@ -378,6 +387,7 @@ lua tests\SoireePlannerTest.lua
 lua tests\SoireeAdvisorTest.lua
 lua tests\NativeSettingsTest.lua
 lua tests\VolumeControlTest.lua
+lua tests\SpeedIndicatorTest.lua
 ```
 
 The fixtures cover intent confirmations, partial failures, late events, summary
