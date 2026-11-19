@@ -467,17 +467,31 @@ end
 
 local lastMerchantOpen = 0
 local function OnMerchantOpened()
+    if not Wild.db then return end
+    local visit = Wild.OpenIntentVisit("vendor")
     local now = GetTime()
     if now - lastMerchantOpen < 1 then return end
     lastMerchantOpen = now
     ProcessAutoRepair()
-    C_Timer.After(Wild.db.advanced.sellStartDelay, ProcessSellIntents)
+    if visit.bypassed then return end
+    C_Timer.After(Wild.db.advanced.sellStartDelay, function()
+        if not visit.closed then ProcessSellIntents() end
+    end)
+end
+
+local function OnMerchantClosed()
+    if Wild.CloseIntentVisit("vendor") then lastMerchantOpen = 0 end
+    if sellLoopActive then
+        local complete = CollectSellResults()
+        FinishSellLoop(not complete and "Some vendor sales were not confirmed before the merchant closed." or nil)
+    end
 end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_CLOSED")
 frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
 frame:RegisterEvent("UI_ERROR_MESSAGE")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "UI_ERROR_MESSAGE" then
@@ -485,14 +499,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "MERCHANT_SHOW" then
         OnMerchantOpened()
     elseif event == "MERCHANT_CLOSED" then
-        if sellLoopActive then
-            local complete = CollectSellResults()
-            FinishSellLoop(not complete and "Some vendor sales were not confirmed before the merchant closed." or nil)
-        end
+        OnMerchantClosed()
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
         local interactionType = ...
         if interactionType == Enum.PlayerInteractionType.Merchant then
             OnMerchantOpened()
+        end
+    elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+        local interactionType = ...
+        if interactionType == Enum.PlayerInteractionType.Merchant then
+            OnMerchantClosed()
         end
     end
 end)

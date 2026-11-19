@@ -215,6 +215,16 @@ StaticPopupDialogs.WILD_NATIVE_COMMAND = {
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 }
 
+local function AddSettingCommand(category, key, name, getCommand, parent)
+    local command = AddButton(category.layout, name, "/", function()
+        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, getCommand())
+    end)
+    function command:GetTooltip()
+        return getCommand() .. "\nClick / to select this command, then press Ctrl+C to copy it."
+    end
+    ConfigureInitializer(command, category, key, parent)
+end
+
 local function ApplyContainerID(popup)
     return Wild.SetContainerAutoOpen(popup:GetEditBox():GetText(), false)
 end
@@ -742,16 +752,9 @@ local function CreateVolumePage()
         "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. The number " ..
         "field also accepts delays above 30 seconds. Command: /wild volume timeout <seconds>.",
         nil, nil, enabled, { allowAboveMaximum = true })
-    local function GetCommand()
+    AddSettingCommand(category, "volumeControl.autoHideDelay", "Auto-hide timeout command", function()
         return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")
-    end
-    local command = AddButton(category.layout, "Auto-hide timeout command", "/", function()
-        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, GetCommand())
-    end)
-    function command:GetTooltip()
-        return GetCommand() .. "\nClick / to select this command, then press Ctrl+C to copy it."
-    end
-    ConfigureInitializer(command, category, "volumeControl.autoHideDelay", timeout)
+    end, timeout)
 end
 
 local function CreateDurabilityPage()
@@ -839,6 +842,13 @@ local function Initialize()
         "Choose a category to configure Wild. Changes apply immediately.")
     AddCheckbox(category, "includeReagentBag", "Include reagent bag",
         "Include your reagent bag when scanning player bags for automation rules.")
+    local bypass = AddDropdown(category, "intentBypassModifier", "Intent rule bypass key", Settings.VarType.String, {
+        { "NONE", NONE_KEY }, { "SHIFT", SHIFT_KEY }, { "CTRL", CTRL_KEY }, { "ALT", ALT_KEY },
+    }, "Hold this key until a bank, guild bank, vendor, or mailbox opens. Wild does not start intent rules for that visit. " ..
+        "Auto-repair, Warband auto-deposits, and inbox auto-open still use their own settings.")
+    AddSettingCommand(category, "intentBypassModifier", "Intent rule bypass key command", function()
+        return "/wild intents bypass " .. Wild.GetSetting("intentBypassModifier"):lower()
+    end, bypass)
     CreateLFGPage()
     CreateCirclePage()
     CreateSpeedPage()

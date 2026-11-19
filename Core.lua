@@ -212,6 +212,7 @@ local defaults = {
         buttonPos = nil,
     },
     intents = {},
+    intentBypassModifier = "SHIFT",
     actors = {
         characters = {},
         labels = {},
@@ -875,6 +876,13 @@ end
 -- Public API — Generic settings
 -- ============================================================
 
+local INTENT_BYPASS_KEYS = {
+    NONE = function() return false end,
+    SHIFT = function() return IsShiftKeyDown() end,
+    CTRL = function() return IsControlKeyDown() end,
+    ALT = function() return IsAltKeyDown() end,
+}
+
 function Wild.GetSetting(key)
     if not Wild.db then return nil end
     return GetNestedValue(Wild.db, key)
@@ -912,6 +920,10 @@ function Wild.SetSetting(key, value, source)
         Wild.Print("|cffff6600Wild:|r Volume timeout must be a finite number of seconds, 0 or greater. Use 0 to keep the panel open.")
         return false
     end
+    if key == "intentBypassModifier" and not INTENT_BYPASS_KEYS[value] then
+        Wild.Print("|cffff6600Wild:|r Use Shift, Ctrl, Alt, or None for the intent rule bypass key.")
+        return false
+    end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
@@ -923,6 +935,27 @@ function Wild.SetSetting(key, value, source)
         Wild.ScanContainers()
     end
     return true
+end
+
+local intentVisits = {}
+
+-- A visit shares one key decision across duplicate open events and intent processors.
+function Wild.OpenIntentVisit(interaction)
+    local visit = intentVisits[interaction]
+    if not visit then
+        local isKeyDown = INTENT_BYPASS_KEYS[Wild.GetSetting("intentBypassModifier")]
+        visit = { bypassed = isKeyDown and isKeyDown() and true or false }
+        intentVisits[interaction] = visit
+    end
+    return visit
+end
+
+function Wild.CloseIntentVisit(interaction)
+    local visit = intentVisits[interaction]
+    if not visit then return false end
+    intentVisits[interaction] = nil
+    visit.closed = true
+    return visit.bypassed
 end
 
 function Wild.ResetSettings()

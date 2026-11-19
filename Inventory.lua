@@ -442,13 +442,19 @@ Wild.ProcessDestroyIntents = ProcessDestroyIntents
 -- ============================================================
 
 local lastInventoryTrigger = 0
-local function OnInventoryTrigger()
+local lastTriggerVisit
+local function OnInventoryTrigger(interaction)
     if not Wild.db or not Wild.db.intents then return end
+    local visit = interaction and Wild.OpenIntentVisit(interaction)
+    if visit and visit.bypassed then return end
 
     local now = GetTime()
-    if lastInventoryTrigger > now - 1 then return end
+    if lastInventoryTrigger > now - 1 and not (lastTriggerVisit and lastTriggerVisit.closed) then return end
     lastInventoryTrigger = now
-    C_Timer.After(Wild.db.advanced.destroyStartDelay, function() ProcessDestroyIntents() end)
+    lastTriggerVisit = visit
+    C_Timer.After(Wild.db.advanced.destroyStartDelay, function()
+        if not visit or not visit.closed then ProcessDestroyIntents() end
+    end)
 end
 
 local frame = CreateFrame("Frame")
@@ -464,17 +470,21 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "LOOT_CLOSED" then
         OnInventoryTrigger()
     elseif event == "MERCHANT_SHOW" then
-        OnInventoryTrigger()
-    elseif event == "BANKFRAME_OPENED" or event == "GUILDBANKFRAME_OPENED" then
-        OnInventoryTrigger()
+        OnInventoryTrigger("vendor")
+    elseif event == "BANKFRAME_OPENED" then
+        OnInventoryTrigger("bank")
+    elseif event == "GUILDBANKFRAME_OPENED" then
+        OnInventoryTrigger("guildBank")
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
         local interactionType = ...
-        if interactionType == Enum.PlayerInteractionType.Merchant then
-            OnInventoryTrigger()
-        elseif interactionType == Enum.PlayerInteractionType.Banker
-            or (Enum.PlayerInteractionType.AccountBanker and interactionType == Enum.PlayerInteractionType.AccountBanker)
-            or interactionType == Enum.PlayerInteractionType.GuildBanker then
-            OnInventoryTrigger()
+        local PIT = Enum.PlayerInteractionType
+        if interactionType == PIT.Merchant then
+            OnInventoryTrigger("vendor")
+        elseif interactionType == PIT.Banker
+            or (PIT.AccountBanker and interactionType == PIT.AccountBanker) then
+            OnInventoryTrigger("bank")
+        elseif interactionType == PIT.GuildBanker then
+            OnInventoryTrigger("guildBank")
         end
     end
 end)

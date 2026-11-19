@@ -143,6 +143,7 @@ subcommands.help = function()
     Print("/wild bank guild on|off — Toggle guild bank")
     Print("/wild bank run — Manually trigger bank filter rules")
     Print("/wild bank rules — List all bank filter rules")
+    Print("/wild intents bypass [shift|ctrl|alt|none] - Show or set the intent rule bypass key")
     print(" ")
     Print("/wild quests on|off — Toggle all quest automation")
     Print("/wild quests accept on|off — Toggle quest auto-accept")
@@ -440,6 +441,16 @@ subcommands.loot = function(args)
     else
         Print("Unknown loot subcommand: " .. sub .. ". Try /wild help")
     end
+end
+
+-- /wild intents bypass [shift|ctrl|alt|none]
+subcommands.intents = function(args)
+    if not args[1] or args[1]:lower() ~= "bypass" or #args > 2 then
+        PrintWarn("Usage: /wild intents bypass [shift|ctrl|alt|none]")
+        return
+    end
+    if args[2] and not Wild.SetSetting("intentBypassModifier", args[2]:upper()) then return end
+    Print("Intent rule bypass key: " .. Wild.GetSetting("intentBypassModifier"))
 end
 
 -- /wild bank [on|off|character|guild|warband|run|rules]

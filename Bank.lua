@@ -1055,6 +1055,11 @@ end
 
 local lastBankOpen = 0
 local function OnBankOpened()
+    if not Wild.db then
+        BlogMsg("Wild.db is nil — aborting.")
+        return
+    end
+    local visit = Wild.OpenIntentVisit("bank")
     local now = GetTime()
     BlogMsg("OnBankOpened called. timeSinceLast=" .. string.format("%.2f", now - lastBankOpen))
     if now - lastBankOpen < 1 then
@@ -1062,10 +1067,6 @@ local function OnBankOpened()
         return
     end
     lastBankOpen = now
-    if not Wild.db then
-        BlogMsg("Wild.db is nil — aborting.")
-        return
-    end
     bankGeneration = bankGeneration + 1
     local generation = bankGeneration
 
@@ -1103,6 +1104,8 @@ local function OnBankOpened()
         end
     end
 
+    if visit.bypassed then return end
+
     -- Event-driven: pre-load item data, then process intents once all data has arrived
     -- Include player bags so deposit/hold intents have cached GetItemInfo data
     C_Timer.After(Wild.db.advanced.bankStartDelay, function()
@@ -1122,11 +1125,13 @@ end
 
 local lastGuildBankOpen = 0
 local function OnGuildBankOpened()
+    if not Wild.db then return end
+    local visit = Wild.OpenIntentVisit("guildBank")
     local now = GetTime()
     if now - lastGuildBankOpen < 1 then return end
     lastGuildBankOpen = now
-    if not Wild.db then return end
     bankGeneration = bankGeneration + 1
+    if visit.bypassed then return end
     local generation = bankGeneration
 
     -- Guild bank items use GetGuildBankItemLink (always available), so no pre-load needed
@@ -1136,7 +1141,11 @@ local function OnGuildBankOpened()
     end)
 end
 
-local function OnBankClosed()
+local function OnBankClosed(interaction)
+    if Wild.CloseIntentVisit(interaction) then
+        -- A bypassed visit must not consume the next open's rule debounce.
+        if interaction == "guildBank" then lastGuildBankOpen = 0 else lastBankOpen = 0 end
+    end
     bankGeneration = bankGeneration + 1
     ClearBankPreload()
     BlogMsg("Bank closed — resetting intent queue.")
@@ -1168,11 +1177,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "BANKFRAME_OPENED" then
         OnBankOpened()
     elseif event == "BANKFRAME_CLOSED" then
-        OnBankClosed()
+        OnBankClosed("bank")
     elseif event == "GUILDBANKFRAME_OPENED" then
         OnGuildBankOpened()
     elseif event == "GUILDBANKFRAME_CLOSED" then
-        OnBankClosed()
+        OnBankClosed("guildBank")
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
         local interactionType = ...
         local PIT = Enum.PlayerInteractionType
@@ -1191,9 +1200,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local PIT = Enum.PlayerInteractionType
         if interactionType == PIT.Banker
             or (PIT.CharacterBanker and interactionType == PIT.CharacterBanker)
-            or (PIT.AccountBanker and interactionType == PIT.AccountBanker)
-            or interactionType == PIT.GuildBanker then
-            OnBankClosed()
+            or (PIT.AccountBanker and interactionType == PIT.AccountBanker) then
+            OnBankClosed("bank")
+        elseif interactionType == PIT.GuildBanker then
+            OnBankClosed("guildBank")
         end
     end
 end)

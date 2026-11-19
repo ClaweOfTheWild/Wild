@@ -552,6 +552,38 @@ local tests = {
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
     end },
+    { "the intent bypass key defaults to Shift and its command reproduces the saved native choice", function()
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local Wild, state, _, Setting = NewEnvironment(nil, nil, mode)
+            local key = Setting("intentBypassModifier")
+            Equal(key:GetValue(), "SHIFT")
+            key:SetValue("NONE")
+            Equal(Wild.GetSetting("intentBypassModifier"), "NONE")
+            Wild.HandleSlashCommand("intents bypass alt")
+            Equal(key:GetValue(), "ALT")
+            Wild.HandleSlashCommand("intents bypass shift extra")
+            Equal(key:GetValue(), "ALT")
+            Wild.HandleSlashCommand("intents bypass bogus")
+            Equal(key:GetValue(), "ALT")
+            assert(state.messages[#state.messages]:find("Shift, Ctrl, Alt, or None", 1, true))
+            Wild.HandleSlashCommand("intents bypass")
+            assert(state.messages[#state.messages]:find("ALT", 1, true))
+            local command
+            for _, initializer in ipairs(key.category.layout.initializers) do
+                if initializer.data.name == "Intent rule bypass key command" then command = initializer end
+            end
+            assert(command and command.data.buttonText == "/", "The bypass key has a command icon")
+            assert(command:GetTooltip():find("/wild intents bypass alt", 1, true))
+            key:SetValue("CTRL")
+            command.data.buttonClick()
+            Equal(state.popup.editBox:GetText(), "/wild intents bypass ctrl")
+            Equal(key:GetValue(), "CTRL")
+            key:SetValueToDefault()
+            Equal(key:GetValue(), "SHIFT")
+            local _, _, _, SavedSetting = NewEnvironment({ intentBypassModifier = "NONE" }, nil, mode)
+            Equal(SavedSetting("intentBypassModifier"):GetValue(), "NONE")
+        end
+    end },
     { "volume timeout controls share precise saved values with slash commands and API changes", function()
         local Wild, state, _, Setting = NewEnvironment()
         local timeout = Setting("volumeControl.autoHideDelay")

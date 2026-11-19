@@ -33,7 +33,7 @@ local function NewEnvironment(...)
         intents = {}, mail = { autoOpen = false }, advanced = {
             debug = false, ruleDelay = 0, passDelay = 0, bankStartDelay = 0,
             sellStartDelay = 0, sellInterval = 0, mailStartDelay = 0,
-            mailBatchDelay = 0, guildBankStartDelay = 0, preloadTimeout = 3,
+            mailBatchDelay = 0, guildBankStartDelay = 0, destroyStartDelay = 0, preloadTimeout = 3,
         },
     } }
     local state = {
@@ -42,19 +42,24 @@ local function NewEnvironment(...)
         money = 100000, bankMoney = 100000, merchantOpen = true,
         attachments = {}, sent = {}, cursor = nil,
         bankTypes = { [0] = true, [2] = true }, guildBankOpen = true,
+        time = 10, modifiers = {},
     }
     local env = setmetatable({
         print = function(message) state.messages[#state.messages + 1] = message end,
         Enum = {
             BagIndex = { ReagentBag = 5, CharacterBankTab_1 = 6, AccountBankTab_1 = 12 },
-            BankType = { Character = 0, Account = 2 }, PlayerInteractionType = { GuildBanker = 10 },
+            BankType = { Character = 0, Account = 2 },
+            PlayerInteractionType = { Merchant = 5, Banker = 8, GuildBanker = 10, AccountBanker = 67 },
             TooltipDataLineType = { SellPrice = 11 },
         },
         BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0, ATTACHMENTS_MAX_SEND = 12,
         tremove = table.remove, SlashCmdList = {},
         strtrim = function(text) return text:match("^%s*(.-)%s*$") end,
         wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
-        GetTime = function() return 10 end,
+        GetTime = function() return state.time end,
+        IsShiftKeyDown = function() return state.modifiers.SHIFT end,
+        IsControlKeyDown = function() return state.modifiers.CTRL end,
+        IsAltKeyDown = function() return state.modifiers.ALT end,
         date = function() return "2026-10-11 12:00:00" end,
         GetMoney = function() return state.money end,
         GetMoneyString = function(amount) return amount .. " copper" end,
@@ -772,6 +777,103 @@ local tests = {
             RunTimers(); RunTimeouts(); RunTimers()
             Equal(#state.requests, 0)
         end
+    end },
+    { "the selected key skips intent rules for one interaction, even if an open event repeats after release", function()
+        local interactions = {
+            { "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "Banker", "SHIFT", "deposit", "character" },
+            { "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "AccountBanker", "ALT", "deposit", "warband", modernFirst = true },
+            { "GUILDBANKFRAME_OPENED", "GUILDBANKFRAME_CLOSED", "GuildBanker", "CTRL", "withdraw", "guild", modernFirst = true },
+            { "MERCHANT_SHOW", "MERCHANT_CLOSED", "Merchant", "SHIFT", "sell", modernFirst = true },
+            { "MAIL_SHOW", "MAIL_CLOSED", nil, "ALT", "mail" },
+        }
+        for _, interaction in ipairs(interactions) do
+            local open, close, interactionName, key, action, target = unpack(interaction, 1, 6)
+            local Wild, state, Fire, RunTimers, _, _, Tick, ClickDestroy, _, env =
+                NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua", "Mail.lua")
+            local interactionType = env.Enum.PlayerInteractionType[interactionName]
+            local modernOpen = "PLAYER_INTERACTION_MANAGER_FRAME_SHOW"
+            local modernClose = "PLAYER_INTERACTION_MANAGER_FRAME_HIDE"
+            Wild.SetSetting("intentBypassModifier", key)
+            Wild.db.intents = {
+                { action = action, target = target, recipient = "Alt-Realm", groups = { {} }, itemID = 1 },
+                { action = "destroy", groups = { {} }, itemID = 2 },
+            }
+            state.bags[0][1], state.bags[0][2], state.bags.guild[1] = Item(), Item(1, 2), Item()
+            state.selling = action == "sell"
+
+            state.modifiers[key] = true
+            if interaction.modernFirst then Fire(modernOpen, interactionType) else Fire(open) end
+            state.modifiers[key] = false
+            state.time = state.time + 2
+            if interactionType and not interaction.modernFirst then Fire(modernOpen, interactionType) else Fire(open) end
+            RunTimers(); RunTimers(); Tick(); ClickDestroy()
+            Equal(#state.requests, 0)
+            Equal(#state.sent, 0)
+
+            if interaction.modernFirst then Fire(modernClose, interactionType) else Fire(close) end
+            state.modifiers[key == "SHIFT" and "CTRL" or "SHIFT"] = true
+            Fire(open)
+            state.modifiers[key] = true
+            RunTimers(); RunTimers(); Tick()
+            if action == "mail" then
+                Equal(state.sent[1], "Alt-Realm")
+            else
+                Equal(#state.requests, 1)
+                Equal(state.requests[1].kind, action)
+                ClickDestroy()
+                Equal(#state.requests, 2)
+                Equal(state.requests[2].kind, "destroy")
+            end
+        end
+    end },
+    { "closing a normal vendor visit cancels pending automatic rules before a bypassed visit", function()
+        local Wild, state, Fire, RunTimers, _, _, Tick, ClickDestroy = NewEnvironment("Inventory.lua", "Vendor.lua")
+        Wild.SetSetting("intentBypassModifier", "SHIFT")
+        Wild.db.intents = {
+            { action = "sell", groups = { {} }, itemID = 1 },
+            { action = "destroy", groups = { {} }, itemID = 2 },
+        }
+        state.bags[0][1], state.bags[0][2] = Item(), Item(1, 2)
+        state.selling = true
+        Fire("MERCHANT_SHOW")
+        Fire("MERCHANT_CLOSED")
+        state.modifiers.SHIFT = true
+        Fire("MERCHANT_SHOW")
+        RunTimers(); RunTimers(); Tick(); ClickDestroy()
+        Equal(#state.requests, 0)
+    end },
+    { "an intent bypass leaves independent automation, loot triggers, and manual bank rules available", function()
+        local Wild, state, Fire, RunTimers, _, _, _, ClickDestroy, _, env =
+            NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua", "Mail.lua", "SlashCommands.lua")
+        Wild.SetSetting("intentBypassModifier", "SHIFT")
+        Wild.db.intents = {
+            { action = "deposit", target = "character", groups = { {} }, itemID = 1 },
+            { action = "destroy", groups = { {} }, itemID = 2 },
+        }
+        Wild.db.bankWarband = { enabled = true, depositWarbound = true }
+        Wild.db.vendorAutoRepair = true
+        Wild.db.mail.autoOpen = true
+        local deposits, repairs, collected = 0, 0, 0
+        env.C_Bank.AutoDepositItemsIntoBank = function() deposits = deposits + 1 end
+        env.CanMerchantRepair = function() return true end
+        env.GetRepairAllCost = function() return 10, true end
+        env.RepairAllItems = function() repairs = repairs + 1 end
+        env.GetInboxNumItems = function() return 1 - collected end
+        env.AutoLootMailItem = function() collected = collected + 1 end
+        state.bags[0][1], state.bags[0][2] = Item(), Item(1, 2)
+        state.modifiers.SHIFT = true
+        Fire("MERCHANT_SHOW"); Fire("MERCHANT_CLOSED")
+        Fire("MAIL_SHOW"); Fire("BANKFRAME_OPENED")
+        RunTimers(); RunTimers()
+        Equal(deposits, 1)
+        Equal(repairs, 1)
+        Equal(collected, 1)
+        Equal(#state.requests, 0)
+        env.SlashCmdList.WILD("bank run")
+        Equal(state.requests[1].kind, "deposit")
+        Fire("LOOT_CLOSED")
+        RunTimers(); ClickDestroy()
+        Equal(state.requests[2].kind, "destroy")
     end },
     { "vendor requests are not sales until the matching item count decreases", function()
         local Wild, state, Fire, RunTimers, _, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")

@@ -308,6 +308,18 @@ outcomes, including self-explanatory configuration and slash-command coverage.
 
 ## Intent actions and logs
 
+The **Intent rule bypass key** is **Shift** by default. Hold the key until the
+bank, guild bank, vendor, or mailbox opens. Wild does not start intent rules
+for that visit. In **Settings > AddOns > Wild**, select **Ctrl** or **Alt** to
+change the key. Select **None** to turn off the shortcut.
+
+The shortcut does not stop automatic repairs, Warband auto-deposits, or
+automatic collection of incoming mail. It does not affect loot triggers.
+Use `/wild bank run` to start bank rules manually while the bank is open.
+
+Run `/wild intents bypass shift` to set the key from chat. Use `ctrl`, `alt`,
+or `none` in place of `shift`, or omit the key to read the saved value.
+
 Wild saves confirmed intent actions and failures in `WildDB.log`, even when
 Debug Mode is off. Chat reports completed quantities, not queued requests.
 Failed or unconfirmed items do not increase action totals or remove earlier

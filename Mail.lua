@@ -301,12 +301,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "UI_ERROR_MESSAGE" then
         if isSending then Wild.LogClientError("Mail", ...) end
     elseif event == "MAIL_SHOW" then
+        if not Wild.db then return end
+        local visit = Wild.OpenIntentVisit("mail")
         AutoOpenMail()
+        if visit.bypassed then return end
         local generation = mailGeneration
         C_Timer.After(Wild.db.advanced.mailStartDelay, function()
             if mailGeneration == generation then StartMailSend() end
         end)
     elseif event == "MAIL_CLOSED" then
+        Wild.CloseIntentVisit("mail")
         StopMailQueue(pendingMail and "Mailbox closed before the send was confirmed; stopped mail queue." or nil, true, "mailbox_closed")
     elseif event == "MAIL_SEND_SUCCESS" then
         if pendingMail then
