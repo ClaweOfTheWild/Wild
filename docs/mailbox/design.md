@@ -79,9 +79,11 @@ It does not read bodies to infer eligibility.
 The Process rules button, the run command, and the automatic open handler
 start the same queue. It selects items through the intent engine, uses the
 native composer and Send button, and leaves confirmations to the player. It
-checks the draft, cursor, and mail command state before each batch. Only
-`MAIL_SEND_SUCCESS` confirms an outgoing batch. An acknowledgment after a
-timeout or close can update the log, but cannot start another batch.
+checks the draft, cursor, and mail command state before each batch. After
+preparing the draft, it checks for a native mail lock again and runs WoW's
+Send validation before it submits the batch. `MAIL_SEND_SUCCESS` confirms
+the send and lets the queue continue without another click. An acknowledgment
+after a timeout or close can update the log, but cannot start another batch.
 
 The window and send queue share a mailbox visit. Enabling the window prevents
 the next automatic collection request, not one already sent to WoW. If the
@@ -120,11 +122,12 @@ and check which empty letters the delete confirmation counts before
 confirming. On Forever, verify that the native controller Open All shortcut
 is inactive in Wild Mail and returns in the standard window.
 
-Use an isolated Mail rule for one low-value test stack and an approved test
-recipient. Check that opening the mailbox does not send anything by default.
-Run **Process rules** and check the recipient and confirmed item count. Repeat
-with **Run Mail rules on open** enabled. Verify that the bypass key prevents
-the automatic send while a manual run still works.
+Use two Mail rules for different low-value test stacks and approved test
+recipients. Check that opening the mailbox does not send anything by default.
+Select **Process rules** once. Check that each recipient gets the correct stack
+without a separate **Send** click. Repeat with **Run Mail rules on open** enabled.
+Verify that the bypass key prevents the automatic send while a manual run still
+works.
 
 ## Client contracts
 

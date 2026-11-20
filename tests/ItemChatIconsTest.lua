@@ -111,6 +111,7 @@ local function NewEnvironment(...)
         IsEnabled = function() return true end,
         Click = function() state.recipient = env.SendMailNameEditBox:GetText() end,
     }
+    env.SendMailFrame_CanSend = function() end
     env.C_Container = {
         GetContainerNumSlots = function() return 2 end,
         GetContainerItemInfo = function(bag, slot) return state.bags[bag][slot] end,

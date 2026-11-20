@@ -43,6 +43,12 @@ local function AutoOpenMail(visit)
     C_Timer.After(0.5, OpenNext)
 end
 
+local function GetMailCommandBlock()
+    if C_Mail.IsCommandPending() or (SendMailFrameLockSendMail and SendMailFrameLockSendMail:IsShown()) then
+        return "Wait for WoW to finish the current mail action.", "mail_command_pending"
+    end
+end
+
 local function GetSendBlock()
     if not mailboxVisit or mailboxVisit.closed or not MailFrame or not MailFrame:IsVisible() then
         return "Open a mailbox before running Mail rules.", "mailbox_closed"
@@ -56,14 +62,13 @@ local function GetSendBlock()
     if Wild.InboxBulk and Wild.InboxBulk.IsBusy() then
         return "Finish the bulk inbox action before running Mail rules.", "inbox_bulk_active"
     end
-    if not SendMailFrame or not MailFrameTab_OnClick or not SendMailMailButton
+    if not SendMailFrame or not MailFrameTab_OnClick or not SendMailMailButton or not SendMailFrame_CanSend
         or not SendMailNameEditBox or not SendMailSubjectEditBox or not SendMailBodyEditBox
         or not SendMailMoney or not MoneyInputFrame_GetCopper then
         return "Mail send controls are unavailable.", "mail_ui_unavailable"
     end
-    if C_Mail.IsCommandPending() or (SendMailFrameLockSendMail and SendMailFrameLockSendMail:IsShown()) then
-        return "Wait for WoW to finish the current mail action.", "mail_command_pending"
-    end
+    local blocked, reason = GetMailCommandBlock()
+    if blocked then return blocked, reason end
     if GetCursorInfo() then
         return "The cursor is already occupied. Clear it before running Mail rules.", "cursor_occupied"
     end
@@ -250,11 +255,19 @@ local function ProcessNextMail()
         SendMailBodyEditBox:SetText("")
         local batch = { recipient = recipient, items = {}, count = count }
         Wild.MergeItemActionEntries(batch.items, confirmedItems)
-        if not SendMailMailButton:IsEnabled() then
+        blocked, reason = GetMailCommandBlock()
+        if not blocked then
+            -- The Send button state can lag behind programmatic edits to the draft.
+            SendMailFrame_CanSend()
+            if not SendMailMailButton:IsEnabled() then
+                blocked, reason = "WoW did not enable Send. Check the prepared mail.", "send_button_disabled"
+            end
+        end
+        if blocked then
             Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = batch.items }, {
-                source = "bags", target = recipient, recipient = recipient, reason = "send_button_disabled",
+                source = "bags", target = recipient, recipient = recipient, reason = reason,
             })
-            StopMailQueue("WoW did not enable Send. Check the prepared mail.", false, "send_button_disabled")
+            StopMailQueue(blocked, false, reason)
             return
         end
         pendingMail = batch

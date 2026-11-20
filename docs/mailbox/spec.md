@@ -112,12 +112,14 @@ run.
 ```gherkin
 Scenario: Send matching items on request
   Given a Mail rule matches a stack in the player's bags
+  And another Mail rule matches a different stack for a different recipient
   And Run Mail rules on open is off
   When the player opens the mailbox
   Then Wild sends nothing
-  When the player selects Process rules with no draft
-  Then Wild requests a send for the matching stack
-  And Wild reports it as sent only after WoW confirms it
+  When the player selects Process rules once with no draft
+  Then Wild requests a send for the first batch
+  And Wild submits the next batch without another click after WoW confirms the first
+  And Wild reports each batch as sent only after WoW confirms it
 ```
 
 ### FR7 - Process selected or loaded mail {#fr7}
