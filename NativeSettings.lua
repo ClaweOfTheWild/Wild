@@ -541,7 +541,8 @@ end
 local function CreateMailPage()
     local category = AddPage("Mail")
     AddCheckbox(category, "mail.autoOpen", "Auto-open mailbox",
-        "Take items and gold from incoming mail automatically when the mailbox opens.", "mail")
+        "Take items and gold from incoming mail automatically when the mailbox opens. " ..
+        "Hold the intent rule bypass key until the mailbox opens to skip collection for that visit.", "mail")
 end
 
 local function CreateLootPage()
@@ -845,7 +846,8 @@ local function Initialize()
     local bypass = AddDropdown(category, "intentBypassModifier", "Intent rule bypass key", Settings.VarType.String, {
         { "NONE", NONE_KEY }, { "SHIFT", SHIFT_KEY }, { "CTRL", CTRL_KEY }, { "ALT", ALT_KEY },
     }, "Hold this key until a bank, guild bank, vendor, or mailbox opens. Wild does not start intent rules for that visit. " ..
-        "Auto-repair, Warband auto-deposits, and inbox auto-open still use their own settings.")
+        "At the mailbox, this key also skips automatic collection of incoming mail. " ..
+        "Auto-repair and Warband auto-deposits still use their own settings.")
     AddSettingCommand(category, "intentBypassModifier", "Intent rule bypass key command", function()
         return "/wild intents bypass " .. Wild.GetSetting("intentBypassModifier"):lower()
     end, bypass)

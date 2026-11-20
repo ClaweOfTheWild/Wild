@@ -40,7 +40,7 @@ local function NewEnvironment(...)
         frames = {}, messages = {}, timers = {}, timeouts = {}, requests = {},
         bags = { [0] = {}, [5] = {}, [6] = {}, [12] = {}, guild = {} },
         money = 100000, bankMoney = 100000, merchantOpen = true,
-        attachments = {}, sent = {}, cursor = nil,
+        attachments = {}, sent = {}, cursor = nil, inboxCount = 0,
         bankTypes = { [0] = true, [2] = true }, guildBankOpen = true,
         time = 10, modifiers = {},
     }
@@ -183,6 +183,8 @@ local function NewEnvironment(...)
         local info = state.attachments[index]
         return info and info.hyperlink
     end
+    env.GetInboxNumItems = function() return state.inboxCount end
+    env.AutoLootMailItem = function() state.inboxCount = state.inboxCount - 1 end
     local function MailEditBox()
         local editBox = { text = "" }
         function editBox:SetText(text) self.text = text end
@@ -844,7 +846,7 @@ local tests = {
     end },
     { "an intent bypass leaves independent automation, loot triggers, and manual bank rules available", function()
         local Wild, state, Fire, RunTimers, _, _, _, ClickDestroy, _, env =
-            NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua", "Mail.lua", "SlashCommands.lua")
+            NewEnvironment("Bank.lua", "Inventory.lua", "Vendor.lua", "SlashCommands.lua")
         Wild.SetSetting("intentBypassModifier", "SHIFT")
         Wild.db.intents = {
             { action = "deposit", target = "character", groups = { {} }, itemID = 1 },
@@ -852,28 +854,69 @@ local tests = {
         }
         Wild.db.bankWarband = { enabled = true, depositWarbound = true }
         Wild.db.vendorAutoRepair = true
-        Wild.db.mail.autoOpen = true
-        local deposits, repairs, collected = 0, 0, 0
+        local deposits, repairs = 0, 0
         env.C_Bank.AutoDepositItemsIntoBank = function() deposits = deposits + 1 end
         env.CanMerchantRepair = function() return true end
         env.GetRepairAllCost = function() return 10, true end
         env.RepairAllItems = function() repairs = repairs + 1 end
-        env.GetInboxNumItems = function() return 1 - collected end
-        env.AutoLootMailItem = function() collected = collected + 1 end
         state.bags[0][1], state.bags[0][2] = Item(), Item(1, 2)
         state.modifiers.SHIFT = true
         Fire("MERCHANT_SHOW"); Fire("MERCHANT_CLOSED")
-        Fire("MAIL_SHOW"); Fire("BANKFRAME_OPENED")
+        Fire("BANKFRAME_OPENED")
         RunTimers(); RunTimers()
         Equal(deposits, 1)
         Equal(repairs, 1)
-        Equal(collected, 1)
         Equal(#state.requests, 0)
         env.SlashCmdList.WILD("bank run")
         Equal(state.requests[1].kind, "deposit")
         Fire("LOOT_CLOSED")
         RunTimers(); ClickDestroy()
         Equal(state.requests[2].kind, "destroy")
+    end },
+    { "holding the configured key at mailbox open skips inbox collection for that visit", function()
+        for _, key in ipairs({ "SHIFT", "CTRL", "ALT" }) do
+            local Wild, state, Fire, RunTimers = NewEnvironment("Mail.lua")
+            Wild.SetSetting("intentBypassModifier", key)
+            Wild.db.mail.autoOpen = true
+            state.inboxCount = 2
+            state.modifiers[key] = true
+            Fire("MAIL_SHOW")
+            state.modifiers[key] = false
+            Fire("MAIL_SHOW")
+            RunTimers(); RunTimers()
+            Equal(state.inboxCount, 2)
+
+            Fire("MAIL_CLOSED")
+            state.modifiers[key == "SHIFT" and "CTRL" or "SHIFT"] = true
+            Fire("MAIL_SHOW")
+            RunTimers(); RunTimers()
+            Equal(state.inboxCount, 0)
+        end
+    end },
+    { "None lets inbox collection run with a modifier held", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Mail.lua")
+        Wild.SetSetting("intentBypassModifier", "NONE")
+        Wild.db.mail.autoOpen = true
+        state.inboxCount = 1
+        state.modifiers.SHIFT = true
+        Fire("MAIL_SHOW")
+        RunTimers()
+        Equal(state.inboxCount, 0)
+    end },
+    { "inbox collection from a closed mailbox cannot continue in a bypassed visit", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Mail.lua")
+        Wild.SetSetting("intentBypassModifier", "SHIFT")
+        Wild.db.mail.autoOpen = true
+        state.inboxCount = 2
+        Fire("MAIL_SHOW")
+        RunTimers()
+        Equal(state.inboxCount, 1)
+
+        Fire("MAIL_CLOSED")
+        state.modifiers.SHIFT = true
+        Fire("MAIL_SHOW")
+        RunTimers()
+        Equal(state.inboxCount, 1)
     end },
     { "vendor requests are not sales until the matching item count decreases", function()
         local Wild, state, Fire, RunTimers, _, Apply, Tick, _, Messages = NewEnvironment("Bank.lua", "Vendor.lua")

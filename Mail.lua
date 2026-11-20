@@ -5,10 +5,11 @@ local ADDON_NAME, Wild = ...
 -- Auto-open incoming mail
 -- ============================================================
 
-local function AutoOpenMail()
-    if not Wild.db or not Wild.db.mail or not Wild.db.mail.autoOpen then return end
+local function AutoOpenMail(visit)
+    if not Wild.db.mail or not Wild.db.mail.autoOpen then return end
 
     local function OpenNext()
+        if visit.closed then return end
         local numItems = GetInboxNumItems()
         if numItems == 0 then return end
         AutoLootMailItem(1)
@@ -303,8 +304,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "MAIL_SHOW" then
         if not Wild.db then return end
         local visit = Wild.OpenIntentVisit("mail")
-        AutoOpenMail()
         if visit.bypassed then return end
+        AutoOpenMail(visit)
         local generation = mailGeneration
         C_Timer.After(Wild.db.advanced.mailStartDelay, function()
             if mailGeneration == generation then StartMailSend() end
