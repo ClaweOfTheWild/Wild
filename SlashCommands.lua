@@ -768,8 +768,9 @@ subcommands.find = function(args)
     Print("Items matching \"" .. query .. "\":")
     for _, r in ipairs(results) do
         local display = r.link or r.name or tostring(r.itemID)
-        local detail = Wild.FormatItemBreakdown(r.breakdown)
-        Wild.Print(string.format("  %s — %dx total (%s)", display, r.total, detail))
+        local detail = Wild.FormatItemBreakdown(r.breakdown, r.sentMail)
+        if r.total > 0 then detail = string.format("%dx total (%s)", r.total, detail) end
+        Wild.Print(string.format("  %s — %s", display, detail))
     end
 end
 subcommands.search = subcommands.find

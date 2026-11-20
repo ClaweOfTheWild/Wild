@@ -213,33 +213,26 @@ local TOOLTIP_LINES = {
         multiLine = true,
         resolve = function(itemID)
             if not Wild.GetItemTotal then return nil end
-            local total, breakdown = Wild.GetItemTotal(itemID)
-            if total == 0 then return nil end
+            local total, breakdown, sentMail = Wild.GetItemTotal(itemID)
+            if total == 0 and #sentMail == 0 then return nil end
             local lines = {}
-            for _, entry in ipairs(breakdown) do
-                local name, realm, where
-                if entry.location == "warband" then
-                    name  = "Warband"
-                    realm = ""
-                    where = "Bank"
-                elseif entry.location == "guild" then
-                    name  = entry.guild or "Guild"
-                    realm = ""
-                    where = "Bank"
-                else
-                    local char = entry.character or ""
-                    name  = char:match("^([^%-]+)") or char
-                    realm = char:match("%-(.+)$") or ""
-                    where = entry.location == "bank" and "Bank" or "Bags"
-                end
-                lines[#lines + 1] = {
-                    col1 = name,
-                    col2 = realm,
-                    col3 = where,
-                    col4 = tostring(entry.count),
-                }
+
+            local function AddRow(owner, where, count)
+                local name, realm = owner:match("^([^-]+)%-(.+)$")
+                lines[#lines + 1] = { col1 = name or owner, col2 = realm or "", col3 = where, col4 = tostring(count) }
             end
-            if #lines > 1 then
+
+            for _, entry in ipairs(breakdown) do
+                local where = Wild.GetInventoryLocationLabel(entry.location)
+                if entry.location == "warband" then
+                    AddRow("Warband", where, entry.count)
+                elseif entry.location == "guild" then
+                    lines[#lines + 1] = { col1 = entry.guild or "Guild", col2 = "", col3 = where, col4 = tostring(entry.count) }
+                else
+                    AddRow(entry.character, where, entry.count)
+                end
+            end
+            if #breakdown > 1 or (total > 0 and #sentMail > 0) then
                 lines[#lines + 1] = {
                     col1 = "|cffffff00Total|r",
                     col2 = "",
@@ -247,7 +240,10 @@ local TOOLTIP_LINES = {
                     col4 = "|cffffff00" .. total .. "|r",
                 }
             end
-            return { header = "Across all characters:", rows = lines }
+            for _, entry in ipairs(sentMail) do
+                AddRow(entry.recipient, "Sent Mail", entry.count)
+            end
+            return { header = total > 0 and "Across all characters:" or "Sent mail:", rows = lines }
         end,
     },
 }
@@ -550,23 +546,29 @@ end
 -- Tooltip hooking
 -- ============================================================
 
+local function CanRead(value)
+    return not issecretvalue or not issecretvalue(value)
+end
+
 local function OnTooltipSetItem(tooltip, data)
     if tooltip ~= GameTooltip then return end
     if not Wild.db or not Wild.db.tooltip then return end
     local cfg = Wild.db.tooltip
     if not cfg.enabled then return end
 
-    local link
-    if data and data.guid then
-        link = C_Item.GetItemLinkByGUID(data.guid)
-    elseif data and data.hyperlink then
-        link = data.hyperlink
-    elseif tooltip.GetItem then
-        _, link = tooltip:GetItem()
+    local link = data and data.hyperlink
+    if data and CanRead(data.guid) and data.guid then
+        local guidLink = C_Item.GetItemLinkByGUID(data.guid)
+        if CanRead(guidLink) and guidLink then link = guidLink end
     end
-    if not link then return end
-    local itemID = tonumber(link:match("item:(%d+)"))
-    if not itemID then return end
+    if not CanRead(link) then link = nil end
+    if not link and tooltip.GetItem then
+        local _, tooltipLink = tooltip:GetItem()
+        if CanRead(tooltipLink) then link = tooltipLink end
+    end
+    local itemID = type(link) == "string" and tonumber(link:match("item:(%d+)"))
+    if not itemID and data and CanRead(data.id) then itemID = data.id end
+    if type(itemID) ~= "number" or itemID <= 0 then return end
 
     -- Build container info for bind-type and intent matching
     local containerInfo = GetContainerInfoFromTooltip(tooltip)

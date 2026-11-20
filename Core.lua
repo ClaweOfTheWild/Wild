@@ -30,6 +30,9 @@ end
 
 function Wild.GetPlayerStorageBags()
     local bags = { unpack(Wild.GetPlayerBags()) }
+    if Enum.BagIndex.ReagentBag and Wild.db and Wild.db.includeReagentBag == false then
+        bags[#bags + 1] = Enum.BagIndex.ReagentBag
+    end
     -- The keyring is read-only storage, never an automation selection.
     if Wild.isForever and Enum.BagIndex.Keyring ~= nil then
         bags[#bags + 1] = Enum.BagIndex.Keyring
@@ -221,6 +224,7 @@ local defaults = {
         characters = {},
         guilds = {},
         warband = {},
+        sentMail = {},
     },
     advanced = {
         debug = false,
@@ -611,17 +615,7 @@ function Wild.CaptureBagItemCounts(bags)
 end
 
 function Wild.CapturePlayerItemCounts()
-    local bags = Wild.GetPlayerStorageBags()
-    local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
-    if reagentBag then
-        local included = false
-        for _, bag in ipairs(bags) do
-            if bag == reagentBag then included = true; break end
-        end
-        -- Evidence includes excluded bags, so sorting cannot masquerade as removal.
-        if not included then bags[#bags + 1] = reagentBag end
-    end
-    return Wild.CaptureBagItemCounts(bags)
+    return Wild.CaptureBagItemCounts(Wild.GetPlayerStorageBags())
 end
 
 -- Optional snapshots let overlapping batches share one physical scan.

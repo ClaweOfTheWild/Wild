@@ -58,7 +58,7 @@ last names; Retail keeps its existing `Name-Realm` format.
 | `Wild.GetPlayerName()` | Return the player's name, including Forever's last name |
 | `Wild.GetCharKey()` | Return the current character's datastore and actor key |
 | `Wild.GetPlayerBags()` | Return automation-selection bags, respecting **Include reagent bag** |
-| `Wild.GetPlayerStorageBags()` | Return snapshot bags, including Forever's read-only keyring |
+| `Wild.GetPlayerStorageBags()` | Return all storage bags, including the reagent bag and Forever's keyring, regardless of rule settings |
 | `Wild.GetCharacterBankBags()` | Return the client's character-bank container IDs |
 | `Wild.GetAccountBankBags()` | Return the client's account-bank container IDs; availability is checked separately |
 
@@ -88,6 +88,26 @@ variables, rules, actor records, and inventory snapshots. Do not link the
 clients' `WTF` folders or install a second Wild copy over the junction.
 Deleting or editing files through either addon path changes the master too;
 the junction is not a backup.
+
+## Cross-character inventory
+
+Open `/wild native tooltips` and set **Cross-Character Count** to **Always** or
+**Shift Held**. Hover over an item to see its quantities and locations.
+Use `/wild find <item name>` to search without an item link.
+
+Wild saves each character's bags, reagent bag, equipped gear, keyring where
+available, personal bank, and mailbox. It tracks the shared Warband bank and
+guild banks where available. To populate an alt's inventory, sign in on that
+character and open its bank and mailbox. View each guild bank tab to record it.
+Wild updates these records as the game reports changes. Offline counts reflect
+the last available data, not a live view.
+
+When the game confirms a manual send or a mail rule, the attachments appear
+under **Sent Mail** for the recipient, even if that character has never used
+Wild. This row confirms the send, not delivery, and does not add to the
+inventory total. The recipient's next complete inbox check replaces these
+estimates with the attachments the game shows. Wild hides expired inbox
+attachments and removes unverified sends from the results after 30 days.
 
 ## Volume panel timeout
 
@@ -416,7 +436,9 @@ The fixtures cover intent confirmations, partial failures, late events, summary
 totals, history retention, and unchanged vendor intervals. They also cover
 container discovery and event sequencing, plus the Soiree API shapes and manual
 fallback. Mail fixtures cover native send-field preparation and full Forever
-recipient names. WoW APIs are simulated because they are unavailable outside the client.
+recipient names. Inventory fixtures cover confirmed sends, incomplete inbox
+data, and storage refreshes. WoW APIs are simulated because they are
+unavailable outside the client.
 A live Retail and Forever check must confirm merchant refusals, full banks,
 mail acknowledgments, deletion prompts, and displayed results. The local
 fixtures do not establish live server behavior or complete Soiree reward data.
