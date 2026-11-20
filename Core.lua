@@ -913,6 +913,10 @@ end
 
 function Wild.NotifySettingsChanged(key, source)
     if Wild.RefreshNativeSettings then Wild.RefreshNativeSettings(key, source) end
+    if Wild.UpdateMailRulePlan and (not key or key == "intents" or key == "actors"
+        or key == "includeReagentBag" or key == "mail" or key == "mail.autoSend") then
+        Wild.UpdateMailRulePlan()
+    end
 end
 
 function Wild.UpdateSettingsVisibility()

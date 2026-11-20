@@ -5,7 +5,7 @@ end
 
 local function NewMailbox(saved, forever)
     local frames, timers, chat, reads, takes, nativeReply = {}, {}, {}, {}, {}, {}
-    local state = { bulkCalls = 0, pending = false, itemLoads = {}, itemClasses = {} }
+    local state = { bulkCalls = 0, pending = false, itemLoads = {}, itemClasses = {}, bags = {}, attached = {}, sent = {} }
     local requests = {}
     local env = setmetatable({
         WildDB = saved, SlashCmdList = {}, tremove = table.remove,
@@ -17,9 +17,17 @@ local function NewMailbox(saved, forever)
         GetCursorInfo = function() return state.cursor end,
         GetBuildInfo = function() return "", "", "", forever and 16001 or 120105 end,
         WOW_PROJECT_ID = forever and 18 or 1, WOW_PROJECT_MAINLINE = 1, WOW_PROJECT_CAMELOT = 18,
-        ATTACHMENTS_MAX_RECEIVE = 16,
+        ATTACHMENTS_MAX_RECEIVE = 16, ATTACHMENTS_MAX_SEND = 12,
+        BACKPACK_CONTAINER = 0, NUM_BAG_SLOTS = 0,
+        GetAverageItemLevel = function() return 100, 100 end,
+        UnitClass = function() return "Warrior", "WARRIOR" end,
+        UnitLevel = function() return 60 end,
+        GetInventoryItemLink = function() end,
+        GetProfessions = function() end,
+        GetTime = function() return 1 end,
+        date = function() return "2026-11-20 20:00:00" end,
         CONTAINER_SLOTS = forever and "%2$s [%1$d places]" or "%d Slot %s",
-        Enum = { ItemClass = { Consumable = 0, Container = 1, Quiver = 11 } },
+        Enum = { BagIndex = {}, ItemClass = { Consumable = 0, Container = 1, Quiver = 11 } },
         ITEM_QUALITY_COLORS = {
             [0] = { r = 0.62, g = 0.62, b = 0.62 },
             [1] = { r = 1, g = 1, b = 1 },
@@ -105,6 +113,10 @@ local function NewMailbox(saved, forever)
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self) end
     end
     function methods:GetText() return self.text or "" end
+    function methods:GetStringHeight()
+        local _, lineBreaks = self:GetText():gsub("\n", "\n")
+        return (lineBreaks + 1) * 12
+    end
     function methods:Press()
         assert(self:IsVisible() and self.enabled and self.scripts.OnClick, "Button cannot be clicked")
         if self.scripts.OnMouseDown then self.scripts.OnMouseDown(self, "LeftButton") end
@@ -306,6 +318,8 @@ local function NewMailbox(saved, forever)
     env.C_Item.GetItemInfoInstant = function(itemID)
         return itemID, nil, nil, nil, nil, state.itemClasses[itemID] or env.Enum.ItemClass.Consumable
     end
+    env.C_Item.GetItemInfo = function() end
+    env.C_Item.GetItemIconByID = function(itemID) return 70000 + itemID end
     env.C_TooltipInfo = { GetInboxItem = function(index, slot)
         local item = state.inbox[index].slots[slot]
         if item.tooltip then
@@ -337,11 +351,48 @@ local function NewMailbox(saved, forever)
     env.DeleteInboxItem = function(index) Request("delete", index) end
     env.ReturnInboxItem = function(index) Request("return", index) end
 
+    env.C_Container.GetContainerNumSlots = function() return 20 end
+    env.C_Container.GetContainerItemInfo = function(_, slot) return state.bags[slot] end
+    env.C_Container.PickupContainerItem = function(_, slot) state.cursor = slot end
+    env.ClickSendMailItemButton = function(index)
+        local slot = assert(state.cursor)
+        state.attached[index], state.bags[slot], state.cursor = state.bags[slot], nil, nil
+    end
+    env.HasSendMailItem = function(index) return state.attached[index] ~= nil end
+    env.GetSendMailItem = function(index)
+        local item = state.attached[index]
+        if item then return "Bag item", item.itemID, nil, item.stackCount end
+    end
+    env.GetSendMailItemLink = function(index)
+        local item = state.attached[index]
+        return item and item.hyperlink
+    end
+    env.SendMailNameEditBox = env.CreateFrame("EditBox", nil, env.SendMailFrame)
+    env.SendMailSubjectEditBox = env.CreateFrame("EditBox", nil, env.SendMailFrame)
+    env.SendMailBodyEditBox = env.CreateFrame("EditBox", nil, env.SendMailFrame)
+    env.SendMailMoney = {}
+    env.MoneyInputFrame_GetCopper = function() return 0 end
+    env.SendMailMailButton = env.CreateFrame("Button", nil, env.SendMailFrame)
+    env.SendMailFrame_CanSend = function()
+        env.SendMailMailButton:SetEnabled(env.SendMailNameEditBox:GetText() ~= "" and env.SendMailSubjectEditBox:GetText() ~= "")
+    end
+    env.SendMailMailButton:SetScript("OnClick", function(self)
+        assert(not state.pending, "Only one native mail command may be pending")
+        state.sent[#state.sent + 1] = { recipient = env.SendMailNameEditBox:GetText(), items = state.attached }
+        state.pending = true
+        self:SetEnabled(false)
+    end)
+
     local Wild = {}
     local function Load(path) setfenv(assert(loadfile(path)), env)("Wild", Wild) end
     local function Fire(event, ...)
         if event == "MAIL_INBOX_UPDATE" then
             if forever then env.InboxFrame:Update() else env.InboxFrame_Update() end
+        elseif event == "MAIL_SEND_SUCCESS" then
+            state.pending, state.attached = false, {}
+            env.SendMailNameEditBox:SetText("")
+            env.SendMailSubjectEditBox:SetText("")
+            env.SendMailBodyEditBox:SetText("")
         end
         for _, frame in ipairs({ unpack(frames) }) do
             if frame.events[event] then frame.scripts.OnEvent(frame, event, ...) end
@@ -455,12 +506,12 @@ local function NewMailbox(saved, forever)
         end
     end
     local function VisibleScroll()
+        local grid
         for _, frame in ipairs(frames) do
-            if frame.kind == "ScrollFrame" and frame:IsVisible() then
-                return frame
-            end
+            if frame.kind == "ScrollFrame" and frame:IsVisible()
+                and (not grid or frame:GetWidth() > grid:GetWidth()) then grid = frame end
         end
-        error("No visible scroll area")
+        return assert(grid, "No visible scroll area")
     end
     local function ScrollGrid(toEnd)
         local scroll = VisibleScroll()
@@ -477,6 +528,7 @@ local function NewMailbox(saved, forever)
     end
 
     Load("Core.lua")
+    Load("Log.lua")
     Load("Conditions.lua")
     Load("Mail.lua")
     Load("InboxBulk.lua")
@@ -503,6 +555,17 @@ local function NewMailbox(saved, forever)
             nativeReply.id = env.InboxFrame.openMailID
         end,
     }
+end
+
+local function MailRule(recipient, itemID)
+    return {
+        action = "mail", recipient = recipient,
+        groups = { { conditions = { { attr = "item.id", op = "=", value = itemID } } } },
+    }
+end
+
+local function BagItem(itemID, name, count)
+    return { itemID = itemID, hyperlink = "|Hitem:" .. itemID .. "|h[" .. name .. "]|h", stackCount = count }
 end
 
 local function AssertIconOrder(mail, ...)
@@ -719,6 +782,78 @@ for _, forever in ipairs({ false, true }) do
     assert(env.SendMailFrame:IsVisible(), "Disabling Wild keeps the native Send tab open")
 end
 
+for _, forever in ipairs({ false, true }) do
+    local mail = NewMailbox({ mail = { showInboxBrowser = true } }, forever)
+    local state = mail.state
+    mail.wild.db.intents = { MailRule("Zane-Realm", 700), MailRule("Alt Family-Realm", 701) }
+    for slot = 1, 13 do state.bags[slot] = BagItem(700, "Wax", 4) end
+    state.bags[14] = BagItem(701, "Honey Cake", 2)
+    mail.open(forever)
+    assert(mail.hasText("Outgoing plan") and mail.hasText("3 messages ready"), "The plan is visible when Items opens")
+    assert(mail.hasText("1. To: Zane-Realm") and mail.hasText("48 x Wax"))
+    assert(mail.hasText("2. To: Zane-Realm") and mail.hasText("4 x Wax"))
+    assert(mail.hasText("3. To: Alt Family-Realm") and mail.hasText("2 x Honey Cake"))
+    assert(mail.hasText("Click Process rules on Send"))
+    assert(mail.findIcon(100), "The outgoing plan does not replace the inbox grid")
+    mail.advance()
+    Equal(#state.sent, 0)
+    Equal(next(state.attached), nil)
+
+    assert(mail.button("Send")):Click()
+    assert(mail.hasText("3. To: Alt Family-Realm"), "The plan stays visible on Send")
+    assert(mail.button("Process rules")):Click()
+    local recipients = { "Zane-Realm", "Zane-Realm", "Alt Family-Realm" }
+    local attachmentCounts = { 12, 1, 1 }
+    for index, recipient in ipairs(recipients) do
+        mail.advance()
+        Equal(#state.sent, index)
+        Equal(state.sent[index].recipient, recipient)
+        Equal(#state.sent[index].items, attachmentCounts[index])
+        assert(mail.hasText("Waiting for WoW to confirm"), "A submitted batch is not shown as sent")
+        mail.advance()
+        Equal(#state.sent, index)
+        mail.fire("BAG_UPDATE_DELAYED")
+        mail.fire("MAIL_SEND_SUCCESS")
+    end
+    assert(mail.hasText("No bag items match enabled Mail rules."))
+    mail.close()
+    assert(not mail.hasText("Outgoing plan"))
+end
+
+do
+    local mail = NewMailbox()
+    mail.wild.db.intents = { MailRule("Alt-Realm", 700) }
+    mail.state.bags[1] = BagItem(700, "Wax", 2)
+    mail.open()
+    assert(not mail.hasText("Outgoing plan"), "Wild does not change the standard mailbox by default")
+    mail.command("mail preview")
+    assert(mail.hasText("2 x Wax"), "The preview command opens the plan without sending")
+    assert(mail.button("Send")):Click()
+    local process = assert(mail.button("Process rules"))
+    process:Press()
+    mail.state.bags[1].stackCount = 5
+    mail.fire("BAG_UPDATE_DELAYED")
+    assert(mail.hasText("5 x Wax"), "The plan refreshes when the bag contents change")
+    process:Release()
+    mail.advance()
+    Equal(#mail.state.sent, 0)
+    Equal(next(mail.state.attached), nil)
+    assert(mail.hasText("Mail plan changed"))
+    mail.wild.db.intents[1].recipient = "Other-Realm"
+    mail.wild.NotifySettingsChanged("intents")
+    assert(mail.hasText("To: Other-Realm") and not mail.hasText("To: Alt-Realm"))
+    mail.env.SendMailNameEditBox:SetText("Draft-Realm")
+    process:Click()
+    mail.advance()
+    Equal(#mail.state.sent, 0)
+    Equal(mail.env.SendMailNameEditBox:GetText(), "Draft-Realm")
+    mail.env.SendMailNameEditBox:SetText("")
+    process:Click()
+    mail.advance()
+    Equal(mail.state.sent[1].recipient, "Other-Realm")
+    Equal(mail.state.sent[1].items[1].stackCount, 5)
+end
+
 do
     local mail = NewMailbox({ mail = { showInboxBrowser = true } })
     mail.state.trial = true
@@ -850,7 +985,7 @@ do
     assert(not mail.findIcon(240))
     local grip = mail.resizeHandle()
     local window, scroll = grip:GetParent(), mail.visibleScroll()
-    local initialWidth, initialHeight = scroll:GetWidth(), scroll:GetHeight()
+    local initialWidth, initialHeight, initialWindowWidth = scroll:GetWidth(), scroll:GetHeight(), window:GetWidth()
     local movedIcon = assert(mail.findIcon(89))
     local _, _, _, _, initialY = movedIcon:GetPoint()
     grip.scripts.OnMouseDown(grip, "LeftButton")
@@ -866,7 +1001,7 @@ do
 
     mail.scrollGrid(true)
     assert(mail.findIcon(240), "The last stack is reachable after narrowing the pane")
-    window:DragSize(750, 660)
+    window:DragSize(initialWindowWidth + 224, 660)
     local _, _, _, _, wideY = assert(mail.findIcon(89)):GetPoint()
     Equal(wideY, initialY)
     Equal(scroll:GetVerticalScroll(), 0)

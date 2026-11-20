@@ -155,12 +155,21 @@ filters the grid, not the bulk actions.
 Deletion includes eligible unread letters by default. To keep them, turn on
 **Keep unread mail when deleting empty mail** in **Mail** settings.
 
-**Process rules** works without automatic sending. To run the same rules each
-time you open a mailbox, turn on **Run Mail rules on open** in **Mail** settings.
-It is off by default and independent of **Collect incoming mail automatically**.
-The [intent rule bypass key](#intent-actions-and-logs) skips both automatic
-actions for the visit. It does not block **Process rules**. Finish or clear
-your draft before you run rules.
+The **Outgoing plan** on the left shows each planned message in send order,
+with its recipient, item names, and quantities. It updates when your bags or
+rules change. Select **Process rules** on **Send** to start with an empty
+composer. If the plan changed before Wild starts, review the updated list and
+select the button again. Wild waits for WoW to confirm each message before
+sending the next. The list shows what remains, and Wild checks the bags again
+for more matches after the last message. WoW confirmation prompts still
+require your approval.
+
+To run the rules when you open a mailbox, turn on **Run Mail rules on open**
+in **Mail** settings. It is off by default and independent of **Collect
+incoming mail automatically**. The [intent rule bypass key](#intent-actions-and-logs)
+skips both automatic actions for the visit. It does not block **Process rules**.
+Use `/wild mail preview` to open the plan for the current visit without
+starting a send.
 
 Using Wild Mail stops Wild's automatic collection of incoming mail for the
 rest of that visit. Enable Wild Mail before you open a mailbox if you want to
@@ -179,8 +188,11 @@ the standard mailbox for the visit. `Wild.SetInboxSelection(3, true)` checks a
 letter by number. `Wild.RunInboxBulk("return", "selected")` requests a bulk
 action and still requires the return confirmation. The saved settings are
 `mail.showInboxBrowser`, `mail.inboxSort`, `mail.keepUnread`, and `mail.autoSend`.
-`Wild.RunMailIntents()` returns `true` when it starts a run, not when it sends a
-batch. If it cannot start, it returns `false` and a reason message.
+`Wild.ShowMailRulePlan()` shows the plan at an open mailbox.
+`Wild.GetMailRulePlan()` returns a snapshot of the next pass or the remaining
+batches of an active run. `Wild.RunMailIntents()` returns `true` when it starts
+a run, not when it sends a batch. If it cannot start, it returns `false` and a
+reason message.
 
 ## Volume panel timeout
 

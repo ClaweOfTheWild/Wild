@@ -4,17 +4,19 @@ local ADDON_NAME, Wild = ...
 local Inbox = Wild.InboxBulk
 local PANEL_WIDTH, PANEL_HEIGHT = 526, 540
 local PAGE_TOP, PAGE_FOOTER = 60, 52
+local PLAN_WIDTH, PLAN_INSET, PLAN_TOP, PLAN_BOTTOM = 236, 12, 51, 112
 local GRID_LEFT, GRID_TOP, GRID_RIGHT, GRID_BOTTOM = 12, 56, 27, PAGE_FOOTER + 44
 local ICON_SIZE, ICON_STEP, ICON_BORDER_SIZE = 36, 41, 2
 local ICON_BACKDROP = { edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = ICON_BORDER_SIZE }
 local UNKNOWN_ITEM_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
-local RULE_INSTRUCTIONS = "Send items that match enabled Mail rules."
+local RULE_INSTRUCTIONS = "Send the outgoing plan, one mail at a time."
 local Lower = strlower or string.lower
 
 local visit, panel, mailboxHooked, visibilityOverride, nativeLayout
 local messages, loadedCount, totalCount = {}, 0, 0
 local commandMessage, query
 local waitingItems, requestedItems = {}, {}
+local planItemRefreshPending
 local selected, inboxRevision = {}, 0
 local RequestAttachment, SelectPage
 
@@ -82,6 +84,72 @@ local function CreateText(parent, font)
     local text = parent:CreateFontString(nil, "OVERLAY", font)
     text:SetJustifyH("LEFT")
     return text
+end
+
+local function ClampPlanScroll(scroll)
+    scroll:UpdateScrollChildRect()
+    scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(), scroll:GetVerticalScrollRange()))
+end
+
+local function FormatPlannedMail(index, batch)
+    local lines = { ("|cffffd100%d. To: %s|r"):format(index, EscapeText(batch.recipient)) }
+    if batch.pending then lines[#lines + 1] = "Waiting for WoW to confirm" end
+    local items = {}
+    for _, item in ipairs(batch.items) do
+        Wild.MergeItemActionEntries(items, {
+            { key = item.link or item.itemID, link = item.link, itemID = item.itemID, count = item.count },
+        })
+    end
+    for _, item in ipairs(items) do
+        local name = item.link and item.link:match("|h%[(.-)%]|h")
+        name = name or C_Item.GetItemInfo(item.itemID) or ("Item %d"):format(item.itemID)
+        lines[#lines + 1] = ("%d x %s"):format(item.count, EscapeText(name))
+    end
+    return table.concat(lines, "\n")
+end
+
+function Wild.UpdateMailRulePlan(warning)
+    if not nativeLayout or not IsMailboxOpen() then return end
+
+    local plan, status = Wild.GetMailRulePlan()
+    panel.rulePlan = plan
+    local suffix = #plan == 1 and "message" or "messages"
+    local summary
+    if status == "unconfirmed" then
+        summary = "Run stopped. Send not confirmed."
+    elseif status == "running" then
+        summary = #plan > 0 and ("%d %s remaining"):format(#plan, suffix) or "Checking bags for more matches."
+    else
+        summary = #plan > 0 and ("%d %s ready"):format(#plan, suffix) or "No bag items match enabled Mail rules."
+    end
+    panel.planSummary:SetText(summary)
+    if warning then panel.ruleStatus:SetText(warning) end
+
+    local hint = "Click Process rules on Send. Wild waits for WoW to confirm each message, then checks your bags for more matches."
+    if Wild.GetSetting("mail.autoSend") == true then
+        local automatic = visit.bypassed and "Run on open is skipped for this visit." or "Run on open is enabled."
+        hint = automatic .. "\n\n" .. hint
+    end
+    panel.planHint:SetText(hint)
+
+    local rows, content = panel.planRows, panel.planContent
+    local height = 0
+    for index, batch in ipairs(plan) do
+        local row = rows[index]
+        if not row then
+            row = CreateText(content, "GameFontHighlightSmall")
+            row:SetWidth(content:GetWidth())
+            row:SetWordWrap(true)
+            rows[index] = row
+        end
+        row:SetText(FormatPlannedMail(index, batch))
+        row:SetPoint("TOPLEFT", 0, -height)
+        row:Show()
+        height = height + math.ceil(row:GetStringHeight()) + 10
+    end
+    for index = #plan + 1, #rows do rows[index]:Hide() end
+    content:SetHeight(math.max(1, height))
+    ClampPlanScroll(panel.planScroll)
 end
 
 local function CreateButton(parent, width, text, callback)
@@ -487,16 +555,20 @@ local function CreateResizeHandle(window)
 end
 
 local function CreateSendActions()
-    panel.sendActions = CreateFrame("Frame", nil, panel)
+    panel.sendActions = CreateFrame("Frame", nil, panel.content)
     panel.sendActions:SetPoint("BOTTOMLEFT", 12, 8)
     panel.sendActions:SetPoint("BOTTOMRIGHT", -24, 8)
     panel.sendActions:SetHeight(42)
     panel.sendActions:Hide()
-    local process = CreateButton(panel.sendActions, 112, "Process rules", function()
-        local _, message = Wild.RunMailIntents()
+    local process = CreateButton(panel.sendActions, 112, "Process rules", function(self)
+        local reviewed = self.reviewedPlan or panel.rulePlan
+        self.reviewedPlan = nil
+        local _, message = Wild.RunMailIntents(reviewed)
         panel.ruleStatus:SetText(message or RULE_INSTRUCTIONS)
     end)
     process:SetPoint("BOTTOMLEFT")
+    process:SetScript("OnMouseDown", function(self) self.reviewedPlan = panel.rulePlan end)
+    process:SetScript("OnHide", function(self) self.reviewedPlan = nil end)
     panel.ruleStatus = CreateText(panel.sendActions, "GameFontHighlightSmall")
     panel.ruleStatus:SetPoint("TOPLEFT")
     panel.ruleStatus:SetPoint("TOPRIGHT")
@@ -507,7 +579,7 @@ local function CreateSendActions()
 end
 
 local function CreateBulkActions()
-    local footer = CreateFrame("Frame", nil, panel)
+    local footer = CreateFrame("Frame", nil, panel.content)
     footer:SetPoint("BOTTOMLEFT", 12, 8)
     footer:SetPoint("BOTTOMRIGHT", -24, 8)
     footer:SetHeight(42)
@@ -577,7 +649,7 @@ local function CreateListChecks()
 end
 
 local function CreateItemsPage()
-    panel.items = CreateFrame("Frame", nil, panel)
+    panel.items = CreateFrame("Frame", nil, panel.content)
     panel.items:SetPoint("TOPLEFT", 0, -PAGE_TOP)
     panel.items:SetPoint("BOTTOMRIGHT", 0, PAGE_FOOTER)
     panel.items:Hide()
@@ -623,6 +695,41 @@ local function CreateItemsPage()
     end)
 end
 
+local function CreateMailRulePlan()
+    local sidebar = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    sidebar:SetPoint("TOPLEFT", 8, -PAGE_TOP)
+    sidebar:SetPoint("BOTTOMLEFT", 8, 8)
+    sidebar:SetWidth(PLAN_WIDTH - 12)
+    sidebar:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
+    })
+    sidebar:SetBackdropColor(0.045, 0.045, 0.06, 1)
+    sidebar:SetBackdropBorderColor(0.29, 0.29, 0.33, 1)
+    local title = CreateText(sidebar, "GameFontNormal")
+    title:SetPoint("TOPLEFT", PLAN_INSET, -PLAN_INSET)
+    title:SetText("Outgoing plan")
+    panel.planSummary = CreateText(sidebar, "GameFontHighlightSmall")
+    panel.planSummary:SetPoint("TOPLEFT", PLAN_INSET, -29)
+    panel.planSummary:SetPoint("TOPRIGHT", -PLAN_INSET, -29)
+    panel.planHint = CreateText(sidebar, "GameFontHighlightSmall")
+    panel.planHint:SetPoint("BOTTOMLEFT", PLAN_INSET, PLAN_INSET)
+    panel.planHint:SetPoint("BOTTOMRIGHT", -PLAN_INSET, PLAN_INSET)
+
+    local scroll = CreateFrame("ScrollFrame", nil, sidebar, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", PLAN_INSET, -PLAN_TOP)
+    scroll:SetWidth(PLAN_WIDTH - 12 - PLAN_INSET - 26)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(scroll:GetWidth(), 1)
+    scroll:SetScrollChild(content)
+    panel.planScroll, panel.planContent, panel.planRows = scroll, content, {}
+end
+
+local function ResizePanel(window, width, height)
+    ResizeGrid(window, width - PLAN_WIDTH, height)
+    window.planScroll:SetHeight(height - PAGE_TOP - 8 - PLAN_TOP - PLAN_BOTTOM)
+    ClampPlanScroll(window.planScroll)
+end
+
 local function CreatePanel()
     panel = CreateFrame("Frame", nil, MailFrame, "BackdropTemplate")
     panel:Hide()
@@ -632,9 +739,9 @@ local function CreatePanel()
     local nativeWidth, nativeHeight = MailFrame:GetWidth(), MailFrame:GetHeight()
     local minWidth = math.max(460, math.max(nativeWidth, OpenMailFrame:GetWidth()) + 76)
     local minHeight = PAGE_TOP + math.max(nativeHeight, OpenMailFrame:GetHeight()) + PAGE_FOOTER
-    panel:SetSize(math.max(PANEL_WIDTH, minWidth), math.max(PANEL_HEIGHT, minHeight))
+    panel:SetSize(math.max(PANEL_WIDTH, minWidth) + PLAN_WIDTH, math.max(PANEL_HEIGHT, minHeight))
     panel:SetResizable(true)
-    panel:SetResizeBounds(minWidth, minHeight)
+    panel:SetResizeBounds(minWidth + PLAN_WIDTH, minHeight)
     panel:SetDontSavePosition(true)
     panel:SetClampedToScreen(true)
     panel:EnableMouse(true)
@@ -657,22 +764,26 @@ local function CreatePanel()
     close:SetPoint("TOPRIGHT", -2, -2)
     close:SetScript("OnClick", function() HideUIPanel(MailFrame) end)
 
+    panel.content = CreateFrame("Frame", nil, panel)
+    panel.content:SetPoint("TOPLEFT", PLAN_WIDTH, 0)
+    panel.content:SetPoint("BOTTOMRIGHT")
     panel.tabs = {}
     for index, page in ipairs({ "List", "Items", "Send" }) do
-        local tab = CreateButton(panel, 72, page, function() SelectPage(page) end)
+        local tab = CreateButton(panel.content, 72, page, function() SelectPage(page) end)
         tab:SetPoint("TOPLEFT", 12 + (index - 1) * 76, -32)
         panel.tabs[page] = tab
     end
-    panel.native = CreateFrame("Frame", nil, panel)
+    panel.native = CreateFrame("Frame", nil, panel.content)
     panel.native:SetSize(nativeWidth, nativeHeight)
-    panel.native:SetPoint("TOP", panel, "TOP", 0, -PAGE_TOP)
+    panel.native:SetPoint("TOP", panel.content, "TOP", 0, -PAGE_TOP)
     CreateBulkActions()
     CreateListChecks()
     CreateSendActions()
     CreateItemsPage()
-    ResizeGrid(panel, panel:GetWidth(), panel:GetHeight())
+    CreateMailRulePlan()
+    ResizePanel(panel, panel:GetWidth(), panel:GetHeight())
     CreateResizeHandle(panel)
-    panel:SetScript("OnSizeChanged", ResizeGrid)
+    panel:SetScript("OnSizeChanged", ResizePanel)
     panel:SetScript("OnHide", FinishResize)
 end
 
@@ -771,6 +882,7 @@ local function MountMailbox()
     visit.inboxBrowserOpened = true
     HideNativeBulkActions()
     RefreshInbox()
+    Wild.UpdateMailRulePlan()
     ShowPage(SendMailFrame:IsShown() and "Send" or OpenMailFrame:IsShown() and "List" or "Items")
 end
 
@@ -787,6 +899,8 @@ local function RestoreMailbox()
     RestorePage(InboxFrame, layout.inbox)
     RestorePage(SendMailFrame, layout.send)
     panel:Hide()
+    panel.rulePlan = nil
+    panel.planScroll:SetVerticalScroll(0)
     panel.items:Hide()
     panel.sendActions:Hide()
     if IsMailboxOpen() and (restricted or (panel.page ~= "Send" and not InboxFrame:IsShown())) then
@@ -860,10 +974,8 @@ local function AttachToMailbox()
     end
 end
 
---- Open Wild Mail to the Items tab for this visit and optionally replace its search.
-function Wild.ShowInboxBrowser(search)
-    if search ~= nil and type(search) ~= "string" then return Warn("Enter text to search the inbox.") end
-    if not IsMailboxOpen() then return Warn("Open a mailbox to browse its attachments.") end
+local function ShowWildMailboxForVisit()
+    if not IsMailboxOpen() then return Warn("Open a mailbox to use Wild Mail.") end
     AttachToMailbox()
     if not mailboxHooked or (GameLimitedMode_IsActive and GameLimitedMode_IsActive()) then
         return Warn("Wild Mail is not available. Use the native mailbox.")
@@ -871,6 +983,20 @@ function Wild.ShowInboxBrowser(search)
     if not nativeLayout and InCombatLockdown() then return Warn("Leave combat before opening Wild Mail.") end
     visibilityOverride = true
     UpdateVisibility()
+    return true
+end
+
+--- Show the outgoing plan without switching tabs or sending mail.
+function Wild.ShowMailRulePlan()
+    if not ShowWildMailboxForVisit() then return false end
+    Wild.UpdateMailRulePlan()
+    return true
+end
+
+--- Open Wild Mail to the Items tab for this visit and optionally replace its search.
+function Wild.ShowInboxBrowser(search)
+    if search ~= nil and type(search) ~= "string" then return Warn("Enter text to search the inbox.") end
+    if not ShowWildMailboxForVisit() then return false end
     SelectPage("Items")
     if search then panel.search:SetText(search) end
     return true
@@ -922,6 +1048,7 @@ local events = CreateFrame("Frame")
 for _, event in ipairs({
     "ADDON_LOADED", "MAIL_SHOW", "MAIL_CLOSED", "MAIL_INBOX_UPDATE",
     "ITEM_DATA_LOAD_RESULT", "TRIAL_STATUS_UPDATE", "PLAYER_REGEN_ENABLED",
+    "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "SKILL_LINES_CHANGED",
 }) do
     events:RegisterEvent(event)
 end
@@ -952,7 +1079,20 @@ events:SetScript("OnEvent", function(_, event, argument, success)
         UpdateVisibility()
     elseif event == "TRIAL_STATUS_UPDATE" or event == "PLAYER_REGEN_ENABLED" then
         UpdateVisibility()
-    elseif event == "MAIL_INBOX_UPDATE" or (event == "ITEM_DATA_LOAD_RESULT" and success and waitingItems[argument]) then
+    elseif event == "ITEM_DATA_LOAD_RESULT" and success then
+        if not nativeLayout or not IsMailboxOpen() then return end
+        if waitingItems[argument] then RefreshInbox() end
+        if not planItemRefreshPending then
+            planItemRefreshPending = true
+            C_Timer.After(0, function()
+                planItemRefreshPending = nil
+                Wild.UpdateMailRulePlan()
+            end)
+        end
+    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED"
+        or event == "PLAYER_LEVEL_UP" or event == "SKILL_LINES_CHANGED" then
+        Wild.UpdateMailRulePlan()
+    elseif event == "MAIL_INBOX_UPDATE" then
         if nativeLayout and IsMailboxOpen() then RefreshInbox() end
     end
 end)

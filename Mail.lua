@@ -29,6 +29,10 @@ function Wild.IsMailSendBusy()
     return isSending or pendingMail ~= nil
 end
 
+local function RefreshMailRulePlan(warning)
+    if Wild.UpdateMailRulePlan then Wild.UpdateMailRulePlan(warning) end
+end
+
 local function AutoOpenMail(visit)
     if not Wild.GetSetting("mail.autoOpen") or Wild.IsFeatureEnabled("inbox") then return end
 
@@ -119,6 +123,7 @@ local function StopMailQueue(warning, keepPending, reason)
     isSending = false
     automaticSend = false
     mailGeneration = mailGeneration + 1
+    RefreshMailRulePlan(warning)
 end
 
 local function ScheduleMailStep(delay, callback)
@@ -126,22 +131,23 @@ local function ScheduleMailStep(delay, callback)
     C_Timer.After(delay, function()
         if isSending and mailGeneration == generation then callback() end
     end)
+    RefreshMailRulePlan()
 end
 
 local function BuildMailQueue()
     if not Wild.db or not Wild.db.intents then return {} end
 
-    local charCtx = Wild.BuildCharContext()
-    local byRecipient = {}
+    local charCtx, bags
+    local byRecipient, recipients = {}, {}
     local seen = {}
-
-    local bags = Wild.GetPlayerBags()
 
     for _, intent in ipairs(Wild.db.intents) do
         if intent.enabled ~= false and intent.action == "mail" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
+            if not charCtx then charCtx, bags = Wild.BuildCharContext(), Wild.GetPlayerBags() end
             local recipient = intent.recipient
             if not byRecipient[recipient] then
                 byRecipient[recipient] = {}
+                recipients[#recipients + 1] = recipient
             end
 
             for _, group in ipairs(Wild.GetItemGroups(intent)) do
@@ -181,7 +187,8 @@ local function BuildMailQueue()
     end
 
     local queue = {}
-    for recipient, items in pairs(byRecipient) do
+    for _, recipient in ipairs(recipients) do
+        local items = byRecipient[recipient]
         for i = 1, #items, MAX_ATTACHMENTS do
             local batch = {}
             for j = i, math.min(i + MAX_ATTACHMENTS - 1, #items) do
@@ -191,6 +198,42 @@ local function BuildMailQueue()
         end
     end
     return queue
+end
+
+local function CopyPlannedMail(batch, pending)
+    local items = {}
+    for index, item in ipairs(batch.items) do
+        items[index] = {
+            bag = item.bag, slot = item.slot, itemID = item.itemID, link = item.link, count = item.count,
+        }
+    end
+    return { recipient = batch.recipient, items = items, pending = pending }
+end
+
+--- Return a snapshot of the next pass or the remaining work of an active run.
+function Wild.GetMailRulePlan()
+    if not Wild.IsMailSendBusy() then return BuildMailQueue() end
+
+    local plan = {}
+    if pendingMail then plan[1] = CopyPlannedMail(pendingMail, true) end
+    for _, batch in ipairs(mailQueue) do
+        plan[#plan + 1] = CopyPlannedMail(batch)
+    end
+    return plan, isSending and "running" or "unconfirmed"
+end
+
+local function SameMailPlan(reviewed, current)
+    if #reviewed ~= #current then return false end
+    for index, batch in ipairs(current) do
+        local previous = reviewed[index]
+        if previous.recipient ~= batch.recipient or #previous.items ~= #batch.items then return false end
+        for itemIndex, item in ipairs(batch.items) do
+            local old = previous.items[itemIndex]
+            if old.bag ~= item.bag or old.slot ~= item.slot or old.itemID ~= item.itemID
+                or old.link ~= item.link or old.count ~= item.count then return false end
+        end
+    end
+    return true
 end
 
 local function ProcessNextMail()
@@ -277,6 +320,7 @@ local function ProcessNextMail()
             end
         end)
         SendMailMailButton:Click()
+        RefreshMailRulePlan()
     else
         StopMailQueue("No mail attachments could be prepared; stopped mail queue.", false, "no_attachments")
     end
@@ -299,6 +343,7 @@ local function OnMailSendComplete()
             mailConfirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
                 if isSending and mailGeneration == generation and waitingForBags then RescanMailQueue() end
             end)
+            RefreshMailRulePlan()
         end
     end
 end
@@ -318,12 +363,16 @@ RescanMailQueue = function()
     end
 end
 
-local function StartMailSend(automatic)
+local function StartMailSend(automatic, reviewed)
     if isSending then return false, "Mail rules are already running.", "already_running" end
     if pendingMail then return false, "Wait for WoW to confirm the previous rule send.", "send_unconfirmed" end
     local blocked, reason = GetSendBlock()
     if blocked and not automatic then return false, blocked, reason end
     local queue = BuildMailQueue()
+    if reviewed and not SameMailPlan(reviewed, queue) then
+        RefreshMailRulePlan()
+        return false, "Mail plan changed. Review it before running the rules again.", "mail_plan_changed"
+    end
     if #queue == 0 then return false, "No bag items match enabled Mail rules.", "no_matches" end
     if blocked then
         Wild.Warn("Mail", blocked, { action = "mail", status = "stopped", reason = reason })
@@ -346,9 +395,9 @@ local function StartMailSend(automatic)
     return true
 end
 
---- Start the same send queue as auto-send without changing the saved setting.
-function Wild.RunMailIntents()
-    return StartMailSend(false)
+--- Start the send queue, optionally requiring it to match a prior GetMailRulePlan snapshot.
+function Wild.RunMailIntents(reviewed)
+    return StartMailSend(false, reviewed)
 end
 
 -- ============================================================
@@ -395,7 +444,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 Wild.LogAction("Mail", "mail", item)
                 Wild.Print("|cff00ccffWild:|r " .. Wild.FormatActionResult("mail", item))
             end
-            if isSending then OnMailSendComplete() else PrintMailSummary(false) end
+            if isSending then
+                OnMailSendComplete()
+            else
+                PrintMailSummary(false)
+                RefreshMailRulePlan()
+            end
         end
     elseif event == "MAIL_FAILED" then
         if isSending or pendingMail then

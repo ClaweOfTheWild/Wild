@@ -19,8 +19,8 @@ handling each letter separately and choose when outgoing rules run.
 
 - The current character's inbox and the standard WoW composer.
 - Bulk actions on all loaded letters or on a player-selected group.
-- Manual and automatic runs of existing Mail rules. Rule editing stays in
-  **Intent Rules**.
+- A read-only outgoing plan and manual and automatic runs of existing Mail
+  rules. Rule editing stays in **Intent Rules**.
 
 ## Functional requirements
 
@@ -95,11 +95,19 @@ Scenario: Change the attachment sort order during a search
 
 ### FR6 - Control when outgoing rules run {#fr6}
 
+Opening Wild Mail MUST show a scrollable outgoing plan on the left on all
+three tabs. The plan MUST show each message in send order, with the
+recipient, item names, and quantities. It MUST update when bags or rules
+change and show the remaining messages during a run. Opening the preview
+with `/wild mail preview` MUST NOT start a send.
+
 **Process rules** on **Send** and `/wild mail run` MUST start the same send
-queue. **Run Mail rules on open** MUST be independent of automatic collection
-and default to off. The intent rule bypass key MUST skip automatic sending
-for the visit without blocking a manual run. Turning off automatic sending
-MUST stop further automatic batches without canceling a pending send.
+queue. If the preview no longer matches the first pass when the button is
+selected, Wild MUST show the updated plan without sending it. **Run Mail
+rules on open** MUST be independent of automatic collection and default to
+off. The intent rule bypass key MUST skip automatic sending for the visit
+without blocking a manual run. Turning off automatic sending MUST stop
+further automatic batches without canceling a pending send.
 
 The queue MUST NOT start another run while one is active or a previous send
 is unconfirmed. It MUST NOT overwrite a draft or send while a mail command
@@ -115,7 +123,8 @@ Scenario: Send matching items on request
   And another Mail rule matches a different stack for a different recipient
   And Run Mail rules on open is off
   When the player opens the mailbox
-  Then Wild sends nothing
+  Then the plan shows both recipients and their matching stacks
+  And Wild sends nothing
   When the player selects Process rules once with no draft
   Then Wild requests a send for the first batch
   And Wild submits the next batch without another click after WoW confirms the first

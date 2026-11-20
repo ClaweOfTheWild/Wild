@@ -222,11 +222,15 @@ end)
 RegisterCommand("mail", {
     { "[on|off]", "Show or set automatic collection of incoming mail." },
     { "autosend [on|off]", "Show or set whether Mail rules run when you open a mailbox." },
+    { "preview", "Show the outgoing Mail rule plan at an open mailbox without sending." },
     { "run", "Run Mail rules at an open mailbox. Finish or clear the draft first." },
 }, function(args)
     local action = args[1] and args[1]:lower()
     if action == "autosend" and #args <= 2 then
         if HandleGenericFeature("mailautosend", { args[2] }) then return end
+    elseif action == "preview" and #args == 1 then
+        Wild.ShowMailRulePlan()
+        return
     elseif action == "run" and #args == 1 then
         local started, message, reason = Wild.RunMailIntents()
         if not started and reason ~= "no_matches" then PrintWarn(message) end
@@ -234,7 +238,7 @@ RegisterCommand("mail", {
     elseif #args <= 1 and HandleGenericFeature("mail", args) then
         return
     end
-    PrintWarn("Usage: /wild mail [on|off|autosend [on|off]|run]")
+    PrintWarn("Usage: /wild mail [on|off|autosend [on|off]|preview|run]")
 end)
 
 local INBOX_SCOPE_HELP = " Omit scope to use the selection, or all loaded mail if none is selected."

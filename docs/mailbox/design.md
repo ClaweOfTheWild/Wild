@@ -78,8 +78,16 @@ It does not read bodies to infer eligibility.
 
 The Process rules button, the run command, and the automatic open handler
 start the same queue. It selects items through the intent engine, uses the
-native composer and Send button, and leaves confirmations to the player. It
-checks the draft, cursor, and mail command state before each batch. After
+native composer and Send button, and leaves confirmations to the player.
+The left pane uses the same queue builder as a send and displays batches in
+the order that their recipient first appears in the applicable rules. Before
+the button starts a run, Wild compares the displayed plan with a fresh bag
+scan. If it differs, the pane shows the new plan without starting a send.
+During a run the pane shows the pending message and remaining queue. Updates
+do not change the active queue. The send queue checks the bags again for
+more matches after each pass.
+
+The queue checks the draft, cursor, and mail command state before each batch. After
 preparing the draft, it checks for a native mail lock again and runs WoW's
 Send validation before it submits the batch. `MAIL_SEND_SUCCESS` confirms
 the send and lets the queue continue without another click. An acknowledgment
@@ -123,11 +131,12 @@ confirming. On Forever, verify that the native controller Open All shortcut
 is inactive in Wild Mail and returns in the standard window.
 
 Use two Mail rules for different low-value test stacks and approved test
-recipients. Check that opening the mailbox does not send anything by default.
-Select **Process rules** once. Check that each recipient gets the correct stack
-without a separate **Send** click. Repeat with **Run Mail rules on open** enabled.
-Verify that the bypass key prevents the automatic send while a manual run still
-works.
+recipients. Check that opening the mailbox shows the plan on the left without
+sending anything by default. Change a stack count and check that the plan
+updates. Select **Process rules** once. Check that each recipient gets the
+correct stack without a separate **Send** click. Repeat with **Run Mail rules
+on open** enabled. Verify that the bypass key prevents the automatic send
+while a manual run still works.
 
 ## Client contracts
 
