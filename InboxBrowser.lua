@@ -1,73 +1,47 @@
--- Wild: Search and take individual attachments from the loaded inbox
+-- Wild: Tabbed mailbox with a searchable attachment grid
 local ADDON_NAME, Wild = ...
 
-local PANEL_WIDTH, PANEL_HEIGHT = 526, 430
-local MESSAGE_HEIGHT, ATTACHMENT_HEIGHT = 46, 30
+local Inbox = Wild.InboxBulk
+local PANEL_WIDTH, PANEL_HEIGHT = 526, 540
+local PAGE_TOP, PAGE_FOOTER = 60, 52
+local GRID_LEFT, GRID_TOP, GRID_RIGHT, GRID_BOTTOM = 12, 56, 27, PAGE_FOOTER + 44
+local ICON_SIZE, ICON_STEP, ICON_BORDER_SIZE = 36, 41, 2
+local ICON_BACKDROP = { edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = ICON_BORDER_SIZE }
 local UNKNOWN_ITEM_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+local RULE_INSTRUCTIONS = "Send items that match enabled Mail rules."
 local Lower = strlower or string.lower
 
-local visit, panel, browseButton, wantsBrowser
+local visit, panel, mailboxHooked, visibilityOverride, nativeLayout
 local messages, loadedCount, totalCount = {}, 0, 0
-local selected, body, query
+local commandMessage, query
 local waitingItems, requestedItems = {}, {}
+local selected, inboxRevision = {}, 0
+local RequestAttachment, SelectPage
 
-local function ReadMessage(index)
-    local _, stationery, sender, subject, money, cod, daysLeft, itemCount = GetInboxHeaderInfo(index)
-    if not daysLeft or money == nil or cod == nil then return end
+local BULK_ACTIONS = {
+    { key = "open", width = 104, all = "Open all mail", selected = "Open selected",
+      help = "Collect items and gold. Skips C.O.D. and GM mail." },
+    { key = "return", width = 104, all = "Return all mail", selected = "Return selected",
+      help = "Return eligible letters and anything in them to their senders. Requires confirmation." },
+    { key = "delete", width = 136, all = "Delete all empty mail", selected = "Delete selected empty",
+      help = "Delete eligible mail with no items or gold. Letter text is also deleted. Requires confirmation." },
+}
 
-    local message = {
-        index = index, stationery = stationery, sender = sender or "Unknown sender",
-        subject = subject and subject ~= "" and subject or "(No subject)",
-        money = money, cod = cod, itemCount = itemCount or 0, attachments = {},
-    }
-    if message.itemCount == 0 then return message end
-
-    for slot = 1, ATTACHMENTS_MAX_RECEIVE do
-        if HasInboxItem(index, slot) then
-            local name, itemID, icon, count, _, _, isCurrency = GetInboxItem(index, slot)
-            local link = GetInboxItemLink(index, slot)
-            message.attachments[#message.attachments + 1] = {
-                slot = slot, itemID = itemID, icon = icon, count = count, isCurrency = isCurrency, link = link,
-                name = name or (link and link:match("|h%[(.-)%]|h")),
-            }
-            if #message.attachments == message.itemCount then break end
-        end
-    end
-    return message
+local function MatchesItem(item)
+    return query and query ~= "" and item.name and Lower(item.name):find(query, 1, true)
 end
 
-local function HasItemIdentity(item)
-    return item and item.name and item.itemID and item.itemID > 0 and item.count and item.count > 0
-        and (item.link or item.isCurrency)
-end
-
-local function SameAttachment(before, now)
-    return before and now and before.slot == now.slot and before.itemID == now.itemID
-        and before.link == now.link and before.count == now.count and before.isCurrency == now.isCurrency
-end
-
-local function SameMessage(before, now)
-    if not now or before.index ~= now.index or before.sender ~= now.sender or before.subject ~= now.subject
-        or before.stationery ~= now.stationery or before.money ~= now.money or before.cod ~= now.cod
-        or before.itemCount ~= now.itemCount or #before.attachments ~= #now.attachments then
-        return false
-    end
-    for position, item in ipairs(before.attachments) do
-        if not SameAttachment(item, now.attachments[position]) then return false end
-    end
-    return true
-end
-
-local function FindMatchingAttachment(message)
-    if not query or query == "" then return end
-    for _, item in ipairs(message.attachments) do
-        if item.name and Lower(item.name):find(query, 1, true) then return item end
-    end
-end
-
-local function MatchesQuery(message)
+local function MatchesHeader(message)
     return not query or query == "" or Lower(message.sender):find(query, 1, true)
-        or Lower(message.subject):find(query, 1, true) or FindMatchingAttachment(message)
+        or Lower(message.subject):find(query, 1, true)
+end
+
+local function MatchesMessage(message)
+    if MatchesHeader(message) then return true end
+    for _, item in ipairs(message.attachments) do
+        if MatchesItem(item) then return true end
+    end
+    return false
 end
 
 local function EscapeText(text)
@@ -77,16 +51,25 @@ end
 local function ReadCurrentMessage(index)
     local loaded, total = GetInboxNumItems()
     if loaded ~= loadedCount or (total or loaded) ~= totalCount then return end
-    return ReadMessage(index)
+    return Inbox.ReadMessage(index)
 end
 
-local function IsInboxVisible()
-    return visit and not visit.closed and MailFrame and MailFrame:IsVisible() and InboxFrame and InboxFrame:IsVisible()
-        and not (OpenMailFrame and OpenMailFrame:IsVisible())
+local function IsMailboxOpen()
+    return visit and not visit.closed and MailFrame and MailFrame:IsVisible()
 end
 
 local function IsBrowserVisible()
-    return panel and panel:IsVisible() and IsInboxVisible()
+    return nativeLayout and panel.items:IsVisible() and IsMailboxOpen()
+end
+
+local function IsReceivePage()
+    return nativeLayout and IsMailboxOpen() and panel.page ~= "Send" and not OpenMailFrame:IsShown()
+end
+
+local function FindAttachment(message, slot)
+    for _, item in ipairs(message.attachments) do
+        if item.slot == slot then return item end
+    end
 end
 
 local function Warn(message)
@@ -95,9 +78,8 @@ local function Warn(message)
     return false
 end
 
-local function CreateText(parent, width, font)
+local function CreateText(parent, font)
     local text = parent:CreateFontString(nil, "OVERLAY", font)
-    text:SetWidth(width)
     text:SetJustifyH("LEFT")
     return text
 end
@@ -110,13 +92,17 @@ local function CreateButton(parent, width, text, callback)
     return button
 end
 
-local function CreateCommandButton(parent, getCommand)
+local function CreateCommandButton(parent, getCommand, help)
     local button = CreateButton(parent, 20, "/", function()
-        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, getCommand())
+        local command = getCommand()
+        if command then StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, command) end
     end)
     button:SetScript("OnEnter", function(self)
+        local command = getCommand()
+        if not command then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(EscapeText(getCommand()), 1, 1, 1)
+        if help then GameTooltip:AddLine(help, 1, 1, 1, true) end
+        GameTooltip:AddLine(EscapeText(command), 1, 1, 1)
         GameTooltip:AddLine("Click /, then press Ctrl+C to copy.", 1, 0.82, 0)
         GameTooltip:Show()
     end)
@@ -124,192 +110,291 @@ local function CreateCommandButton(parent, getCommand)
     return button
 end
 
-local function CreateScroll(parent, x, width)
-    local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -87)
-    scroll:SetSize(width, 299)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(width, 1)
-    scroll:SetScrollChild(content)
-    return scroll, content
+local function SetInboxTooltip(owner, message, slot)
+    if not IsBrowserVisible() or not message or not Inbox.SameMessage(message, ReadCurrentMessage(message.index)) then return end
+    local item = FindAttachment(message, slot)
+    if not item then return end
+
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    if Inbox.HasItemIdentity(item) then
+        GameTooltip:SetInboxItem(message.index, slot)
+    else
+        GameTooltip:SetText("Attachment not ready")
+    end
+    GameTooltip:AddLine(("Mail #%d, slot %d: %s"):format(message.index, slot, EscapeText(message.subject)), 1, 1, 1, true)
+    GameTooltip:AddLine("From: " .. EscapeText(message.sender), 1, 1, 1, true)
+    if message.cod > 0 then
+        GameTooltip:AddLine("C.O.D.: " .. Wild.FormatGold(message.cod), 1, 0.82, 0)
+        GameTooltip:AddLine("Open the letter on the List tab to confirm payment.", 1, 0.82, 0)
+    elseif not Inbox.HasItemIdentity(item) then
+        GameTooltip:AddLine("Wait for the attachment to load or use the WoW inbox.", 1, 0.82, 0, true)
+    end
+    GameTooltip:Show()
 end
 
-local function CreateMessageRow(position)
-    local row = CreateFrame("Button", nil, panel.results)
-    row:SetSize(184, MESSAGE_HEIGHT)
-    row:SetPoint("TOPLEFT", panel.results, "TOPLEFT", 0, -(position - 1) * MESSAGE_HEIGHT)
-    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-    row.subject = CreateText(row, 180, "GameFontHighlight")
-    row.subject:SetPoint("TOPLEFT", 2, -2)
-    row.subject:SetWordWrap(false)
-    row.sender = CreateText(row, 180, "GameFontHighlightSmall")
-    row.sender:SetPoint("TOPLEFT", 2, -18)
-    row.sender:SetWordWrap(false)
-    row.preview = CreateText(row, 180, "GameFontHighlightSmall")
-    row.preview:SetPoint("TOPLEFT", 2, -31)
-    row.preview:SetWordWrap(false)
-    row:SetScript("OnClick", function(self) Wild.ReadInboxMessage(self.index) end)
-    return row
+local function HideOwnedTooltip(owner)
+    if GameTooltip:IsOwned(owner) then GameTooltip:Hide() end
 end
 
-local function FormatAttachmentPreview(message)
-    local item = FindMatchingAttachment(message)
-    local label = item and (item.name .. (item.count and " x" .. item.count or "")) or ""
-    if label == "" and message.itemCount > 0 then label = message.itemCount .. " attachments" end
-    if message.cod > 0 then return "C.O.D.  " .. label end
-    if label == "" and message.money > 0 then return "Enclosed money" end
-    return label
+local function GetQualityColor(quality)
+    if issecretvalue and issecretvalue(quality) then return end
+    return ITEM_QUALITY_COLORS[quality]
 end
 
-local function RenderResults(resetScroll)
-    local count = 0
-    for index = 1, loadedCount do
-        local message = messages[index]
-        if message and MatchesQuery(message) then
-            count = count + 1
-            local row = panel.messageRows[count] or CreateMessageRow(count)
-            panel.messageRows[count] = row
-            row.index = index
-            row.subject:SetText(("#%d  %s"):format(index, EscapeText(message.subject)))
-            row.sender:SetText(EscapeText(message.sender))
-            row.preview:SetText(EscapeText(FormatAttachmentPreview(message)))
-            local isSelected = selected and selected.index == index
-            row.subject:SetTextColor(1, isSelected and 0.82 or 1, isSelected and 0 or 1)
-            row:Show()
+local function GetCapacityPattern()
+    if type(CONTAINER_SLOTS) ~= "string" then return end
+    -- Some locales put the bag type first with numbered format arguments.
+    local format = CONTAINER_SLOTS:gsub("%%%d+%$([ds])", "%%%1")
+    if not format:find("%d", 1, true) then return end
+    local escaped = format:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+    return "^" .. escaped:gsub("%%%%([ds])", { d = "(%d+)", s = ".-" }) .. "$"
+end
+
+local function ReadAttachmentCapacity(index, item, pattern)
+    if not pattern then return end
+    local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(item.itemID)
+    if not classID then return nil, true end
+    if classID ~= Enum.ItemClass.Container and classID ~= Enum.ItemClass.Quiver then return end
+
+    local tooltip = C_TooltipInfo.GetInboxItem(index, item.slot)
+    for _, line in ipairs(tooltip and tooltip.lines or {}) do
+        local text = line.leftText
+        if type(text) == "string" and not (issecretvalue and issecretvalue(text)) then
+            local plainText = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            local capacity = tonumber(plainText:match(pattern))
+            if capacity and capacity > 0 then return capacity end
         end
     end
-    for position = count + 1, #panel.messageRows do
-        local row = panel.messageRows[position]
-        row:Hide()
-        row.subject:SetText("")
-        row.sender:SetText("")
-        row.preview:SetText("")
-    end
-    panel.results:SetHeight(math.max(MESSAGE_HEIGHT, count * MESSAGE_HEIGHT))
-    if resetScroll then panel.resultsScroll:SetVerticalScroll(0) end
-    panel.summary:SetText(("%d of %d messages loaded. %d shown."):format(loadedCount, totalCount, count))
-    local empty = ""
-    if count == 0 then
-        empty = totalCount == 0 and "No mail in the inbox."
-            or loadedCount == 0 and "Waiting for mail to load." or "No matching messages."
-    end
-    panel.empty:SetText(empty)
+    return nil, true
 end
 
-local function CreateAttachmentRow()
-    local row = CreateFrame("Frame", nil, panel.details)
-    row:SetSize(282, ATTACHMENT_HEIGHT)
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(24, 24)
-    row.icon:SetPoint("LEFT", row, "LEFT", 0, 0)
-    row.name = CreateText(row, 170, "GameFontHighlightSmall")
-    row.name:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
-    row.take = CreateButton(row, 54, "Take", function()
-        if selected then Wild.TakeInboxAttachment(selected.index, row.slot) end
+local function CreateGridIcon()
+    local icon = CreateFrame("Button", nil, panel.grid, "BackdropTemplate")
+    icon:SetSize(ICON_SIZE, ICON_SIZE)
+    icon:SetBackdrop(ICON_BACKDROP)
+    icon.art = icon:CreateTexture(nil, "ARTWORK")
+    icon.art:SetPoint("TOPLEFT", ICON_BORDER_SIZE, -ICON_BORDER_SIZE)
+    icon.art:SetPoint("BOTTOMRIGHT", -ICON_BORDER_SIZE, ICON_BORDER_SIZE)
+    local labelInset = ICON_BORDER_SIZE + 1
+    icon.count = icon:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    icon.count:SetPoint("BOTTOMRIGHT", -labelInset, labelInset)
+    icon.capacity = icon:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    icon.capacity:SetPoint("TOPLEFT", labelInset, -labelInset)
+    icon.capacity:SetTextColor(1, 0.82, 0)
+    icon:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    icon:RegisterForClicks("LeftButtonUp")
+    icon:SetScript("OnEnter", function(self)
+        local stack = self.stack
+        if stack then SetInboxTooltip(self, stack.message, stack.item.slot) end
     end)
-    row.take:SetPoint("RIGHT", row, "RIGHT", -22, 0)
-    row.command = CreateCommandButton(row, function()
-        return ("/wild inbox take %d %d"):format(selected.index, row.slot)
+    icon:SetScript("OnLeave", HideOwnedTooltip)
+    icon:SetScript("OnHide", function(self)
+        self.pressedStack = nil
+        HideOwnedTooltip(self)
     end)
-    row.command:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-
-    row:EnableMouse(true)
-    row:SetScript("OnEnter", function(self)
-        if not IsBrowserVisible() or not selected or not SameMessage(selected, ReadCurrentMessage(selected.index)) then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetInboxItem(selected.index, self.slot)
-        GameTooltip:Show()
+    icon:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then self.pressedStack = self.stack end
     end)
-    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    row:SetScript("OnHide", function(self)
-        if GameTooltip and (GameTooltip:IsOwned(self) or GameTooltip:IsOwned(self.command)) then GameTooltip:Hide() end
+    icon:SetScript("OnClick", function(self)
+        local stack = self.pressedStack
+        self.pressedStack = nil
+        if stack and self:IsVisible() then RequestAttachment(stack.message, stack.item.slot) end
     end)
-    return row
+    return icon
 end
 
-local function PlaceText(text, y, value)
-    text:SetPoint("TOPLEFT", text:GetParent(), "TOPLEFT", 0, -y)
-    text:SetText(value)
-    return y + math.ceil(text:GetStringHeight()) + 6
-end
-
-local function RenderDetails(resetScroll)
-    local instruction = "Select a message to read it and view its attachments."
-    local y = PlaceText(panel.subject, 0, selected and EscapeText(selected.subject) or instruction)
-    y = PlaceText(panel.sender, y, selected and ("From: " .. EscapeText(selected.sender)) or "")
-    local money = ""
-    if selected and selected.cod > 0 then
-        money = "C.O.D.: " .. Wild.FormatGold(selected.cod) .. "\nUse the WoW inbox to confirm payment."
-    elseif selected and selected.money > 0 then
-        money = "Enclosed: " .. Wild.FormatGold(selected.money)
-    end
-    if money ~= "" then y = PlaceText(panel.money, y, money) else panel.money:SetText("") end
-
-    local attachments = selected and selected.attachments or {}
-    local isLoading = selected and #attachments < selected.itemCount
-    for position, item in ipairs(attachments) do
-        local row = panel.attachmentRows[position] or CreateAttachmentRow()
-        panel.attachmentRows[position] = row
-        row.slot = item.slot
-        row:SetPoint("TOPLEFT", panel.details, "TOPLEFT", 0, -y)
-        row.icon:SetTexture(item.icon or UNKNOWN_ITEM_ICON)
-        local label = item.name or "Loading attachment"
-        local color = query and query ~= "" and Lower(label):find(query, 1, true)
-        row.name:SetTextColor(1, color and 0.82 or 1, color and 0 or 1)
-        row.name:SetText(("#%d  %s%s"):format(item.slot, EscapeText(label), item.count and (" x" .. item.count) or ""))
-        local hasIdentity = not not HasItemIdentity(item)
-        isLoading = isLoading or not hasIdentity
-        row.take:SetEnabled(selected.cod == 0 and hasIdentity)
-        row.command:SetShown(selected.cod == 0 and hasIdentity)
-        row:Show()
-        y = y + ATTACHMENT_HEIGHT
-    end
-    for position = #attachments + 1, #panel.attachmentRows do
-        local row = panel.attachmentRows[position]
-        row:Hide()
-        row.name:SetText("")
-        row.icon:SetTexture(nil)
-    end
-    if isLoading then
-        y = PlaceText(panel.loading, y, "Some attachments are not ready. Wait for them to load or use the WoW inbox.")
+local function BindGridIcon(icon, stack, row, column)
+    if icon.stack == stack and icon.row == row and icon.column == column then return end
+    -- Reflow can move the same stack, so changes to its position also cancel a press.
+    icon.stack, icon.row, icon.column, icon.pressedStack = stack, row, column, nil
+    HideOwnedTooltip(icon)
+    icon:ClearAllPoints()
+    icon:SetPoint("TOPLEFT", panel.grid, "TOPLEFT", column * ICON_STEP, -row * ICON_STEP)
+    local item = stack.item
+    icon.art:SetTexture(item.icon or UNKNOWN_ITEM_ICON)
+    icon.art:SetDesaturated(stack.message.cod > 0 or not Inbox.HasItemIdentity(item))
+    local color = GetQualityColor(item.quality)
+    if color then
+        icon:SetBackdropBorderColor(color.r, color.g, color.b, 1)
     else
-        panel.loading:SetText("")
+        icon:SetBackdropBorderColor(0, 0, 0, 0)
     end
-    y = PlaceText(panel.body, y + 4, EscapeText(body or ""))
-    panel.details:SetHeight(y)
-    if resetScroll then panel.detailsScroll:SetVerticalScroll(0) end
+    local count = item.count
+    icon.count:SetText(count and count > 1 and tostring(count) or "")
+    icon.capacity:SetText(item.capacity and tostring(item.capacity) or "")
+    icon:Show()
+end
+
+local function BindGridIcons(offset)
+    local columns = panel.gridColumns
+    local firstRow = math.floor(offset / ICON_STEP)
+    local endRow = math.ceil((offset + panel.gridScroll:GetHeight()) / ICON_STEP)
+    local lastIndex = math.min(#panel.stacks, endRow * columns)
+    local used = 0
+    for index = firstRow * columns + 1, lastIndex do
+        used = used + 1
+        local icon = panel.gridIcons[used] or CreateGridIcon()
+        panel.gridIcons[used] = icon
+        BindGridIcon(icon, panel.stacks[index], math.floor((index - 1) / columns), (index - 1) % columns)
+    end
+    for index = used + 1, #panel.gridIcons do
+        local icon = panel.gridIcons[index]
+        icon:Hide()
+        icon.stack, icon.pressedStack = nil, nil
+        icon.art:SetTexture(nil)
+        icon:SetBackdropBorderColor(0, 0, 0, 0)
+        icon.count:SetText("")
+        icon.capacity:SetText("")
+    end
+end
+
+local function LayoutGrid(offset)
+    local scroll = panel.gridScroll
+    local rows = math.ceil(#panel.stacks / panel.gridColumns)
+    panel.grid:SetHeight(math.max(1, rows * ICON_STEP - (ICON_STEP - ICON_SIZE)))
+    scroll:UpdateScrollChildRect()
+    scroll:SetVerticalScroll(math.min(offset, math.floor(scroll:GetVerticalScrollRange())))
+    BindGridIcons(scroll:GetVerticalScroll())
+end
+
+local function ResizeGrid(window, width, height)
+    local scroll = window.gridScroll
+    local offset = scroll:GetVerticalScroll()
+    local gridWidth = width - GRID_LEFT - GRID_RIGHT
+    window.gridColumns = math.max(1, math.floor((gridWidth + ICON_STEP - ICON_SIZE) / ICON_STEP))
+    scroll:SetSize(gridWidth, height - PAGE_TOP - GRID_TOP - GRID_BOTTOM)
+    window.grid:SetWidth(gridWidth)
+    LayoutGrid(offset)
+end
+
+local STACK_SORT_KEYS = {
+    name = function(stack)
+        local name = stack.item.name
+        if name and name ~= "" then return Lower(name) end
+    end,
+    sender = function(stack) return Lower(stack.message.sender) end,
+    size = function(stack)
+        local count = stack.item.count
+        if count and count > 0 then return -count end
+    end,
+}
+
+local function SortStacks(stacks, order)
+    local getKey = STACK_SORT_KEYS[order]
+    if not getKey then return end
+
+    for _, stack in ipairs(stacks) do stack.sortKey = getKey(stack) end
+    table.sort(stacks, function(left, right)
+        if left.sortKey ~= right.sortKey then
+            if left.sortKey == nil then return false end
+            if right.sortKey == nil then return true end
+            return left.sortKey < right.sortKey
+        end
+        if left.message.index ~= right.message.index then return left.message.index < right.message.index end
+        return left.item.slot < right.item.slot
+    end)
+end
+
+local function RenderGrid(resetScroll)
+    local stacks = {}
+    for index = 1, loadedCount do
+        local message = messages[index]
+        if message then
+            local includeAll = MatchesHeader(message)
+            for _, item in ipairs(message.attachments) do
+                if includeAll or MatchesItem(item) then stacks[#stacks + 1] = { message = message, item = item } end
+            end
+        end
+    end
+    SortStacks(stacks, Wild.GetSetting("mail.inboxSort"))
+    panel.stacks = stacks
+    LayoutGrid(resetScroll and 0 or panel.gridScroll:GetVerticalScroll())
+
+    local empty = ""
+    if #stacks == 0 then
+        empty = totalCount > 0 and loadedCount == 0 and "Waiting for mail to load."
+            or query and query ~= "" and "No matching attachments." or "No attachments in loaded mail."
+    end
+    panel.gridEmpty:SetText(empty)
+    panel.summary:SetText(("%d of %d messages loaded. %d stacks shown."):format(loadedCount, totalCount, #stacks))
+end
+
+local function UpdateRowChecks()
+    if not panel then return end
+    local show = IsReceivePage() and panel.page == "List"
+    local busy = Inbox.IsBusy()
+    for _, check in ipairs(panel.rowChecks) do
+        local row = check.mailButton
+        local index = show and row:IsShown() and row.index or nil
+        if busy and row:IsEnabled() then
+            row:SetEnabled(false)
+            check.disabledMailButton = true
+        elseif not busy and check.disabledMailButton then
+            row:SetEnabled(true)
+            check.disabledMailButton = nil
+        end
+        check.index = index
+        check:SetChecked(index ~= nil and selected[index] == true)
+        check:SetEnabled(not busy)
+        check:SetShown(index ~= nil and not not messages[index])
+    end
+end
+
+local function UpdateReceiveControls()
+    if not panel then return end
+    local visible = IsReceivePage()
+    panel.receiveActions:SetShown(not not visible)
+    UpdateRowChecks()
+    if not visible then return end
+
+    local count = 0
+    for _ in pairs(selected) do count = count + 1 end
+    for _, action in ipairs(BULK_ACTIONS) do
+        local button = panel.bulkButtons[action.key]
+        button:SetText(count > 0 and action.selected or action.all)
+        button:SetEnabled(not Inbox.IsBusy())
+    end
+    local scope = count > 0 and ("%d selected"):format(count) or ("All loaded mail (%d)"):format(loadedCount)
+    panel.receiveStatus:SetText(panel.bulkStatus and scope .. " - " .. panel.bulkStatus or scope)
 end
 
 local function RefreshInbox()
-    local loaded, total = GetInboxNumItems()
-    total = total or loaded
-    local inboxSizeChanged = loaded ~= loadedCount or total ~= totalCount
-    loadedCount, totalCount = loaded, total
-    local current = {}
+    local current, total = Inbox.ReadLoaded()
+    local inboxSizeChanged = #current ~= loadedCount or total ~= totalCount
+    if inboxSizeChanged or not Inbox.SameLoaded(messages, current) then
+        inboxRevision = inboxRevision + 1
+        if next(selected) and not Inbox.IsBusy() then panel.bulkStatus = "The inbox changed. Selection cleared." end
+        selected = {}
+    end
+    loadedCount, totalCount = #current, total
     waitingItems = {}
-    for index = 1, loadedCount do
-        local message = ReadMessage(index)
-        current[index] = message
+    local capacityPattern = GetCapacityPattern()
+    for _, message in ipairs(current) do
         if message then
             for _, item in ipairs(message.attachments) do
-                if item.itemID and item.itemID > 0 and not item.isCurrency and not HasItemIdentity(item) then
-                    waitingItems[item.itemID] = true
+                if item.itemID and item.itemID > 0 and not item.isCurrency then
+                    local capacity, capacityPending = ReadAttachmentCapacity(message.index, item, capacityPattern)
+                    item.capacity = capacity
+                    if capacityPending or not Inbox.HasItemIdentity(item) or not GetQualityColor(item.quality) then
+                        waitingItems[item.itemID] = true
+                    end
                 end
             end
         end
     end
     messages = current
 
-    local selectionChanged = selected and (inboxSizeChanged or not SameMessage(selected, current[selected.index]))
-    if selectionChanged then
-        selected, body = nil, nil
-        panel.status:SetText("The selected message changed. Select it again.")
-    elseif selected then
-        selected = current[selected.index]
-        if not MatchesQuery(selected) then selected, body = nil, nil end
+    if commandMessage then
+        local updated = current[commandMessage.index]
+        if inboxSizeChanged or not Inbox.SameMessage(commandMessage, updated) then
+            commandMessage = nil
+            panel.status:SetText("The selected message changed. Run the read command again.")
+        else
+            commandMessage = MatchesMessage(updated) and updated or nil
+        end
     end
-    RenderResults(false)
-    RenderDetails(selectionChanged)
+    RenderGrid(false)
+    UpdateReceiveControls()
     for itemID in pairs(waitingItems) do
         if not requestedItems[itemID] then
             requestedItems[itemID] = true
@@ -318,164 +403,555 @@ local function RefreshInbox()
     end
 end
 
-local function CreatePanel()
-    panel = CreateFrame("Frame", nil, MailFrame, "BackdropTemplate")
-    panel:Hide()
-    panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
-    panel:SetPoint("TOPLEFT", MailFrame, "TOPRIGHT", 6, 0)
-    panel:SetClampedToScreen(true)
-    panel:EnableMouse(true)
-    panel:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
-    })
-    panel:SetBackdropColor(0.06, 0.06, 0.08, 0.98)
-    panel:SetBackdropBorderColor(0.29, 0.29, 0.33, 1)
-    local title = CreateText(panel, 400, "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 12, -9)
-    title:SetText("Wild Mail Browser")
-    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", 0, 0)
-    close:SetScript("OnClick", function() Wild.HideInboxBrowser() end)
+local function ReportBulk(message, warning)
+    if panel then
+        panel.bulkStatus = message
+        UpdateReceiveControls()
+    end
+    if warning then return Warn(message) end
+end
 
-    panel.search = CreateFrame("EditBox", nil, panel, "SearchBoxTemplate")
+function Wild.SetInboxSelection(index, checked)
+    if not IsReceivePage() then return ReportBulk("Open the List or Items tab in Wild Mail.", true) end
+    if Inbox.IsBusy() then return ReportBulk("Finish the bulk mail action before changing the selection.", true) end
+    if type(index) ~= "number" or index < 1 or index % 1 ~= 0 or type(checked) ~= "boolean" then
+        return ReportBulk("Enter a loaded mail number and on or off.", true)
+    end
+    local revision = inboxRevision
+    RefreshInbox()
+    if revision ~= inboxRevision then return ReportBulk("The inbox changed. Check the letter and select it again.", true) end
+    if not messages[index] then return ReportBulk("Enter a loaded mail number.", true) end
+    selected[index] = checked or nil
+    inboxRevision = inboxRevision + 1
+    ReportBulk()
+    return true
+end
+
+function Wild.RunInboxBulk(action, scope)
+    if action ~= "open" and action ~= "return" and action ~= "delete" then
+        return ReportBulk("Choose open, return, or delete.", true)
+    end
+    if scope ~= nil and scope ~= "all" and scope ~= "selected" then
+        return ReportBulk("Choose all or selected, or omit the scope to use the current selection.", true)
+    end
+    if not IsReceivePage() then return ReportBulk("Open the List or Items tab and close any open letter.", true) end
+    if Inbox.IsBusy() then return ReportBulk("Finish the current bulk mail action first.", true) end
+
+    local revision = inboxRevision
+    RefreshInbox()
+    if revision ~= inboxRevision then return ReportBulk("The inbox changed. Check the mail and start again.", true) end
+    local checked = scope ~= "all" and next(selected) and selected or nil
+    if scope == "selected" and not checked then return ReportBulk("Select mail on the List tab first.", true) end
+    local started, warning = Inbox.Start(action, messages, totalCount, checked, ReportBulk)
+    if not started then
+        if warning then ReportBulk(warning, true) end
+        return false
+    end
+    UpdateReceiveControls()
+    return true
+end
+
+RequestAttachment = function(message, slot)
+    if not IsBrowserVisible() then return Warn("Open the Items tab in Wild Mail.") end
+    if Inbox.IsBusy() or Wild.IsMailSendBusy() then return Warn("Wait for the current batch before taking an attachment.") end
+    if InCombatLockdown() then return Warn("Leave combat before taking an attachment.") end
+    if GetCursorInfo() then return Warn("Clear the cursor before taking an attachment.") end
+    if C_Mail.IsCommandPending() then return Warn("Wait for WoW to finish the current mail action.") end
+    local current = ReadCurrentMessage(message.index)
+    if not Inbox.SameMessage(message, current) then
+        RefreshInbox()
+        return Warn("The inbox changed. Check the attachment and try again.")
+    end
+    if current.cod ~= 0 then return Warn("Open the letter on the List tab to confirm C.O.D. payment.") end
+    if not Inbox.HasItemIdentity(FindAttachment(current, slot)) then
+        return Warn("The attachment is not ready. Wait for it to load or use the List tab.")
+    end
+
+    commandMessage = nil
+    panel.status:SetText("")
+    TakeInboxItem(message.index, slot)
+    return true
+end
+
+local function AnchorPanel(window)
+    window:ClearAllPoints()
+    window:SetPoint("TOPLEFT", MailFrame, "TOPLEFT")
+end
+
+local function FinishResize(window)
+    if not window.resizing then return end
+    window.resizing = nil
+    window:StopMovingOrSizing()
+    -- WoW re-anchors the frame to the screen after sizing.
+    AnchorPanel(window)
+end
+
+local function CreateResizeHandle(window)
+    local handle = CreateFrame("Button", nil, window)
+    handle:SetSize(16, 16)
+    handle:SetPoint("BOTTOMRIGHT", -3, 3)
+    handle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    handle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    handle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    handle:SetScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" then
+            window.resizing = true
+            window:StartSizing("BOTTOMRIGHT")
+        end
+    end)
+    handle:SetScript("OnMouseUp", function(_, button)
+        if button == "LeftButton" then FinishResize(window) end
+    end)
+end
+
+local function CreateSendActions()
+    panel.sendActions = CreateFrame("Frame", nil, panel)
+    panel.sendActions:SetPoint("BOTTOMLEFT", 12, 8)
+    panel.sendActions:SetPoint("BOTTOMRIGHT", -24, 8)
+    panel.sendActions:SetHeight(42)
+    panel.sendActions:Hide()
+    local process = CreateButton(panel.sendActions, 112, "Process rules", function()
+        local _, message = Wild.RunMailIntents()
+        panel.ruleStatus:SetText(message or RULE_INSTRUCTIONS)
+    end)
+    process:SetPoint("BOTTOMLEFT")
+    local runCommand = CreateCommandButton(panel.sendActions, function() return "/wild mail run" end)
+    runCommand:SetPoint("LEFT", process, "RIGHT", 4, 0)
+    panel.ruleStatus = CreateText(panel.sendActions, "GameFontHighlightSmall")
+    panel.ruleStatus:SetPoint("TOPLEFT")
+    panel.ruleStatus:SetPoint("TOPRIGHT")
+    panel.ruleStatus:SetText(RULE_INSTRUCTIONS)
+    panel.sendActions:SetScript("OnHide", function()
+        HideOwnedTooltip(runCommand)
+        panel.ruleStatus:SetText(RULE_INSTRUCTIONS)
+    end)
+end
+
+local function CreateBulkActions()
+    local footer = CreateFrame("Frame", nil, panel)
+    footer:SetPoint("BOTTOMLEFT", 12, 8)
+    footer:SetPoint("BOTTOMRIGHT", -24, 8)
+    footer:SetHeight(42)
+    footer:Hide()
+    panel.receiveActions = footer
+    panel.receiveStatus = CreateText(footer, "GameFontHighlightSmall")
+    panel.receiveStatus:SetPoint("TOPLEFT")
+    panel.receiveStatus:SetPoint("TOPRIGHT")
+    panel.receiveStatus:SetWordWrap(false)
+    panel.bulkButtons = {}
+
+    local previous
+    for _, action in ipairs(BULK_ACTIONS) do
+        local button = CreateButton(footer, action.width, action.all, function(self)
+            local pressed = self.pressedRevision
+            self.pressedRevision = nil
+            if pressed and pressed ~= inboxRevision then
+                return ReportBulk("The inbox or selection changed. Check the mail and try again.", true)
+            end
+            Wild.RunInboxBulk(action.key)
+        end)
+        button:SetScript("OnMouseDown", function(self) self.pressedRevision = inboxRevision end)
+        button:SetScript("OnHide", function(self) self.pressedRevision = nil end)
+        if previous then button:SetPoint("LEFT", previous, "RIGHT", 6, 0) else button:SetPoint("BOTTOMLEFT") end
+        panel.bulkButtons[action.key] = button
+        previous = CreateCommandButton(footer, function()
+            return "/wild inbox " .. action.key .. (next(selected) and " selected" or " all")
+        end, action.help)
+        previous:SetPoint("LEFT", button, "RIGHT", 2, 0)
+        previous:SetScript("OnHide", HideOwnedTooltip)
+    end
+end
+
+local function CreateListChecks()
+    panel.rowChecks = {}
+    for index = 1, INBOXITEMS_TO_DISPLAY do
+        local row, button = _G["MailItem" .. index], _G["MailItem" .. index .. "Button"]
+        if row and button then
+            local check = CreateFrame("CheckButton", nil, row, "InterfaceOptionsCheckButtonTemplate")
+            check:SetSize(22, 22)
+            check:SetPoint("RIGHT", row, "LEFT", -3, 0)
+            check:Hide()
+            check.mailButton = button
+            check:SetScript("OnMouseDown", function(self)
+                self.pressedIndex, self.pressedRevision = self.index, inboxRevision
+            end)
+            check:SetScript("OnClick", function(self)
+                local pressed, revision = self.pressedIndex, self.pressedRevision
+                self.pressedIndex, self.pressedRevision = nil, nil
+                if self.index and self:IsVisible()
+                    and (not revision or (pressed == self.index and revision == inboxRevision))
+                    and Wild.SetInboxSelection(self.index, not not self:GetChecked()) then
+                    PlaySound(self:GetChecked() and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
+                        or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+                else
+                    UpdateRowChecks()
+                end
+            end)
+            local command = CreateCommandButton(check, function()
+                if check.index then
+                    return ("/wild inbox select %d %s"):format(check.index, selected[check.index] and "off" or "on")
+                end
+            end, "Select this letter for bulk actions, or clear its selection.")
+            command:SetPoint("RIGHT", check, "LEFT", -2, 0)
+            command:SetScript("OnHide", HideOwnedTooltip)
+            panel.rowChecks[#panel.rowChecks + 1] = check
+        end
+    end
+end
+
+local function CreateItemsPage()
+    panel.items = CreateFrame("Frame", nil, panel)
+    panel.items:SetPoint("TOPLEFT", 0, -PAGE_TOP)
+    panel.items:SetPoint("BOTTOMRIGHT", 0, PAGE_FOOTER)
+    panel.items:Hide()
+    panel.search = CreateFrame("EditBox", nil, panel.items, "SearchBoxTemplate")
     panel.search:SetAutoFocus(false)
-    panel.search:SetSize(472, 24)
-    panel.search:SetPoint("TOPLEFT", 18, -35)
+    panel.search:SetHeight(24)
+    panel.search:SetPoint("TOPLEFT", 18, -5)
+    panel.search:SetPoint("TOPRIGHT", -36, -5)
     if panel.search.Instructions then panel.search.Instructions:SetText("Sender, subject, or attachment") end
     panel.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     panel.search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    local command = CreateCommandButton(panel, function()
+    local command = CreateCommandButton(panel.items, function()
         local search = strtrim(panel.search:GetText())
         return search ~= "" and "/wild inbox search " .. search or "/wild inbox search"
     end)
     command:SetPoint("LEFT", panel.search, "RIGHT", 4, 0)
-    panel:SetScript("OnHide", function() panel.search:ClearFocus() end)
-
-    panel.summary = CreateText(panel, PANEL_WIDTH - 24, "GameFontHighlightSmall")
-    panel.summary:SetPoint("TOPLEFT", 12, -65)
-    panel.status = CreateText(panel, PANEL_WIDTH - 24, "GameFontNormalSmall")
+    panel.summary = CreateText(panel.items, "GameFontHighlightSmall")
+    panel.summary:SetPoint("TOPLEFT", 12, -35)
+    panel.summary:SetPoint("TOPRIGHT", -12, -35)
+    local instruction = CreateText(panel.items, "GameFontHighlightSmall")
+    instruction:SetPoint("BOTTOMLEFT", 12, 27)
+    instruction:SetText("Hover for details. Click to take a stack.")
+    panel.status = CreateText(panel.items, "GameFontNormalSmall")
     panel.status:SetPoint("BOTTOMLEFT", 12, 12)
-    panel.resultsScroll, panel.results = CreateScroll(panel, 12, 184)
-    panel.detailsScroll, panel.details = CreateScroll(panel, 218, 282)
-    panel.messageRows, panel.attachmentRows = {}, {}
-    panel.empty = CreateText(panel.results, 184, "GameFontHighlight")
-    panel.empty:SetPoint("TOPLEFT", 2, -2)
-    for _, field in ipairs({ "subject", "sender", "money", "loading", "body" }) do
-        panel[field] = CreateText(panel.details, 282, field == "subject" and "GameFontNormal" or "GameFontHighlight")
-    end
+    panel.status:SetPoint("BOTTOMRIGHT", -30, 12)
+    panel.status:SetWordWrap(false)
+
+    panel.gridScroll = CreateFrame("ScrollFrame", nil, panel.items, "UIPanelScrollFrameTemplate")
+    panel.gridScroll:SetPoint("TOPLEFT", GRID_LEFT, -GRID_TOP)
+    panel.grid = CreateFrame("Frame", nil, panel.gridScroll)
+    panel.grid:SetSize(1, 1)
+    panel.gridScroll:SetScrollChild(panel.grid)
+    panel.gridIcons, panel.stacks = {}, {}
+    panel.gridEmpty = CreateText(panel.grid, "GameFontHighlight")
+    panel.gridEmpty:SetPoint("TOPLEFT")
+    panel.gridEmpty:SetPoint("TOPRIGHT")
+
+    panel.gridScroll:HookScript("OnVerticalScroll", function(_, offset) BindGridIcons(offset) end)
+    panel.items:SetScript("OnHide", function()
+        panel.search:ClearFocus()
+        HideOwnedTooltip(command)
+    end)
     panel.search:HookScript("OnTextChanged", function(self)
         query = Lower(strtrim(self:GetText()))
         if not IsBrowserVisible() then return end
-        if selected and not MatchesQuery(selected) then selected, body = nil, nil end
+        if commandMessage and not MatchesMessage(commandMessage) then commandMessage = nil end
         panel.status:SetText("")
-        RenderResults(true)
-        RenderDetails(false)
+        RenderGrid(true)
     end)
 end
 
-local function UpdateVisibility()
-    if not browseButton then return end
-    local inboxVisible = IsInboxVisible()
-    browseButton:SetShown(inboxVisible and not wantsBrowser or false)
-    if inboxVisible and wantsBrowser then
-        if not panel then CreatePanel() end
-        if not panel:IsShown() then
-            panel:Show()
-            RefreshInbox()
+local function CreatePanel()
+    panel = CreateFrame("Frame", nil, MailFrame, "BackdropTemplate")
+    panel:Hide()
+    panel:SetIgnoreParentAlpha(true)
+    AnchorPanel(panel)
+    -- Retail offsets its controls within a larger page; Forever stretches the page to these bounds.
+    local nativeWidth, nativeHeight = MailFrame:GetWidth(), MailFrame:GetHeight()
+    local minWidth = math.max(460, math.max(nativeWidth, OpenMailFrame:GetWidth()) + 76)
+    local minHeight = PAGE_TOP + math.max(nativeHeight, OpenMailFrame:GetHeight()) + PAGE_FOOTER
+    panel:SetSize(math.max(PANEL_WIDTH, minWidth), math.max(PANEL_HEIGHT, minHeight))
+    panel:SetResizable(true)
+    panel:SetResizeBounds(minWidth, minHeight)
+    panel:SetDontSavePosition(true)
+    panel:SetClampedToScreen(true)
+    panel:EnableMouse(true)
+    panel:EnableMouseWheel(true)
+    panel:SetScript("OnMouseWheel", function(_, delta)
+        if nativeLayout and nativeLayout.wheel and panel.page == "List" and not OpenMailFrame:IsShown() then
+            local wheel = MailFrame:GetScript("OnMouseWheel")
+            if wheel then wheel(MailFrame, delta) end
         end
-    elseif panel then
-        panel:Hide()
+    end)
+    panel:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
+    })
+    panel:SetBackdropColor(0.06, 0.06, 0.08, 1)
+    panel:SetBackdropBorderColor(0.29, 0.29, 0.33, 1)
+    local title = CreateText(panel, "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 12, -9)
+    title:SetText("Wild Mail")
+    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -2, -2)
+    close:SetScript("OnClick", function() HideUIPanel(MailFrame) end)
+
+    panel.tabs = {}
+    for index, page in ipairs({ "List", "Items", "Send" }) do
+        local tab = CreateButton(panel, 72, page, function() SelectPage(page) end)
+        tab:SetPoint("TOPLEFT", 12 + (index - 1) * 76, -32)
+        panel.tabs[page] = tab
+    end
+    panel.native = CreateFrame("Frame", nil, panel)
+    panel.native:SetSize(nativeWidth, nativeHeight)
+    panel.native:SetPoint("TOP", panel, "TOP", 0, -PAGE_TOP)
+    CreateBulkActions()
+    CreateListChecks()
+    CreateSendActions()
+    CreateItemsPage()
+    ResizeGrid(panel, panel:GetWidth(), panel:GetHeight())
+    CreateResizeHandle(panel)
+    panel:SetScript("OnSizeChanged", ResizeGrid)
+    panel:SetScript("OnHide", FinishResize)
+end
+
+local function MountPage(frame, isLetter)
+    local layout = {
+        parent = frame:GetParent(), alpha = frame:GetAlpha(), mouse = frame:IsMouseEnabled(),
+        strata = frame:GetFrameStrata(), level = frame:GetFrameLevel(), points = {},
+    }
+    for index = 1, frame:GetNumPoints() do layout.points[index] = { frame:GetPoint(index) } end
+
+    frame:ClearAllPoints()
+    frame:SetParent(panel.native)
+    frame:SetFrameStrata(panel:GetFrameStrata())
+    frame:SetFrameLevel(panel.native:GetFrameLevel() + (isLetter and 3 or 1))
+    if isLetter then
+        frame:SetPoint("TOP", panel.native, "TOP")
+    else
+        for _, point in ipairs(layout.points) do
+            frame:SetPoint(point[1], panel.native, point[3], point[4], point[5])
+        end
+    end
+    return layout
+end
+
+local function RestorePage(frame, layout)
+    frame:ClearAllPoints()
+    frame:SetParent(layout.parent)
+    frame:SetFrameStrata(layout.strata)
+    frame:SetFrameLevel(layout.level)
+    frame:SetAlpha(layout.alpha)
+    frame:EnableMouse(layout.mouse)
+    for _, point in ipairs(layout.points) do frame:SetPoint(unpack(point, 1, 5)) end
+end
+
+local function UpdateLetterPage()
+    if not nativeLayout then return end
+    local isReading = panel.page == "List" and OpenMailFrame:IsShown()
+    local showInbox = panel.page == "List" and not isReading
+    InboxFrame:SetShown(showInbox)
+    -- Keep the letter open for native Reply, but put it below the mouse-enabled shell on other tabs.
+    OpenMailFrame:SetAlpha(isReading and nativeLayout.letter.alpha or 0)
+    OpenMailFrame:SetFrameStrata(isReading and panel:GetFrameStrata() or "BACKGROUND")
+    OpenMailFrame:EnableMouse(isReading and nativeLayout.letter.mouse)
+    if OpenMailFrame:IsShown() then Inbox.Cancel("Opened a letter. Stopped the bulk mail action.") end
+    UpdateReceiveControls()
+end
+
+local function ShowPage(page)
+    panel.page = page
+    local showItems = page == "Items"
+    local wasShowingItems = panel.items:IsShown()
+    panel.items:SetShown(showItems)
+    panel.sendActions:SetShown(page == "Send")
+    if page == "Send" then Inbox.Cancel("Switched to Send. Stopped the bulk mail action.") end
+    for name, tab in pairs(panel.tabs) do
+        if name == page then tab:LockHighlight() else tab:UnlockHighlight() end
+    end
+    UpdateLetterPage()
+    if showItems and not wasShowingItems then RefreshInbox() end
+end
+
+local function HideNativeBulkActions()
+    if not nativeLayout then return end
+    if OpenAllMail then OpenAllMail:Hide() end
+    local footer = InboxFrame.gamepadFooter
+    if footer and footer.isShown then
+        footer:HideAndDeactivateBindings()
+        nativeLayout.gamepadFooterHidden = true
+    end
+end
+
+SelectPage = function(page)
+    if panel.page == page then return end
+    panel.page = page
+    MailFrameTab_OnClick(nil, page == "Send" and 2 or 1)
+end
+
+local function MountMailbox()
+    -- Reparenting an open letter to a hidden host would run its native close script.
+    panel:Show()
+    nativeLayout = {
+        alpha = MailFrame:GetAlpha(), mouse = MailFrame:IsMouseEnabled(), wheel = MailFrame:IsMouseWheelEnabled(),
+        close = MailFrame.CloseButton and MailFrame.CloseButton:IsShown(),
+        inboxTab = MailFrameTab1:IsShown(), sendTab = MailFrameTab2:IsShown(),
+        inboxArt = InboxFrameBg and InboxFrameBg:IsShown(),
+        openAll = OpenAllMail and OpenAllMail:IsShown(),
+        inbox = MountPage(InboxFrame), send = MountPage(SendMailFrame), letter = MountPage(OpenMailFrame, true),
+    }
+    MailFrame:SetAlpha(0)
+    MailFrame:EnableMouse(false)
+    MailFrame:EnableMouseWheel(false)
+    MailFrameTab1:Hide()
+    MailFrameTab2:Hide()
+    if MailFrame.CloseButton then MailFrame.CloseButton:Hide() end
+    if InboxFrameBg then InboxFrameBg:Hide() end
+    visit.inboxBrowserOpened = true
+    HideNativeBulkActions()
+    RefreshInbox()
+    ShowPage(SendMailFrame:IsShown() and "Send" or OpenMailFrame:IsShown() and "List" or "Items")
+end
+
+local function RestoreMailbox()
+    local layout = nativeLayout
+    local restricted = GameLimitedMode_IsActive and GameLimitedMode_IsActive()
+    nativeLayout = nil
+    Inbox.Cancel("Closed Wild Mail. Stopped the bulk mail action.")
+    selected, inboxRevision = {}, inboxRevision + 1
+    panel.bulkStatus = nil
+    UpdateReceiveControls()
+    -- Moving the letter back first avoids its native OnHide when the Wild shell is hidden.
+    RestorePage(OpenMailFrame, layout.letter)
+    RestorePage(InboxFrame, layout.inbox)
+    RestorePage(SendMailFrame, layout.send)
+    panel:Hide()
+    panel.items:Hide()
+    panel.sendActions:Hide()
+    if IsMailboxOpen() and (restricted or (panel.page ~= "Send" and not InboxFrame:IsShown())) then
+        MailFrameTab_OnClick(nil, 1)
+    end
+    if InboxFrameBg then InboxFrameBg:SetShown(layout.inboxArt) end
+    local gamepad = Wild.isForever and InputUtil and InputUtil.IsGamepadUIEnabled()
+    if OpenAllMail then OpenAllMail:SetShown(not gamepad and layout.openAll) end
+    if gamepad and layout.gamepadFooterHidden and InboxFrame:IsVisible() then
+        InboxFrame.gamepadFooter:ShowAndActivateBindings()
+    end
+    if MailFrame.CloseButton then MailFrame.CloseButton:SetShown(layout.close) end
+    MailFrameTab1:SetShown(layout.inboxTab)
+    MailFrameTab2:SetShown(layout.sendTab and not restricted)
+    MailFrame:EnableMouse(layout.mouse)
+    MailFrame:EnableMouseWheel(layout.wheel)
+    MailFrame:SetAlpha(layout.alpha)
+    panel.page = nil
+end
+
+local function UpdateVisibility()
+    if not mailboxHooked then return end
+    local showBrowser = visibilityOverride
+    if showBrowser == nil then showBrowser = Wild.IsFeatureEnabled("inbox") end
+    if showBrowser and IsMailboxOpen() and not (GameLimitedMode_IsActive and GameLimitedMode_IsActive()) then
+        if not nativeLayout and not InCombatLockdown() then
+            if not panel then CreatePanel() end
+            MountMailbox()
+        end
+    elseif nativeLayout then
+        RestoreMailbox()
+    end
+end
+
+local function OnNativeTabChanged()
+    if nativeLayout then
+        ShowPage(SendMailFrame:IsShown() and "Send" or panel.page == "Items" and "Items" or "List")
+    else
+        -- WoW stores the original MailFrame_Show callback, which calls the global tab handler.
+        UpdateVisibility()
     end
 end
 
 local function AttachToMailbox()
-    if browseButton or not MailFrame or not InboxFrame or not OpenMailFrame then return end
-    browseButton = CreateButton(MailFrame, 112, "Browse Mail", function() Wild.ShowInboxBrowser() end)
-    browseButton:Hide()
-    browseButton:SetClampedToScreen(true)
-    browseButton:SetPoint("TOPLEFT", MailFrame, "TOPRIGHT", 6, 0)
-    for _, frame in ipairs({ MailFrame, InboxFrame, OpenMailFrame }) do
-        frame:HookScript("OnShow", UpdateVisibility)
-        frame:HookScript("OnHide", UpdateVisibility)
+    if mailboxHooked or not MailFrame or not InboxFrame or not OpenMailFrame or not SendMailFrame
+        or not MailFrameTab1 or not MailFrameTab2 or not MailFrameTab_OnClick then return end
+    mailboxHooked = true
+    MailFrame:HookScript("OnHide", UpdateVisibility)
+    OpenMailFrame:HookScript("OnShow", UpdateLetterPage)
+    OpenMailFrame:HookScript("OnHide", UpdateLetterPage)
+    MailFrameTab2:HookScript("OnShow", function(self)
+        if nativeLayout then
+            nativeLayout.sendTab = true
+            self:Hide()
+        end
+    end)
+    if OpenAllMail then
+        OpenAllMail:HookScript("OnShow", function(self)
+            if nativeLayout then
+                nativeLayout.openAll = true
+                self:Hide()
+            end
+        end)
+    end
+    hooksecurefunc("MailFrameTab_OnClick", OnNativeTabChanged)
+    if Wild.isForever and InboxFrame.Update then
+        hooksecurefunc(InboxFrame, "Update", UpdateRowChecks)
+        if InboxFrame.FocusGamepad then hooksecurefunc(InboxFrame, "FocusGamepad", HideNativeBulkActions) end
+    elseif InboxFrame_Update then
+        hooksecurefunc("InboxFrame_Update", UpdateRowChecks)
     end
 end
 
---- Open the browser at the visible Inbox tab and optionally replace its search.
+--- Open Wild Mail to the Items tab for this visit and optionally replace its search.
 function Wild.ShowInboxBrowser(search)
     if search ~= nil and type(search) ~= "string" then return Warn("Enter text to search the inbox.") end
-    if not IsInboxVisible() then return Warn("Open the WoW Inbox tab and close any open message to browse mail.") end
+    if not IsMailboxOpen() then return Warn("Open a mailbox to browse its attachments.") end
     AttachToMailbox()
-    if not browseButton then return Warn("The WoW inbox controls are not available.") end
-    visit.inboxBrowserOpened = true
-    wantsBrowser = true
+    if not mailboxHooked or (GameLimitedMode_IsActive and GameLimitedMode_IsActive()) then
+        return Warn("Wild Mail is not available. Use the native mailbox.")
+    end
+    if not nativeLayout and InCombatLockdown() then return Warn("Leave combat before opening Wild Mail.") end
+    visibilityOverride = true
     UpdateVisibility()
+    SelectPage("Items")
     if search then panel.search:SetText(search) end
     return true
 end
 
 function Wild.HideInboxBrowser()
-    wantsBrowser = false
+    visibilityOverride = false
     UpdateVisibility()
 end
 
 function Wild.UpdateInboxBrowser()
     if not visit then return end
-    wantsBrowser = Wild.IsFeatureEnabled("inbox")
-    if wantsBrowser then visit.inboxBrowserOpened = true end
+    visibilityOverride = nil
     UpdateVisibility()
 end
 
---- Open a numbered search result; this marks that message as read.
+function Wild.UpdateInboxBrowserSort()
+    if IsBrowserVisible() then RenderGrid(true) end
+end
+
+--- Print a numbered letter in chat and select it for the take command.
 function Wild.ReadInboxMessage(index)
-    if not IsBrowserVisible() then return Warn("Open Browse Mail at a mailbox first.") end
+    if not IsBrowserVisible() then return Warn("Open the Items tab in Wild Mail.") end
     local message = messages[index]
-    if not message or not MatchesQuery(message) then return Warn("Select a message shown in Browse Mail.") end
-    if not SameMessage(message, ReadCurrentMessage(index)) then
+    if not message or not MatchesMessage(message) then return Warn("Enter a message number that matches the current search.") end
+    if not Inbox.SameMessage(message, ReadCurrentMessage(index)) then
         RefreshInbox()
         return Warn("The inbox changed. Select a message again.")
     end
 
-    -- GetInboxText marks the mail as read. Call it only for the player's selection.
-    selected, body = message, nil
+    -- Only the explicit read command calls GetInboxText, which marks the letter as read.
+    commandMessage = message
     local text = GetInboxText(index)
-    if selected and SameMessage(message, selected) then body = text end
     panel.status:SetText("")
-    RenderResults(false)
-    RenderDetails(true)
+    print(("|cff00ccffWild:|r Mail #%d from %s: %s"):format(index, EscapeText(message.sender), EscapeText(message.subject)))
+    if text and text ~= "" then print(EscapeText(text)) end
     return true
 end
 
 --- Request one numbered attachment from the selected message, not a bulk take.
 function Wild.TakeInboxAttachment(index, slot)
-    if not IsBrowserVisible() or not selected or selected.index ~= index then
-        return Warn("Select this message in Browse Mail before taking an attachment.")
+    if not IsBrowserVisible() or not commandMessage or commandMessage.index ~= index then
+        return Warn("Use /wild inbox read <message> before taking a numbered attachment.")
     end
-    if InCombatLockdown() then return Warn("Leave combat before taking an attachment.") end
-    if GetCursorInfo() then return Warn("Clear the cursor before taking an attachment.") end
-    if C_Mail.IsCommandPending() then return Warn("Wait for WoW to finish the current mail action.") end
-    local current = ReadCurrentMessage(index)
-    if not SameMessage(selected, current) then
-        RefreshInbox()
-        return Warn("The inbox changed. Select the message and check its attachments again.")
-    end
-    if current.cod ~= 0 then return Warn("Use the WoW inbox to confirm C.O.D. payment.") end
-    local attachment
-    for _, item in ipairs(current.attachments) do
-        if item.slot == slot then attachment = item; break end
-    end
-    if not HasItemIdentity(attachment) then return Warn("Select a loaded attachment in this message.") end
-
-    -- Each take requires a fresh selection. Do not retry or report success for a request.
-    selected, body = nil, nil
-    RenderResults(false)
-    RenderDetails(true)
-    panel.status:SetText("")
-    TakeInboxItem(index, slot)
-    return true
+    return RequestAttachment(commandMessage, slot)
 end
 
 local events = CreateFrame("Frame")
-for _, event in ipairs({ "ADDON_LOADED", "MAIL_SHOW", "MAIL_CLOSED", "MAIL_INBOX_UPDATE", "ITEM_DATA_LOAD_RESULT" }) do
+for _, event in ipairs({
+    "ADDON_LOADED", "MAIL_SHOW", "MAIL_CLOSED", "MAIL_INBOX_UPDATE",
+    "ITEM_DATA_LOAD_RESULT", "TRIAL_STATUS_UPDATE", "PLAYER_REGEN_ENABLED",
+}) do
     events:RegisterEvent(event)
 end
 events:SetScript("OnEvent", function(_, event, argument, success)
@@ -489,20 +965,23 @@ events:SetScript("OnEvent", function(_, event, argument, success)
             UpdateVisibility()
         end
     elseif event == "MAIL_CLOSED" then
-        visit, wantsBrowser, selected, body = nil, nil, nil, nil
+        visit, visibilityOverride, commandMessage = nil, nil, nil
+        selected, inboxRevision = {}, inboxRevision + 1
         messages, waitingItems, requestedItems, query = {}, {}, {}, nil
         loadedCount, totalCount = 0, 0
         UpdateVisibility()
         if panel then
             panel.search:SetText("")
             panel.status:SetText("")
-            RenderResults(true)
-            RenderDetails(true)
+            panel.bulkStatus = nil
+            RenderGrid(true)
         end
     elseif event == "ADDON_LOADED" and argument == "Blizzard_MailFrame" then
         AttachToMailbox()
         UpdateVisibility()
+    elseif event == "TRIAL_STATUS_UPDATE" or event == "PLAYER_REGEN_ENABLED" then
+        UpdateVisibility()
     elseif event == "MAIL_INBOX_UPDATE" or (event == "ITEM_DATA_LOAD_RESULT" and success and waitingItems[argument]) then
-        if IsBrowserVisible() then RefreshInbox() end
+        if nativeLayout and IsMailboxOpen() then RefreshInbox() end
     end
 end)

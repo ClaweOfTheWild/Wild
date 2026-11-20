@@ -14,7 +14,7 @@ local function NewEnvironment(...)
             debug = false, ruleDelay = 0, passDelay = 0, sellStartDelay = 0,
             mailStartDelay = 0, mailBatchDelay = 0,
         },
-        mail = { autoOpen = false },
+        mail = { autoOpen = false, autoSend = true },
     } }
     local state = {
         frames = {}, timers = {}, messages = {}, iconRequests = {},
@@ -22,6 +22,9 @@ local function NewEnvironment(...)
         bags = { [0] = {}, [6] = {}, [12] = {}, [20] = {} },
         attachments = {},
     }
+    local function MailEditBox()
+        return { GetText = function(self) return self.text or "" end, SetText = function(self, text) self.text = text end }
+    end
     local env = setmetatable({
         print = function(...)
             Equal(select("#", ...), 1)
@@ -39,6 +42,8 @@ local function NewEnvironment(...)
         GetTime = function() return 10 end,
         date = function() return "2026-01-01 00:00:00" end,
         GetMoneyString = function(amount) return amount .. " copper" end,
+        C_Mail = { IsCommandPending = function() return false end },
+        InCombatLockdown = function() return false end,
         C_Bank = { CanUseBank = function() return true end },
         C_PlayerInteractionManager = { IsInteractingWithNpcOfType = function() return true end },
         GetCursorInfo = function()
@@ -88,17 +93,24 @@ local function NewEnvironment(...)
             local info = state.attachments[index]
             if info then return "Test Item", info.itemID, 134400, info.stackCount, 4 end
         end,
+        HasSendMailItem = function(index) return state.attachments[index] ~= nil end,
         GetSendMailItemLink = function(index)
             local info = state.attachments[index]
             return info and info.hyperlink
         end,
+        MailFrame = { IsVisible = function() return true end },
         SendMailFrame = { IsShown = function() return true end },
         MailFrameTab_OnClick = function() end,
-        SendMailNameEditBox = { SetText = function() end },
-        SendMailSubjectEditBox = { SetText = function() end },
-        SendMailBodyEditBox = { SetText = function() end },
-        SendMail = function(recipient) state.recipient = recipient end,
+        SendMailNameEditBox = MailEditBox(),
+        SendMailSubjectEditBox = MailEditBox(),
+        SendMailBodyEditBox = MailEditBox(),
+        SendMailMoney = {},
+        MoneyInputFrame_GetCopper = function() return 0 end,
     }, { __index = _G })
+    env.SendMailMailButton = {
+        IsEnabled = function() return true end,
+        Click = function() state.recipient = env.SendMailNameEditBox:GetText() end,
+    }
     env.C_Container = {
         GetContainerNumSlots = function() return 2 end,
         GetContainerItemInfo = function(bag, slot) return state.bags[bag][slot] end,

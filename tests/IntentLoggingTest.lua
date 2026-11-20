@@ -30,7 +30,7 @@ end
 
 local function NewEnvironment(...)
     local Wild = { db = {
-        intents = {}, mail = { autoOpen = false }, advanced = {
+        intents = {}, mail = { autoOpen = false, autoSend = true }, advanced = {
             debug = false, ruleDelay = 0, passDelay = 0, bankStartDelay = 0,
             sellStartDelay = 0, sellInterval = 0, mailStartDelay = 0,
             mailBatchDelay = 0, guildBankStartDelay = 0, destroyStartDelay = 0, preloadTimeout = 3,
@@ -62,6 +62,8 @@ local function NewEnvironment(...)
         IsAltKeyDown = function() return state.modifiers.ALT end,
         date = function() return "2026-10-11 12:00:00" end,
         GetMoney = function() return state.money end,
+        InCombatLockdown = function() return state.combat end,
+        C_Mail = { IsCommandPending = function() return state.mailPending end },
         GetMoneyString = function(amount) return amount .. " copper" end,
         MerchantFrame = { IsShown = function() return state.merchantOpen end },
         StaticPopup_Visible = function(which)
@@ -179,6 +181,7 @@ local function NewEnvironment(...)
         local info = state.attachments[index]
         if info then return "Test Item", info.itemID, 134400, info.stackCount, 2 end
     end
+    env.HasSendMailItem = function(index) return state.attachments[index] ~= nil end
     env.GetSendMailItemLink = function(index)
         local info = state.attachments[index]
         return info and info.hyperlink
@@ -194,6 +197,9 @@ local function NewEnvironment(...)
     env.SendMailNameEditBox = MailEditBox()
     env.SendMailSubjectEditBox = MailEditBox()
     env.SendMailBodyEditBox = MailEditBox()
+    env.SendMailMoney = {}
+    env.MoneyInputFrame_GetCopper = function() return state.draftCopper or 0 end
+    env.MailFrame = { IsVisible = function() return state.mailOpen end }
     env.SendMailFrame = { IsShown = function() return state.mailTab == 2 end }
     env.MailFrameTab_OnClick = function(_, tabID)
         state.mailTab = tabID
@@ -203,6 +209,12 @@ local function NewEnvironment(...)
         state.sent[#state.sent + 1] = recipient
         state.subject = subject
     end
+    env.SendMailMailButton = {
+        IsEnabled = function() return not state.sendDisabled end,
+        Click = function()
+            env.SendMail(env.SendMailNameEditBox:GetText(), env.SendMailSubjectEditBox:GetText(), env.SendMailBodyEditBox:GetText())
+        end,
+    }
     env.CreateFrame = function(frameType)
         local frame = { events = {}, scripts = {}, shown = false, frameType = frameType }
         function frame:RegisterEvent(event) self.events[event] = true end
@@ -249,7 +261,14 @@ local function NewEnvironment(...)
     end
     for _, file in ipairs({ ... }) do Load(file) end
     local function Fire(event, ...)
-        if event == "MAIL_SEND_SUCCESS" then state.attachments = {} end
+        if event == "MAIL_SHOW" then state.mailOpen = true end
+        if event == "MAIL_CLOSED" then state.mailOpen = false end
+        if event == "MAIL_SEND_SUCCESS" then
+            state.attachments = {}
+            env.SendMailNameEditBox:SetText("")
+            env.SendMailSubjectEditBox:SetText("")
+            env.SendMailBodyEditBox:SetText("")
+        end
         local frames = { unpack(state.frames) }
         for _, frame in ipairs(frames) do
             if frame.events[event] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, event, ...) end
@@ -999,6 +1018,87 @@ local tests = {
         assert(Messages("Mailed ")[1]:find(COUNT .. "5 to Alt-Realm.", 1, true))
         Equal(#Messages("Mail complete: 5 item(s)"), 1)
     end },
+    { "outgoing mail rules wait for an explicit run unless automation is enabled", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Bank.lua", "Mail.lua")
+        Wild.db.mail.autoSend = nil
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.sent, 0)
+        assert(Wild.RunMailIntents())
+        assert(not Wild.RunMailIntents(), "A second click must not start another queue")
+        RunTimers()
+        Equal(#state.sent, 1)
+        Equal(#ActionEntries(Wild, "mail"), 0)
+        Fire("BAG_UPDATE_DELAYED"); Fire("MAIL_SEND_SUCCESS")
+        Equal(#ActionEntries(Wild, "mail"), 1)
+        Fire("MAIL_CLOSED")
+        assert(not Wild.RunMailIntents(), "Rules cannot run with a closed mailbox")
+    end },
+    { "mail rules leave a new draft and its gold alone before any attachments move", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, _, env = NewEnvironment("Bank.lua", "Mail.lua")
+        Wild.db.mail.autoSend = false
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW")
+        state.draftCopper = 100
+        assert(not Wild.RunMailIntents())
+        Equal(state.draftCopper, 100)
+        state.draftCopper = 0
+        assert(Wild.RunMailIntents())
+        env.SendMailBodyEditBox:SetText("Unsent draft")
+        RunTimers()
+        Equal(#state.sent, 0)
+        Equal(env.SendMailBodyEditBox:GetText(), "Unsent draft")
+        Equal(state.bags[0][1].stackCount, 3)
+    end },
+    { "a manual run wins over the delayed automatic run even on a duplicate open event", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Mail.lua", "SlashCommands.lua")
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW")
+        Fire("MAIL_SHOW")
+        Wild.HandleSlashCommand("mail run")
+        RunTimers(); RunTimers()
+        Equal(#state.sent, 1)
+        Fire("BAG_UPDATE_DELAYED"); Fire("MAIL_SEND_SUCCESS")
+        state.bags[0][2] = Item(2)
+        RunTimers()
+        Equal(#state.sent, 1)
+    end },
+    { "automatic mail rules honor changes to the setting and leave pending mail and combat alone", function()
+        local Wild, state, Fire, RunTimers, _, _, _, _, _, env = NewEnvironment("Mail.lua")
+        state.bags[0][1] = Item(3)
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW")
+        Wild.SetSetting("mail.autoSend", false)
+        RunTimers(); RunTimers()
+        Equal(#state.sent, 0)
+        state.mailPending = true
+        assert(not Wild.RunMailIntents())
+        state.mailPending = false
+        state.combat = true
+        assert(not Wild.RunMailIntents())
+        state.combat = false
+        env.GameLimitedMode_IsActive = function() return true end
+        assert(not Wild.RunMailIntents())
+        Equal(next(state.attachments), nil)
+        Equal(state.bags[0][1].stackCount, 3)
+    end },
+    { "turning off automatic mail rules stops later batches but keeps the confirmed send", function()
+        local Wild, state, Fire, RunTimers = NewEnvironment("Mail.lua")
+        for slot = 1, 13 do state.bags[0][slot] = Item(2) end
+        Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
+        Fire("MAIL_SHOW"); RunTimers(); RunTimers()
+        Equal(#state.sent, 1)
+        Wild.SetSetting("mail.autoSend", false)
+        Fire("MAIL_SEND_SUCCESS"); RunTimers()
+        Equal(#state.sent, 1)
+        Equal(ActionEntries(Wild, "mail")[1].count, 24)
+        assert(Wild.RunMailIntents(), "Turning off automatic sends must not block a manual run")
+        RunTimers()
+        Equal(#state.sent, 2)
+    end },
     { "mail prepares the native send tab and preserves full recipient names in both clients", function()
         for _, case in ipairs({
             { forever = true, recipient = "Alt Family" },
@@ -1010,8 +1110,6 @@ local tests = {
             state.bags[0][1] = Item(3)
             local intent = { action = "mail", recipient = case.recipient, groups = { {} } }
             Wild.db.intents = { intent }
-            env.SendMailSubjectEditBox:SetText("Old subject")
-            env.SendMailBodyEditBox:SetText("Old body")
             if case.reply then
                 state.mailTab = 2
                 env.SendMailFrame.sendMode = "reply"
@@ -1310,6 +1408,7 @@ local tests = {
         Wild.db.intents = { { action = "mail", recipient = "Alt-Realm", groups = { {} } } }
         Fire("MAIL_SHOW"); RunTimers(); RunTimers(); RunTimeouts()
         Equal(#Messages("Mailed "), 0)
+        assert(not Wild.RunMailIntents(), "A timed-out send is not safe to start again while awaiting confirmation")
         Fire("MAIL_SEND_SUCCESS"); Fire("BAG_UPDATE_DELAYED"); RunTimers()
         Equal(#Messages("Mailed "), 1)
         Equal(#Messages("Mail stopped: 24 item(s) sent"), 1)

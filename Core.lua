@@ -63,6 +63,20 @@ function Wild.GetAccountBankBags()
     return GetBankBags("AccountBankTab_")
 end
 
+Wild.INBOX_SORT_OPTIONS = {
+    { "inbox", "Inbox order" },
+    { "name", "Item name (A-Z)" },
+    { "sender", "Sender (A-Z)" },
+    { "size", "Stack size (largest first)" },
+}
+
+local function IsInboxSortOrder(value)
+    for _, option in ipairs(Wild.INBOX_SORT_OPTIONS) do
+        if option[1] == value then return true end
+    end
+    return false
+end
+
 -- Default saved variables
 local defaults = {
     includeReagentBag = true,
@@ -208,7 +222,10 @@ local defaults = {
     },
     mail = {
         autoOpen = false,
+        autoSend = false,
         showInboxBrowser = false,
+        inboxSort = "inbox",
+        keepUnread = false,
     },
     volumeControl = {
         enabled = false,
@@ -366,6 +383,10 @@ frame:SetScript("OnEvent", function(self, event, addon)
 
     ApplyDefaults(WildDB, defaults)
     Wild.db = WildDB
+    if not IsInboxSortOrder(Wild.db.mail.inboxSort) then
+        Wild.db.mail.inboxSort = defaults.mail.inboxSort
+        Wild.Print("|cffff6600Wild:|r Invalid saved attachment sort order. The grid uses Inbox order.")
+    end
 
     self:UnregisterEvent("ADDON_LOADED")
 end)
@@ -755,7 +776,9 @@ local FEATURES = {
     auctionhouse     = { key = "auctionHouse.enabled" },
     craftingorders   = { key = "craftingOrders.enabled" },
     mail             = { key = "mail.autoOpen" },
+    mailautosend     = { key = "mail.autoSend" },
     inbox            = { key = "mail.showInboxBrowser", onToggle = function() Wild.UpdateInboxBrowser() end },
+    inboxkeepunread  = { key = "mail.keepUnread" },
     dungeonbar       = { key = "dungeonBar.enabled" },
     autoreply        = { key = "autoReply.enabled" },
     autoaccept       = { key = "quests.autoAccept" },
@@ -920,10 +943,20 @@ function Wild.SetSetting(key, value, source)
         Wild.Print("|cffff6600Wild:|r Use Shift, Ctrl, Alt, or None for the intent rule bypass key.")
         return false
     end
+    if key == "mail" and type(value) == "table" and value.inboxSort == nil then
+        value = CopySettingValue(value)
+        value.inboxSort = defaults.mail.inboxSort
+    end
+    if (key == "mail.inboxSort" and not IsInboxSortOrder(value)) or
+        (key == "mail" and type(value) == "table" and not IsInboxSortOrder(value.inboxSort)) then
+        Wild.Print("|cffff6600Wild:|r Choose an attachment sort order: inbox, name, sender, or size.")
+        return false
+    end
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     if (key == "mail" or key == "mail.showInboxBrowser") and Wild.UpdateInboxBrowser then Wild.UpdateInboxBrowser() end
+    if (key == "mail" or key == "mail.inboxSort") and Wild.UpdateInboxBrowserSort then Wild.UpdateInboxBrowserSort() end
     if (key == "volumeControl" or key:match("^volumeControl%.")) and Wild.UpdateVolumeControl then
         Wild.UpdateVolumeControl()
     end

@@ -22,6 +22,7 @@ Currency.lua
 AuctionHouse.lua
 CraftingOrders.lua
 Mail.lua
+InboxBulk.lua
 InboxBrowser.lua
 Delve.lua
 DungeonBar.lua

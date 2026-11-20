@@ -109,39 +109,87 @@ inventory total. The recipient's next complete inbox check replaces these
 estimates with the attachments the game shows. Wild hides expired inbox
 attachments and removes unverified sends from the results after 30 days.
 
-## Find and take an attachment
+## Use the Wild mailbox
 
-Open a mailbox and click **Browse Mail** beside WoW's **Inbox**. Search by
-sender, subject, or attachment name. Select a message to read its text and
-see its attachments and enclosed money. Browsing and searching do not mark
-messages as read. Selecting a message marks only that message as read.
+Turn on **Use Wild mailbox** in **Settings > AddOns > Wild > Mail**, or run
+`/wild inbox on`. Wild replaces the standard mailbox window with three tabs.
+Drag the bottom-right corner to resize the window. Turn the setting off to
+restore the standard mailbox. The setting is off by default.
+If you update Wild while WoW is running, run `/reload` before you open a
+mailbox.
 
-Click **Take** next to an attachment to request that stack only. Other
-attachments and enclosed money stay in the inbox. Use the WoW inbox to take
-C.O.D. attachments and confirm the charge. The browser shows how many
-messages WoW has loaded and updates when the inbox changes.
+| Tab | What it does |
+| --- | --- |
+| **List** | Read and reply to letters, confirm C.O.D. payments, or check letters for bulk actions. |
+| **Items** | Search and take individual attachment stacks. This tab opens first. |
+| **Send** | Write mail with WoW's composer, or select **Process rules** to send items that match enabled Mail rules. |
 
-Use `/wild inbox on` or **Settings > AddOns > Wild > Mail > Show the mail
-browser automatically** to open the pane on each visit. This option starts
-off. Opening the pane stops Wild's automatic collection of incoming mail for
-that visit. If automatic collection is enabled, turn on automatic browser
-display before opening the mailbox to stop collection from starting. Outgoing
-mail rules do not change.
+**Items** shows one icon for each attachment stack in the mail WoW has loaded.
+The border uses WoW's item quality color, such as blue for rare or purple
+for epic. Attachments without quality information have no colored border.
+Bag and quiver icons show their total slots in the upper-left corner when WoW
+reports the capacity. A 10-slot bag shows `10`, separate from the stack count.
+Scroll through the grid or search by item name, sender, or subject. Hover over
+an icon for WoW's item tooltip. Click it to take that stack without opening
+the letter. Other stacks and enclosed money stay in the inbox.
+
+Set **Attachment sort order** on the **Mail** settings page. Choose **Inbox
+order** (default), **Item name (A-Z)**, **Sender (A-Z)**, or **Stack size
+(largest first)**. The choice is saved and applies to the open grid without
+clearing the search.
+
+On **List** or **Items**, the bulk buttons act on all loaded mail if no
+letters are checked. Check letters in **List** to limit all three actions to
+that selection. Checkmarks carry across inbox pages and tabs. A change to the
+loaded letters or their contents clears the selection. The **Items** search
+filters the grid, not the bulk actions.
+
+| Action | What it does |
+| --- | --- |
+| **Open all mail** / **Open selected** | Collect items and gold. Skips C.O.D. and GM mail. Does not read letter text. |
+| **Return all mail** / **Return selected** | Return mail that WoW allows you to return, including any items or gold it contains. Requires confirmation. |
+| **Delete all empty mail** / **Delete selected empty** | Delete eligible mail with no items or gold. This also deletes any letter text. Requires confirmation. |
+
+Deletion includes eligible unread letters by default. To keep them, turn on
+**Keep unread mail when deleting empty mail** in **Mail** settings.
+
+**Process rules** works without automatic sending. To run the same rules each
+time you open a mailbox, turn on **Run Mail rules on open** in **Mail** settings.
+It is off by default and independent of **Collect incoming mail automatically**.
+The [intent rule bypass key](#intent-actions-and-logs) skips both automatic
+actions for the visit. It does not block **Process rules**. Finish or clear
+your draft before you run rules.
+
+Using Wild Mail stops Wild's automatic collection of incoming mail for the
+rest of that visit. Enable Wild Mail before you open a mailbox if you want to
+prevent collection from starting.
 
 | Command | Behavior |
 | --- | --- |
-| `/wild inbox` | Show the saved automatic display setting |
-| `/wild inbox on\|off` | Set automatic display |
-| `/wild inbox show\|hide` | Show or hide the browser for the current visit |
-| `/wild inbox search [text]` | Open the browser and apply a filter, or clear it if text is omitted |
-| `/wild inbox read <message>` | Read a message by its displayed number |
-| `/wild inbox take <message> <slot>` | Request one attachment from the selected message; use the numbers shown in the pane |
+| `/wild inbox` | Show the saved mailbox setting |
+| `/wild inbox on\|off` | Use Wild Mail or the standard mailbox |
+| `/wild inbox show\|hide` | Open Items or return to the standard mailbox for this visit |
+| `/wild inbox search [text]` | Open Items and apply a filter, or clear it if text is omitted |
+| `/wild inbox sort [inbox\|name\|sender\|size]` | Show or save the attachment sort order |
+| `/wild inbox select <message> on\|off` | Check or uncheck a loaded letter by its inbox number |
+| `/wild inbox open\|return\|delete [all\|selected]` | Run a bulk action. Omit the scope to use the current selection, or all loaded mail if none are checked. |
+| `/wild inbox keepunread [on\|off]` | Show or set whether bulk deletion keeps unread letters |
+| `/wild inbox read <message>` | Read a numbered letter in chat and mark it as read |
+| `/wild inbox take <message> <slot>` | Request one stack after reading its letter; hover over an icon for the mail and slot numbers |
+| `/wild mail on\|off` | Turn automatic collection of incoming mail on or off |
+| `/wild mail autosend [on\|off]` | Show or set whether Mail rules run on open |
+| `/wild mail run` | Run Mail rules at the open mailbox, even when the standard mailbox is in use |
 
 Use `Wild.ShowInboxBrowser("Honey Cake")`, `Wild.ReadInboxMessage(3)`, and
 `Wild.TakeInboxAttachment(3, 2)` for the equivalent Lua calls. These return
 `true` when the request is made, or `false` with a warning. A successful take
-request is not confirmation from the game. Use `Wild.HideInboxBrowser()` to
-close the browser. The setting is `mail.showInboxBrowser`.
+request is not confirmation from the game. `Wild.HideInboxBrowser()` restores
+the standard mailbox for the visit. `Wild.SetInboxSelection(3, true)` checks a
+letter by number. `Wild.RunInboxBulk("return", "selected")` requests a bulk
+action and still requires the return confirmation. The saved settings are
+`mail.showInboxBrowser`, `mail.inboxSort`, `mail.keepUnread`, and `mail.autoSend`.
+`Wild.RunMailIntents()` returns `true` when it starts a run, not when it sends a
+batch. If it cannot start, it returns `false` and a reason message.
 
 ## Volume panel timeout
 
@@ -370,7 +418,8 @@ or **Alt** to change the key. Select **None** to turn off the shortcut.
 At the mailbox, the shortcut also skips automatic collection of incoming
 items and gold for that visit. It does not affect automatic repairs, Warband
 auto-deposits, or loot triggers.
-Use `/wild bank run` to start bank rules manually while the bank is open.
+Use `/wild bank run` or `/wild mail run` to start rules manually while the bank
+or mailbox is open.
 
 Run `/wild intents bypass shift` to set the key from chat. Use `ctrl`, `alt`,
 or `none` in place of `shift`, or omit the key to read the saved value.
@@ -416,8 +465,9 @@ settles. Vendor requests wait while the cursor is occupied.
 For a **Mail** intent, set **Recipient** to the address you use for manual
 mail. Keep the space in Forever's full character name, such as `Alt Family`.
 Realm-qualified names, such as `Alt Family-Realm`, also keep that space.
-Wild selects **Send Mail**, fills **To** and **Subject**, and clears **Body**
-before each batch. It does not rewrite the saved recipient.
+Wild selects the Send tab, checks that the composer is empty, then prepares
+each batch in WoW's composer. It uses WoW's Send button and leaves any
+confirmation to the player. It does not rewrite the saved recipient.
 
 Mail summaries show **complete** only on normal completion, or **stopped** when
 the queue stops after earlier successful sends. A send acknowledgment that
@@ -472,16 +522,16 @@ totals, history retention, and unchanged vendor intervals. They also cover
 container discovery and event sequencing, plus the Soiree API shapes and manual
 fallback. Mail fixtures cover native send-field preparation and full Forever
 recipient names. Inventory fixtures cover confirmed sends, incomplete inbox
-data, and storage refreshes. Browser fixtures cover search, selective reading,
-single-attachment requests, and collection interlocks. WoW APIs are simulated
-because they are unavailable outside the client.
+data, and storage refreshes. Mailbox fixtures cover the native open sequence,
+tab selection, single-stack pickup, and scoped bulk actions with confirmations.
+WoW APIs are simulated because they are unavailable outside the client.
 A live Retail and Forever check must confirm merchant refusals, full banks,
 mail acknowledgments, deletion prompts, and displayed results. The local
 fixtures do not establish live server behavior or complete Soiree reward data.
 Volume fixtures cover opening without adjustments, interaction resets, held
 controls, cancellation, and shared timeout settings. A live client check must
 confirm slider dragging and panel layout.
-For the mail browser, [verify layout and selective collection in both clients](docs/mailbox/design.md#testing-strategy).
+For the mailbox, [verify layout, selective collection, and sending in both clients](docs/mailbox/design.md#testing-strategy).
 Native settings fixtures cover inline numeric entry, limits, units, draft
 cancellation, and row reuse. Check number-field placement and scrolling in
 both clients.

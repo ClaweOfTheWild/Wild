@@ -2,25 +2,6 @@
 local ADDON_NAME, Wild = ...
 
 -- ============================================================
--- Auto-open incoming mail
--- ============================================================
-
-local function AutoOpenMail(visit)
-    if not Wild.db.mail or not Wild.db.mail.autoOpen
-        or visit.inboxBrowserOpened or Wild.IsFeatureEnabled("inbox") then return end
-
-    local function OpenNext()
-        if visit.closed or visit.inboxBrowserOpened then return end
-        local numItems = GetInboxNumItems()
-        if numItems == 0 then return end
-        AutoLootMailItem(1)
-        C_Timer.After(0.35, OpenNext)
-    end
-
-    C_Timer.After(0.5, OpenNext)
-end
-
--- ============================================================
 -- Mail send queue — event-driven retry-until-done
 -- Scans bags → builds batches → sends via MAIL_SEND_SUCCESS
 -- chain → re-scans. Done when no more matching items remain.
@@ -30,9 +11,11 @@ local MAX_ATTACHMENTS = ATTACHMENTS_MAX_SEND or 12
 local MAX_MAIL_PASSES = 50
 local mailQueue = {}
 local isSending = false
+local automaticSend = false
 local mailPassNum = 0
 local mailTotalSent = 0
 local mailSummaryCount = 0
+local mailboxVisit
 local pendingMail
 local mailGeneration = 0
 local mailConfirmationTimer
@@ -41,6 +24,59 @@ local bagsUpdated = false
 local RescanMailQueue
 local rescanFrame = CreateFrame("Frame")
 local CONFIRMATION_TIMEOUT = 10
+
+function Wild.IsMailSendBusy()
+    return isSending or pendingMail ~= nil
+end
+
+local function AutoOpenMail(visit)
+    if not Wild.GetSetting("mail.autoOpen") or Wild.IsFeatureEnabled("inbox") then return end
+
+    local function OpenNext()
+        if visit.closed or visit.inboxBrowserOpened or not Wild.GetSetting("mail.autoOpen")
+            or not MailFrame or not MailFrame:IsVisible() or (pendingMail and not isSending) then return end
+        if GetInboxNumItems() == 0 then return end
+        if not isSending and not C_Mail.IsCommandPending() then AutoLootMailItem(1) end
+        C_Timer.After(0.35, OpenNext)
+    end
+
+    C_Timer.After(0.5, OpenNext)
+end
+
+local function GetSendBlock()
+    if not mailboxVisit or mailboxVisit.closed or not MailFrame or not MailFrame:IsVisible() then
+        return "Open a mailbox before running Mail rules.", "mailbox_closed"
+    end
+    if GameLimitedMode_IsActive and GameLimitedMode_IsActive() then
+        return "This account cannot send mail.", "account_restricted"
+    end
+    if InCombatLockdown() then
+        return "Leave combat before running Mail rules.", "in_combat"
+    end
+    if Wild.InboxBulk and Wild.InboxBulk.IsBusy() then
+        return "Finish the bulk inbox action before running Mail rules.", "inbox_bulk_active"
+    end
+    if not SendMailFrame or not MailFrameTab_OnClick or not SendMailMailButton
+        or not SendMailNameEditBox or not SendMailSubjectEditBox or not SendMailBodyEditBox
+        or not SendMailMoney or not MoneyInputFrame_GetCopper then
+        return "Mail send controls are unavailable.", "mail_ui_unavailable"
+    end
+    if C_Mail.IsCommandPending() or (SendMailFrameLockSendMail and SendMailFrameLockSendMail:IsShown()) then
+        return "Wait for WoW to finish the current mail action.", "mail_command_pending"
+    end
+    if GetCursorInfo() then
+        return "The cursor is already occupied. Clear it before running Mail rules.", "cursor_occupied"
+    end
+    for index = 1, MAX_ATTACHMENTS do
+        if HasSendMailItem(index) then
+            return "Mail attachments are already occupied. Finish or clear the draft first.", "attachments_occupied"
+        end
+    end
+    if SendMailNameEditBox:GetText() ~= "" or SendMailSubjectEditBox:GetText() ~= ""
+        or SendMailBodyEditBox:GetText() ~= "" or MoneyInputFrame_GetCopper(SendMailMoney) > 0 then
+        return "Finish or clear your mail draft before running Mail rules.", "mail_draft"
+    end
+end
 
 local function PrintMailSummary(complete)
     if mailTotalSent == 0 or mailTotalSent == mailSummaryCount then return end
@@ -76,6 +112,7 @@ local function StopMailQueue(warning, keepPending, reason)
     if not keep then pendingMail = nil end
     waitingForBags = false
     isSending = false
+    automaticSend = false
     mailGeneration = mailGeneration + 1
 end
 
@@ -87,17 +124,13 @@ local function ScheduleMailStep(delay, callback)
 end
 
 local function BuildMailQueue()
-    if not Wild.db or not Wild.db.intents then return end
+    if not Wild.db or not Wild.db.intents then return {} end
 
     local charCtx = Wild.BuildCharContext()
     local byRecipient = {}
     local seen = {}
 
-    local bags = Wild.GetPlayerBags and Wild.GetPlayerBags() or { BACKPACK_CONTAINER }
-    if not Wild.GetPlayerBags then
-        for i = 1, NUM_BAG_SLOTS do bags[#bags + 1] = i end
-        if Enum.BagIndex.ReagentBag then bags[#bags + 1] = Enum.BagIndex.ReagentBag end
-    end
+    local bags = Wild.GetPlayerBags()
 
     for _, intent in ipairs(Wild.db.intents) do
         if intent.enabled ~= false and intent.action == "mail" and Wild.ValidateIntent(intent) and Wild.IntentMatchesActor(intent) then
@@ -142,33 +175,28 @@ local function BuildMailQueue()
         end
     end
 
-    mailQueue = {}
+    local queue = {}
     for recipient, items in pairs(byRecipient) do
         for i = 1, #items, MAX_ATTACHMENTS do
             local batch = {}
             for j = i, math.min(i + MAX_ATTACHMENTS - 1, #items) do
                 table.insert(batch, items[j])
             end
-            table.insert(mailQueue, { recipient = recipient, items = batch })
+            table.insert(queue, { recipient = recipient, items = batch })
         end
     end
+    return queue
 end
 
 local function ProcessNextMail()
     if not isSending or pendingMail or #mailQueue == 0 then return end
-    if GetCursorInfo() then
-        StopMailQueue("Mail attachments or the cursor are already occupied; stopped mail queue.", false, "cursor_occupied")
+    if automaticSend and Wild.GetSetting("mail.autoSend") ~= true then
+        StopMailQueue()
         return
     end
-    for index = 1, MAX_ATTACHMENTS do
-        if GetSendMailItem(index) then
-            StopMailQueue("Mail attachments or the cursor are already occupied; stopped mail queue.", false, "attachments_occupied")
-            return
-        end
-    end
-    if not SendMailFrame or not MailFrameTab_OnClick or not SendMailNameEditBox
-        or not SendMailSubjectEditBox or not SendMailBodyEditBox then
-        StopMailQueue("Mail send controls are unavailable; stopped mail queue.", false, "mail_ui_unavailable")
+    local blocked, reason = GetSendBlock()
+    if blocked then
+        StopMailQueue(blocked, false, reason)
         return
     end
 
@@ -222,13 +250,20 @@ local function ProcessNextMail()
         SendMailBodyEditBox:SetText("")
         local batch = { recipient = recipient, items = {}, count = count }
         Wild.MergeItemActionEntries(batch.items, confirmedItems)
+        if not SendMailMailButton:IsEnabled() then
+            Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = batch.items }, {
+                source = "bags", target = recipient, recipient = recipient, reason = "send_button_disabled",
+            })
+            StopMailQueue("WoW did not enable Send. Check the prepared mail.", false, "send_button_disabled")
+            return
+        end
         pendingMail = batch
         mailConfirmationTimer = C_Timer.NewTimer(CONFIRMATION_TIMEOUT, function()
             if pendingMail == batch then
                 StopMailQueue("Mail send was not confirmed; stopped mail queue.", true, "confirmation_timeout")
             end
         end)
-        SendMail(recipient, subject, "")
+        SendMailMailButton:Click()
     else
         StopMailQueue("No mail attachments could be prepared; stopped mail queue.", false, "no_attachments")
     end
@@ -258,7 +293,7 @@ end
 RescanMailQueue = function()
     waitingForBags = false
     if mailConfirmationTimer then mailConfirmationTimer:Cancel(); mailConfirmationTimer = nil end
-    BuildMailQueue()
+    mailQueue = BuildMailQueue()
     if #mailQueue == 0 then
         PrintMailSummary(true)
         StopMailQueue()
@@ -270,11 +305,20 @@ RescanMailQueue = function()
     end
 end
 
-local function StartMailSend()
-    if isSending or pendingMail then return end
-    BuildMailQueue()
-    if #mailQueue == 0 then return end
+local function StartMailSend(automatic)
+    if isSending then return false, "Mail rules are already running.", "already_running" end
+    if pendingMail then return false, "Wait for WoW to confirm the previous rule send.", "send_unconfirmed" end
+    local blocked, reason = GetSendBlock()
+    if blocked and not automatic then return false, blocked, reason end
+    local queue = BuildMailQueue()
+    if #queue == 0 then return false, "No bag items match enabled Mail rules.", "no_matches" end
+    if blocked then
+        Wild.Warn("Mail", blocked, { action = "mail", status = "stopped", reason = reason })
+        return false, blocked, reason
+    end
+    mailQueue = queue
     isSending = true
+    automaticSend = automatic
     mailGeneration = mailGeneration + 1
     mailPassNum = 1
     mailTotalSent = 0
@@ -286,6 +330,12 @@ local function StartMailSend()
         if waitingForBags then RescanMailQueue() end
     end)
     ScheduleMailStep(Wild.db.advanced.mailBatchDelay, ProcessNextMail)
+    return true
+end
+
+--- Start the same send queue as auto-send without changing the saved setting.
+function Wild.RunMailIntents()
+    return StartMailSend(false)
 end
 
 -- ============================================================
@@ -305,14 +355,21 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "MAIL_SHOW" then
         if not Wild.db then return end
         local visit = Wild.OpenIntentVisit("mail")
+        if mailboxVisit == visit then return end
+        mailboxVisit = visit
         if visit.bypassed then return end
         AutoOpenMail(visit)
-        local generation = mailGeneration
-        C_Timer.After(Wild.db.advanced.mailStartDelay, function()
-            if mailGeneration == generation then StartMailSend() end
-        end)
+        if Wild.GetSetting("mail.autoSend") == true then
+            local generation = mailGeneration
+            C_Timer.After(Wild.db.advanced.mailStartDelay, function()
+                if mailboxVisit == visit and mailGeneration == generation and Wild.GetSetting("mail.autoSend") == true then
+                    StartMailSend(true)
+                end
+            end)
+        end
     elseif event == "MAIL_CLOSED" then
         Wild.CloseIntentVisit("mail")
+        mailboxVisit = nil
         StopMailQueue(pendingMail and "Mailbox closed before the send was confirmed; stopped mail queue." or nil, true, "mailbox_closed")
     elseif event == "MAIL_SEND_SUCCESS" then
         if pendingMail then

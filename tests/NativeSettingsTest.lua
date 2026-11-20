@@ -783,7 +783,7 @@ local tests = {
         Equal(setting:GetValue(), false)
 
         for _, initializer in ipairs(state.layouts.Mail.initializers) do
-            if initializer.data.name == "Mail browser command" then
+            if initializer.data.name == "Wild mailbox command" then
                 assert(initializer:GetTooltip():find("/wild inbox off", 1, true))
                 initializer.data.buttonClick()
                 Equal(state.popup.editBox:GetText(), "/wild inbox off")
@@ -791,7 +791,66 @@ local tests = {
                 return
             end
         end
-        error("The mail browser setting needs a command icon")
+        error("The Wild mailbox setting needs a command icon")
+    end },
+    { "the mail sort dropdown and its command change the same saved order", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local sort = Setting("mail.inboxSort")
+        Equal(sort:GetValue(), "inbox")
+
+        local dropdown, command
+        for _, initializer in ipairs(state.layouts.Mail.initializers) do
+            if initializer.data.setting == sort then dropdown = initializer.data end
+            if initializer.data.name == "Attachment sort order command" then command = initializer end
+        end
+        Equal(assert(dropdown).kind, "Dropdown")
+        local options = {}
+        for _, option in ipairs(dropdown.options()) do options[option.value] = option end
+        sort:SetValue(assert(options.sender).value)
+        Equal(Wild.GetSetting("mail.inboxSort"), "sender")
+        Equal(Wild.IsFeatureEnabled("inbox"), false, "Sorting does not enable the browser")
+
+        Wild.HandleSlashCommand("inbox sort size")
+        assert(assert(command):GetTooltip():find("/wild inbox sort size", 1, true))
+        command.data.buttonClick()
+        Equal(state.popup.editBox:GetText(), "/wild inbox sort size")
+        Equal(sort:GetValue(), "size")
+        Wild.HandleSlashCommand("inbox sort invalid")
+        Equal(sort:GetValue(), "size")
+        assert(state.messages[#state.messages]:find("inbox, name, sender, or size", 1, true))
+        sort:SetValueToDefault()
+        Equal(Wild.GetSetting("mail.inboxSort"), "inbox")
+    end },
+    { "outgoing mail automation is a separate opt-in setting", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local autoSend = Setting("mail.autoSend")
+        Equal(autoSend:GetValue(), false)
+        autoSend:SetValue(true)
+        Equal(Wild.GetSetting("mail.autoSend"), true)
+        Equal(Wild.GetSetting("mail.autoOpen"), false)
+        local command
+        for _, initializer in ipairs(state.layouts.Mail.initializers) do
+            if initializer.data.name == "Automatic Mail rules command" then command = initializer end
+        end
+        assert(assert(command):GetTooltip():find("/wild mail autosend on", 1, true))
+        command.data.buttonClick()
+        Equal(state.popup.editBox:GetText(), "/wild mail autosend on")
+        Wild.HandleSlashCommand("mail autosend off")
+        Equal(autoSend:GetValue(), false)
+    end },
+    { "keeping unread empty mail is configurable from native settings and chat", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local keepUnread = Setting("mail.keepUnread")
+        Equal(keepUnread:GetValue(), false)
+        keepUnread:SetValue(true)
+        Equal(Wild.GetSetting("mail.keepUnread"), true)
+        local command
+        for _, initializer in ipairs(state.layouts.Mail.initializers) do
+            if initializer.data.name == "Keep unread mail command" then command = initializer end
+        end
+        assert(assert(command):GetTooltip():find("/wild inbox keepunread on", 1, true))
+        Wild.HandleSlashCommand("inbox keepunread off")
+        Equal(keepUnread:GetValue(), false)
     end },
     { "Soiree native controls slash commands and generic setters share the opt-in setting", function()
         local Wild, state, _, Setting = NewEnvironment()

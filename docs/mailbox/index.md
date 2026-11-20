@@ -1,10 +1,10 @@
 ---
-title: Inbox browsing
-description: Search the current character's inbox and take individual attachments.
+title: Wild mailbox
+description: Read, collect, and send mail in one window.
 ---
 
-# Inbox browsing
+# Wild mailbox
 
-- [Use the mail browser](../../README.md#find-and-take-an-attachment)
+- [Use the Wild mailbox](../../README.md#use-the-wild-mailbox)
 - [Specification](spec.md)
 - [Design](design.md)

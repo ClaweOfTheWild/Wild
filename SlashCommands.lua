@@ -51,7 +51,10 @@ local FEATURE_NAMES = {
     tooltip          = "Tooltip Enhancements",
     auctionhouse     = "Auction House Defaults",
     craftingorders   = "Crafting Orders Defaults",
-    inbox            = "Automatic Mail Browser",
+    mail             = "Automatic Incoming Mail Collection",
+    mailautosend     = "Automatic Mail Rules",
+    inbox            = "Wild Mailbox",
+    inboxkeepunread  = "Keep Unread Mail",
     dungeonbar       = "Dungeon Bar",
     autoreply        = "Mythic+ Auto-Reply",
     autoaccept       = "Quest Auto-Accept",
@@ -186,10 +189,18 @@ subcommands.help = function()
     Print("/wild log clear — Clear saved actions, warnings, and diagnostics")
     print(" ")
     Print("/wild find <name> — Search items across all characters")
-    Print("/wild inbox on|off|show|hide - Control the searchable mail browser")
+    Print("/wild mail on|off - Toggle automatic collection of incoming mail")
+    Print("/wild mail autosend [on|off] - Show or set whether Mail rules run on open")
+    Print("/wild mail run - Send items that match enabled Mail rules at the open mailbox")
+    Print("/wild inbox on|off - Use Wild Mail or the standard mailbox")
+    Print("/wild inbox show|hide - Open Items or return to the standard mailbox for this visit")
     Print("/wild inbox search [text] - Filter by sender, subject, or attachment")
-    Print("/wild inbox read <message> - View a numbered result and mark it as read")
-    Print("/wild inbox take <message> <slot> - Take one attachment from the selected message")
+    Print("/wild inbox sort [inbox|name|sender|size] - Show or set the attachment sort order")
+    Print("/wild inbox select <message> on|off - Select or deselect a loaded letter for bulk actions")
+    Print("/wild inbox open|return|delete [all|selected] - Process loaded mail; omit scope to use the current selection")
+    Print("/wild inbox keepunread [on|off] - Keep unread letters when deleting empty mail")
+    Print("/wild inbox read <message> - Read a numbered letter in chat; marks it as read")
+    Print("/wild inbox take <message> <slot> - Take one stack after reading its letter; hover for the numbers")
     Print("/wild datastore — Show cross-character datastore status")
     Print("/wild datastore refresh — Re-scan current character's bags")
     print(" ")
@@ -212,7 +223,8 @@ subcommands.status = function()
         "circle", "casthistory", "repair", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
         "reputation", "delve", "tooltip",
-        "auctionhouse", "craftingorders", "inbox", "dungeonbar", "autoreply", "autoaccept", "autohandin", "volume",
+        "auctionhouse", "craftingorders", "mail", "mailautosend", "inbox",
+        "dungeonbar", "autoreply", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
         "speed", "dialog", "soiree",
     }
@@ -290,20 +302,51 @@ subcommands.speed = function(args)
     PrintWarn("Usage: /wild speed [on|off]")
 end
 
+subcommands.mail = function(args)
+    local action = args[1] and args[1]:lower()
+    if action == "autosend" and #args <= 2 then
+        if HandleGenericFeature("mailautosend", { args[2] }) then return end
+    elseif action == "run" and #args == 1 then
+        local started, message, reason = Wild.RunMailIntents()
+        if not started and reason ~= "no_matches" then PrintWarn(message) end
+        return
+    elseif #args <= 1 and HandleGenericFeature("mail", args) then
+        return
+    end
+    PrintWarn("Usage: /wild mail [on|off|autosend [on|off]|run]")
+end
+
 subcommands.inbox = function(args, message)
     local action = args[1] and args[1]:lower()
     if action == "search" then
         Wild.ShowInboxBrowser(message:match("^%S+%s+%S+%s*(.*)$") or "")
+    elseif action == "sort" then
+        if #args == 1 then
+            Print("Attachment sort order: " .. Wild.GetSetting("mail.inboxSort"))
+        elseif #args == 2 then
+            local order = args[2]:lower()
+            if Wild.SetSetting("mail.inboxSort", order) then Print("Attachment sort order: " .. order) end
+        else
+            PrintWarn("Usage: /wild inbox sort [inbox|name|sender|size]")
+        end
     elseif action == "show" and #args == 1 then
         Wild.ShowInboxBrowser()
     elseif action == "hide" and #args == 1 then
         Wild.HideInboxBrowser()
+    elseif action == "keepunread" and #args <= 2 then
+        if not HandleGenericFeature("inboxkeepunread", { args[2] }) then
+            PrintWarn("Usage: /wild inbox keepunread [on|off]")
+        end
+    elseif action == "select" and #args == 3 and args[2]:match("^%d+$") and OnOff(args[3]) ~= nil then
+        Wild.SetInboxSelection(tonumber(args[2]), OnOff(args[3]))
+    elseif (action == "open" or action == "return" or action == "delete") and #args <= 2 then
+        Wild.RunInboxBulk(action, args[2] and args[2]:lower())
     elseif action == "read" and #args == 2 and args[2]:match("^%d+$") then
         Wild.ReadInboxMessage(tonumber(args[2]))
     elseif action == "take" and #args == 3 and args[2]:match("^%d+$") and args[3]:match("^%d+$") then
         Wild.TakeInboxAttachment(tonumber(args[2]), tonumber(args[3]))
     elseif #args > 1 or not HandleGenericFeature("inbox", args) then
-        PrintWarn("Use /wild help for inbox commands. Read and take require the numbers shown in Browse Mail.")
+        PrintWarn("Use /wild help for inbox commands. Hover over an icon for its mail and slot numbers.")
     end
 end
 

@@ -540,16 +540,34 @@ end
 
 local function CreateMailPage()
     local category = AddPage("Mail")
-    AddCheckbox(category, "mail.autoOpen", "Auto-open mailbox",
+    AddCheckbox(category, "mail.autoOpen", "Collect incoming mail automatically",
         "Take items and gold from incoming mail automatically when the mailbox opens. " ..
         "Hold the intent rule bypass key until the mailbox opens to skip collection for that visit. " ..
-        "Opening Browse Mail stops any further Wild collection for the visit.", "mail")
-    local browser = AddCheckbox(category, "mail.showInboxBrowser", "Show the mail browser automatically",
-        "Show loaded messages beside the Inbox tab. Search by sender, subject, or attachment name. " ..
-        "This skips Wild's automatic collection of incoming mail for the visit. It does not change send rules.", "inbox")
-    AddSettingCommand(category, "mail.showInboxBrowser", "Mail browser command", function()
+        "Using Wild Mail stops further automatic collection for the visit.", "mail")
+    local autoSend = AddCheckbox(category, "mail.autoSend", "Run Mail rules on open",
+        "Send bag items that match enabled Mail rules when you open a mailbox. " ..
+        "Hold the rule bypass key on open to skip automatic sending for that visit. " ..
+        "You can still use Process rules on the Send tab.", "mailautosend")
+    AddSettingCommand(category, "mail.autoSend", "Automatic Mail rules command", function()
+        return "/wild mail autosend " .. (Wild.IsFeatureEnabled("mailautosend") and "on" or "off")
+    end, autoSend)
+    local browser = AddCheckbox(category, "mail.showInboxBrowser", "Use Wild mailbox",
+        "Replace the native mailbox window with List, Items, and Send tabs. " ..
+        "This skips Wild's automatic collection of incoming mail for the visit.", "inbox")
+    AddSettingCommand(category, "mail.showInboxBrowser", "Wild mailbox command", function()
         return "/wild inbox " .. (Wild.IsFeatureEnabled("inbox") and "on" or "off")
     end, browser)
+    local sort = AddDropdown(category, "mail.inboxSort", "Attachment sort order", Settings.VarType.String,
+        Wild.INBOX_SORT_OPTIONS, "Sort the mail attachment grid without changing the order of letters in the Inbox.")
+    AddSettingCommand(category, "mail.inboxSort", "Attachment sort order command", function()
+        return "/wild inbox sort " .. Wild.GetSetting("mail.inboxSort")
+    end, sort)
+    local keepUnread = AddCheckbox(category, "mail.keepUnread", "Keep unread mail when deleting empty mail",
+        "Delete empty mail always skips letters with items or gold. Turn this on to also keep unread letters.",
+        "inboxkeepunread")
+    AddSettingCommand(category, "mail.keepUnread", "Keep unread mail command", function()
+        return "/wild inbox keepunread " .. (Wild.IsFeatureEnabled("inboxkeepunread") and "on" or "off")
+    end, keepUnread)
 end
 
 local function CreateLootPage()
