@@ -1,4 +1,4 @@
--- Wild: Slash command parser & dispatcher
+-- Wild: Slash command catalog and dispatcher
 local ADDON_NAME, Wild = ...
 
 local INFO = "|cff00ccffWild:|r "
@@ -89,132 +89,52 @@ end
 -- Subcommand handlers
 -- ============================================================
 
-local subcommands = {}
+local WILD_SLASH = "/wild"
+local commandHandlers = {}
+local commandCatalog = {}
 
--- /wild help
-subcommands.help = function()
-    print("|cff00ccff--- Wild Commands ---|r")
-    Print("/wild - Open WoW Settings > AddOns > Wild")
-    Print("/wild native [page] - Open native WoW Settings (for example: /wild native speed)")
-    Print("/wild help — Show this help")
-    Print("/wild status — Show all feature states")
-    Print("/wild client - Show the detected WoW client mode")
-    Print("/wild <feature> on|off — Toggle a feature")
-    print(" ")
-    print("|cff00ccff  Features:|r lfg, circle, repair, loot, autoloot,")
-    print("    bank, bankcharacter, bankguild, reputation,")
-    print("    delve, tooltip, auctionhouse (ah), craftingorders (co), dungeonbar (bar), casts,")
-    print("    autoaccept, autohandin, autoconfirmrole, autoacceptqueue, lfgfilters,")
-    print("    volume (vol), durability (dur), speed, dialog, soiree")
-    print(" ")
-    Print("/wild lfg on|off — Toggle LFG quick apply")
-    Print("/wild lfg autoconfirm on|off — Auto-confirm role")
-    Print("/wild lfg autoaccept on|off — Auto-accept queue")
-    Print("/wild lfg filters on|off — Toggle result filters")
-    Print("/wild lfg keys on|off — Toggle keystone panel")
-    Print("/wild lfg anchor <position> — Set keystone panel anchor (right|left|topleft|topright|bottomleft|bottomright)")
-    Print("/wild autoreply on|off - Toggle Mythic+ whisper replies (Retail)")
-    print(" ")
-    Print("/wild circle on|off — Toggle center circle")
-    Print("/wild circle size <n> — Set circle size")
-    Print("/wild circle thickness <n> — Set circle thickness")
-    Print("/wild circle opacity <0-100> — Set circle opacity")
-    Print("/wild circle color <r> <g> <b> — Set circle color (0-1 floats)")
-    Print("/wild circle offset <x> <y> — Set circle offset")
-    print(" ")
-    Print("/wild casts on|off — Toggle cast history")
-    Print("/wild casts size <20-100> — Set icon size")
-    Print("/wild casts text on|off — Show or hide spell names")
-    Print("/wild casts textsize <8-32> — Set spell-name size")
-    Print("/wild casts length <1-20> — Set history limit for GCD and non-GCD casts separately")
-    Print("/wild casts fade <1-30> — Set seconds before fading")
-    Print("/wild casts spacing <0-100> — Set the gap between tracks")
-    Print("/wild casts direction left|right|up|down — Set slide direction")
-    Print("/wild casts move|lock|reset|clear — Configure the start point or clear history")
-    print(" ")
-    Print("/wild repair on|off — Toggle auto-repair")
-    Print("/wild repair guild on|off — Toggle guild funds")
-    Print("/wild loot on|off — Toggle quick loot")
-    Print("/wild loot modifier shift|ctrl|alt|none — Set auto-loot modifier key")
-    Print("/wild containers - Open container settings")
-    Print("/wild containers default on|off - Set auto-open for newly discovered containers")
-    Print("/wild containers add <itemID> [on|off] - Add an ID; disabled unless on is specified")
-    Print("/wild containers <itemID> on|off - Change a container's saved opening choice")
-    Print("/wild containers list|scan - List saved choices or rescan and retry containers")
-    print(" ")
-    Print("/wild bank on|off — Toggle warband bank")
-    Print("/wild bank character on|off — Toggle character bank")
-    Print("/wild bank guild on|off — Toggle guild bank")
-    Print("/wild bank run — Manually trigger bank filter rules")
-    Print("/wild bank rules — List all bank filter rules")
-    Print("/wild intents bypass [shift|ctrl|alt|none] - Show or set the intent rule bypass key")
-    print(" ")
-    Print("/wild quests on|off — Toggle all quest automation")
-    Print("/wild quests accept on|off — Toggle quest auto-accept")
-    Print("/wild quests handin on|off — Toggle quest auto-hand-in")
-    print(" ")
-    Print("/wild gossip — Show gossip automation status")
-    Print("/wild gossip single on|off — Toggle auto-select single option")
-    Print("/wild gossip quest on|off — Toggle auto-select quest options")
-    Print("/wild gossip delve on|off — Toggle auto-select delve options")
-    Print("/wild gossip skip on|off — Toggle auto-select skip options")
-    print(" ")
-    Print("/wild dialog on|off - Toggle keyboard confirmation of popups, queues, and delve entry")
-    Print("/wild dialog key <key> - Set the confirmation key (SPACE, ENTER, CTRL-F2)")
-    Print("/wild dialog destroy on|off - Allow item destruction without typing DELETE")
-    Print("/wild soiree on|off - Show advice when opening Saltheril's invitation selector")
-    Print("/wild soiree show|hide - Open or dismiss the advisor for the current selector")
-    print(" ")
-    Print("/wild dungeonbar on|off — Toggle dungeon bar")
-    Print("/wild dungeonbar show|hide|toggle — Control visibility")
-    print(" ")
-    Print("/wild volume on|off — Toggle volume control button")
-    Print("/wild volume timeout [seconds] - Show or set the panel auto-hide timeout; 0 keeps it open")
-    print(" ")
-    Print("/wild durability — Show durability overlay status")
-    Print("/wild durability on|off — Toggle all durability overlays")
-    Print("/wild durability equipped on|off — Toggle per-slot equipped overlays")
-    Print("/wild durability total on|off — Toggle total durability overlay")
-    Print("/wild durability bags on|off — Toggle bag item overlays")
-    print(" ")
-    Print("/wild speed on|off — Toggle the draggable movement speed indicator")
-    Print("  Shows current speed as a percentage of normal running speed (100%).")
-    print(" ")
-    Print("/wild trace start — Start recording events")
-    Print("/wild trace stop — Stop recording")
-    Print("/wild trace filter <text> — Filter events by name")
-    Print("/wild trace show — Show last 50 entries in chat")
-    Print("/wild trace clear — Clear the log")
-    Print("/wild log show [filter] — Show the last 20 matching actions, warnings, or diagnostics")
-    Print("/wild log clear — Clear saved actions, warnings, and diagnostics")
-    print(" ")
-    Print("/wild find <name> — Search items across all characters")
-    Print("/wild mail on|off - Toggle automatic collection of incoming mail")
-    Print("/wild mail autosend [on|off] - Show or set whether Mail rules run on open")
-    Print("/wild mail run - Send items that match enabled Mail rules at the open mailbox")
-    Print("/wild inbox on|off - Use Wild Mail or the standard mailbox")
-    Print("/wild inbox show|hide - Open Items or return to the standard mailbox for this visit")
-    Print("/wild inbox search [text] - Filter by sender, subject, or attachment")
-    Print("/wild inbox sort [inbox|name|sender|size] - Show or set the attachment sort order")
-    Print("/wild inbox select <message> on|off - Select or deselect a loaded letter for bulk actions")
-    Print("/wild inbox open|return|delete [all|selected] - Process loaded mail; omit scope to use the current selection")
-    Print("/wild inbox keepunread [on|off] - Keep unread letters when deleting empty mail")
-    Print("/wild inbox read <message> - Read a numbered letter in chat; marks it as read")
-    Print("/wild inbox take <message> <slot> - Take one stack after reading its letter; hover for the numbers")
-    Print("/wild datastore — Show cross-character datastore status")
-    Print("/wild datastore refresh — Re-scan current character's bags")
-    print(" ")
-    Print("/wild delay — Show all timing settings")
-    Print("/wild delay <setting> <seconds> — Set a timing value")
-    Print("  Settings: rule, pass, bankstart, guildbankstart,")
-    Print("  sellinterval, sellstart, mailstart, mailbatch,")
-    Print("  destroystart, preloadtimeout")
-    print(" ")
-    Print("/wild reset — Reset all settings to defaults")
+local function AddCatalogEntry(syntax, description)
+    commandCatalog[#commandCatalog + 1] = { syntax = syntax, description = description }
 end
 
--- /wild status
-subcommands.status = function()
+local function CommandSyntax(name, arguments)
+    return WILD_SLASH .. (name == "" and "" or " " .. name) .. (arguments == "" and "" or " " .. arguments)
+end
+
+-- Register each accepted form beside its handler so the Commands page does not maintain a separate list.
+local function RegisterCommand(name, forms, handler, aliases)
+    assert(not commandHandlers[name] and #forms > 0, "Invalid command registration: " .. name)
+    commandHandlers[name] = handler
+    for _, form in ipairs(forms) do
+        AddCatalogEntry(CommandSyntax(name, form[1]), form[2])
+    end
+    for _, alias in ipairs(aliases or {}) do
+        assert(not commandHandlers[alias], "Duplicate command alias: " .. alias)
+        commandHandlers[alias] = handler
+        local arguments = #forms == 1 and forms[1][1] or "[<arguments>]"
+        AddCatalogEntry(CommandSyntax(alias, arguments), "Alias for " .. CommandSyntax(name, "") .. ". Use the same arguments.")
+    end
+end
+
+local function RegisterFeatureCommand(name, description, aliases)
+    RegisterCommand(name, { { "[on|off]", description } }, function(args)
+        if not HandleGenericFeature(name, args) then
+            PrintWarn("Usage: " .. CommandSyntax(name, "[on|off]"))
+        end
+    end, aliases)
+end
+
+local function OpenCommands()
+    Wild.OpenSettings("Commands")
+end
+
+RegisterCommand("", { { "", "Open Wild settings." } }, function()
+    Wild.OpenSettings()
+end)
+
+RegisterCommand("help", { { "", "Open the Commands page." } }, OpenCommands)
+
+RegisterCommand("status", { { "", "Show the client mode and feature states." } }, function()
     print("|cff00ccff--- Wild Status ---|r")
     Print("Client mode: " .. Wild.GetClientMode())
     -- Ordered list for predictable output
@@ -233,28 +153,31 @@ subcommands.status = function()
         Print(name .. ": " .. FeatureStatus(feature))
     end
     Print("New container auto-open: " .. StatusText(Wild.GetSetting("containers.autoOpenNew")))
-end
+end)
 
-subcommands.client = function()
+RegisterCommand("client", { { "", "Show the detected WoW client mode." } }, function()
     Print("Client mode: " .. Wild.GetClientMode())
-end
+end)
 
-subcommands.autoreply = function(args)
-    if HandleGenericFeature("autoreply", args) then return end
-    PrintWarn("Usage: /wild autoreply [on|off]")
-end
-
--- /wild reset
-subcommands.reset = function()
+RegisterCommand("reset", { { "", "Reset Wild settings to their defaults." } }, function()
     Wild.ResetSettings()
-end
+end)
 
-subcommands.native = function(args)
+RegisterCommand("native", {
+    { "[<page>]", "Open Wild settings or go to a page by name, for example speed." },
+}, function(args)
     local page = #args > 0 and table.concat(args, " ") or nil
     Wild.OpenSettings(page)
-end
+end)
 
-subcommands.containers = function(args)
+RegisterCommand("containers", {
+    { "", "Open container settings." },
+    { "<itemID> on|off", "Set whether a container with this item ID opens automatically." },
+    { "add <itemID> [on|off]", "Save a container item ID. Auto-open is off unless you specify on." },
+    { "default [on|off]", "Show or set auto-open for newly discovered containers only." },
+    { "list", "Show saved container IDs and their auto-open settings." },
+    { "scan", "Scan bags for containers and retry containers that timed out." },
+}, function(args)
     if #args == 0 then Wild.OpenSettings("Containers"); return end
     local sub = args[1]:lower()
     if sub == "default" and #args <= 2 then
@@ -294,15 +217,13 @@ subcommands.containers = function(args)
         end
     end
     PrintWarn("Usage: /wild containers [default on|off|add <itemID> [on|off]|<itemID> on|off|list|scan]")
-end
+end)
 
--- /wild speed [on|off]
-subcommands.speed = function(args)
-    if HandleGenericFeature("speed", args) then return end
-    PrintWarn("Usage: /wild speed [on|off]")
-end
-
-subcommands.mail = function(args)
+RegisterCommand("mail", {
+    { "[on|off]", "Show or set automatic collection of incoming mail." },
+    { "autosend [on|off]", "Show or set whether Mail rules run when you open a mailbox." },
+    { "run", "Run Mail rules at an open mailbox. Finish or clear the draft first." },
+}, function(args)
     local action = args[1] and args[1]:lower()
     if action == "autosend" and #args <= 2 then
         if HandleGenericFeature("mailautosend", { args[2] }) then return end
@@ -314,9 +235,23 @@ subcommands.mail = function(args)
         return
     end
     PrintWarn("Usage: /wild mail [on|off|autosend [on|off]|run]")
-end
+end)
 
-subcommands.inbox = function(args, message)
+local INBOX_SCOPE_HELP = " Omit scope to use the selection, or all loaded mail if none is selected."
+RegisterCommand("inbox", {
+    { "[on|off]", "Show or set whether to use Wild Mail or the standard mailbox." },
+    { "delete [all|selected]", "Delete letters with no items or gold after confirmation." .. INBOX_SCOPE_HELP },
+    { "hide", "Return to the standard mailbox for this visit." },
+    { "keepunread [on|off]", "Show or set whether deleting empty mail keeps unread letters." },
+    { "open [all|selected]", "Collect items and gold. Skip C.O.D. and GM mail." .. INBOX_SCOPE_HELP },
+    { "read <message>", "On Items, show a numbered letter in chat and mark it as read." },
+    { "return [all|selected]", "Return eligible mail to its senders after confirmation." .. INBOX_SCOPE_HELP },
+    { "search [<text>]", "Open Items and filter by sender, subject, or attachment. Omit text to clear the filter." },
+    { "select <message> on|off", "Select or deselect a loaded letter by its inbox number." },
+    { "show", "Open the Items tab at the current mailbox." },
+    { "sort [inbox|name|sender|size]", "Show or set the attachment sort order." },
+    { "take <message> <slot>", "Take a stack after reading its letter. Hover over the attachment for its mail and slot numbers." },
+}, function(args, message)
     local action = args[1] and args[1]:lower()
     if action == "search" then
         Wild.ShowInboxBrowser(message:match("^%S+%s+%S+%s*(.*)$") or "")
@@ -348,9 +283,13 @@ subcommands.inbox = function(args, message)
     elseif #args > 1 or not HandleGenericFeature("inbox", args) then
         PrintWarn("Use /wild help for inbox commands. Hover over an icon for its mail and slot numbers.")
     end
-end
+end)
 
-subcommands.soiree = function(args)
+RegisterCommand("soiree", {
+    { "[on|off]", "Show or set automatic advice when you open Saltheril's invitation selector. Retail only." },
+    { "hide", "Close Saltheril's Soiree advisor. Retail only." },
+    { "show", "Open Saltheril's Soiree advisor for the current selector. Retail only." },
+}, function(args)
     if #args == 1 and args[1]:lower() == "show" then
         Wild.ShowSoireeAdvisor()
     elseif #args == 1 and args[1]:lower() == "hide" then
@@ -358,10 +297,13 @@ subcommands.soiree = function(args)
     elseif not HandleGenericFeature("soiree", args) then
         PrintWarn("Usage: /wild soiree [on|off|show|hide]")
     end
-end
+end)
 
--- /wild dialog [on|off|key <key>|destroy on|off]
-subcommands.dialog = function(args)
+RegisterCommand("dialog", {
+    { "[on|off]", "Show or set keyboard confirmation of supported dialogs." },
+    { "destroy on|off", "Set whether the confirmation key can permanently destroy an item without typing DELETE." },
+    { "key <key>", "Set the confirmation key. Examples: SPACE, ENTER, CTRL-F2." },
+}, function(args)
     if #args == 0 then
         Print("Dialog Key: " .. StatusText(Wild.IsFeatureEnabled("dialog")))
         Print("Item destruction: " .. StatusText(Wild.GetSetting("dialogKey.destroy")))
@@ -386,10 +328,16 @@ subcommands.dialog = function(args)
     else
         PrintWarn("Usage: /wild dialog [on|off|key <key>|destroy on|off]")
     end
-end
+end)
 
--- /wild circle [on|off|size|thickness|opacity|color|offset]
-subcommands.circle = function(args)
+RegisterCommand("circle", {
+    { "[on|off]", "Show or set whether the center circle appears." },
+    { "color <r> <g> <b>", "Set red, green, and blue values from 0 to 1." },
+    { "offset <x> <y>", "Move the circle from the screen center by these horizontal and vertical offsets." },
+    { "opacity <percent>", "Set the circle opacity from 0 to 100 percent." },
+    { "size <pixels>", "Set the circle diameter in pixels." },
+    { "thickness <pixels>", "Set the circle line width in pixels." },
+}, function(args)
     if HandleGenericFeature("circle", args) then return end
 
     local sub = args[1]:lower()
@@ -434,10 +382,16 @@ subcommands.circle = function(args)
     else
         Print("Unknown circle subcommand: " .. sub .. ". Try /wild help")
     end
-end
+end)
 
--- /wild lfg [on|off|autoconfirm|autoaccept|filters|keys|anchor]
-subcommands.lfg = function(args)
+RegisterCommand("lfg", {
+    { "[on|off]", "Show or set Quick Apply for the group finder. Retail only." },
+    { "anchor left|right|topleft|topright|bottomleft|bottomright", "Set the keystone panel position. Retail only." },
+    { "autoaccept on|off", "Set whether to accept queue role checks automatically. Retail only." },
+    { "autoconfirm on|off", "Set whether to confirm your role automatically when invited. Retail only." },
+    { "filters on|off", "Legacy command. LFG Result Filters are not available." },
+    { "keys on|off", "Show or hide the keystone panel. Retail only." },
+}, function(args)
     if HandleGenericFeature("lfg", args) then return end
 
     local sub = args[1]:lower()
@@ -473,10 +427,12 @@ subcommands.lfg = function(args)
     else
         Print("Unknown lfg subcommand: " .. sub .. ". Try /wild help")
     end
-end
+end)
 
--- /wild repair [on|off|guild]
-subcommands.repair = function(args)
+RegisterCommand("repair", {
+    { "[on|off]", "Show or set automatic repairs at vendors." },
+    { "guild on|off", "Set whether to try guild funds first when repairing." },
+}, function(args)
     if HandleGenericFeature("repair", args) then return end
 
     local sub = args[1]:lower()
@@ -488,10 +444,12 @@ subcommands.repair = function(args)
     else
         Print("Unknown repair subcommand: " .. sub .. ". Try /wild help")
     end
-end
+end)
 
--- /wild loot [on|off|modifier]
-subcommands.loot = function(args)
+RegisterCommand("loot", {
+    { "[on|off]", "Show or set Quick Loot." },
+    { "modifier shift|ctrl|alt|none", "Set the modifier key that reverses normal Auto-Loot behavior." },
+}, function(args)
     if HandleGenericFeature("loot", args) then return end
 
     local sub = args[1]:lower()
@@ -506,20 +464,27 @@ subcommands.loot = function(args)
     else
         Print("Unknown loot subcommand: " .. sub .. ". Try /wild help")
     end
-end
+end)
 
--- /wild intents bypass [shift|ctrl|alt|none]
-subcommands.intents = function(args)
+RegisterCommand("intents", {
+    { "bypass [shift|ctrl|alt|none]", "Show or set the intent rule bypass key." },
+}, function(args)
     if not args[1] or args[1]:lower() ~= "bypass" or #args > 2 then
         PrintWarn("Usage: /wild intents bypass [shift|ctrl|alt|none]")
         return
     end
     if args[2] and not Wild.SetSetting("intentBypassModifier", args[2]:upper()) then return end
     Print("Intent rule bypass key: " .. Wild.GetSetting("intentBypassModifier"))
-end
+end)
 
--- /wild bank [on|off|character|guild|warband|run|rules]
-subcommands.bank = function(args)
+RegisterCommand("bank", {
+    { "[on|off]", "Show all bank feature states, or set Warband Bank automation." },
+    { "character on|off", "Turn Character Bank automation on or off." },
+    { "guild on|off", "Turn Guild Bank automation on or off." },
+    { "rules", "Show saved bank rules." },
+    { "run", "Run bank rules at the open bank." },
+    { "warband on|off", "Turn Warband Bank automation on or off." },
+}, function(args)
     if #args == 0 then
         Print("Warband Bank: " .. StatusText(Wild.IsFeatureEnabled("bank")))
         Print("Character Bank: " .. StatusText(Wild.IsFeatureEnabled("bankcharacter")))
@@ -577,43 +542,14 @@ subcommands.bank = function(args)
     else
         Print("Unknown bank subcommand: " .. sub .. ". Try /wild help")
     end
-end
+end)
 
--- /wild reputation [on|off]  (alias: rep)
-subcommands.reputation = function(args)
-    if HandleGenericFeature("reputation", args) then return end
-    Print("Usage: /wild reputation on|off")
-end
-subcommands.rep = subcommands.reputation
-
--- /wild delve [on|off]
-subcommands.delve = function(args)
-    if HandleGenericFeature("delve", args) then return end
-    Print("Usage: /wild delve on|off")
-end
-
--- /wild tooltip [on|off]
-subcommands.tooltip = function(args)
-    if HandleGenericFeature("tooltip", args) then return end
-    Print("Usage: /wild tooltip on|off")
-end
-
--- /wild auctionhouse [on|off]  (alias: ah)
-subcommands.auctionhouse = function(args)
-    if HandleGenericFeature("auctionhouse", args) then return end
-    Print("Usage: /wild auctionhouse on|off")
-end
-subcommands.ah = subcommands.auctionhouse
-
--- /wild craftingorders [on|off]  (alias: co)
-subcommands.craftingorders = function(args)
-    if HandleGenericFeature("craftingorders", args) then return end
-    Print("Usage: /wild craftingorders on|off")
-end
-subcommands.co = subcommands.craftingorders
-
--- /wild dungeonbar [on|off|show|hide|toggle]  (alias: bar)
-subcommands.dungeonbar = function(args)
+RegisterCommand("dungeonbar", {
+    { "[on|off]", "Show or set whether the Dungeon Bar is enabled." },
+    { "hide", "Hide the Dungeon Bar." },
+    { "show", "Show the Dungeon Bar when it is enabled." },
+    { "toggle", "Switch Dungeon Bar visibility." },
+}, function(args)
     if #args == 0 then
         Print("Dungeon Bar: " .. StatusText(Wild.IsFeatureEnabled("dungeonbar")))
         return
@@ -641,11 +577,23 @@ subcommands.dungeonbar = function(args)
     else
         Print("Usage: /wild dungeonbar on|off|show|hide|toggle")
     end
-end
-subcommands.bar = subcommands.dungeonbar
+end, { "bar" })
 
--- /wild casts [on|off|size|text|textsize|length|fade|spacing|direction|move|lock|reset|clear]
-subcommands.casts = function(args)
+RegisterCommand("casts", {
+    { "[on|off]", "Show Cast History settings, or turn recording on or off." },
+    { "clear", "Clear the current cast history." },
+    { "direction left|right|up|down", "Set the direction cast icons move." },
+    { "fade <seconds>", "Set the delay before icons fade, from 1 to 30 seconds." },
+    { "length <count>", "Set how many casts each track keeps, from 1 to 20." },
+    { "lock", "Lock the Cast History start point." },
+    { "move", "Unlock the Cast History start point so you can drag it." },
+    { "reset", "Restore the default Cast History start point." },
+    { "size <pixels>", "Set the icon size from 20 to 100 pixels." },
+    { "spacing <pixels>", "Set the gap between tracks from 0 to 100 pixels." },
+    { "text on|off", "Show or hide spell and item names." },
+    { "textsize <pixels>", "Set the name text size from 8 to 32 pixels." },
+    { "unlock", "Unlock the Cast History start point so you can drag it." },
+}, function(args)
     local config = Wild.db and Wild.db.castHistory
     if not config then
         PrintWarn("Cast history settings are not loaded yet.")
@@ -723,12 +671,15 @@ subcommands.casts = function(args)
     else
         Print("Usage: /wild casts on|off|size <20-100>|text on|off|textsize <8-32>|length <1-20>|fade <1-30>|spacing <0-100>|direction left|right|up|down|move|lock|reset|clear")
     end
-end
-subcommands.cast = subcommands.casts
-subcommands.casthistory = subcommands.casts
+end, { "cast", "casthistory" })
 
--- /wild quests [on|off|accept|handin]  (alias: quest)
-subcommands.quests = function(args)
+RegisterCommand("quests", {
+    { "[on|off]", "Show or set both automatic quest acceptance and hand-in." },
+    { "accept on|off", "Set automatic quest acceptance." },
+    { "autoaccept on|off", "Alias for quests accept." },
+    { "autohandin on|off", "Alias for quests handin." },
+    { "handin on|off", "Set automatic quest hand-in." },
+}, function(args)
     if #args == 0 then
         Print("Quest Auto-Accept: " .. StatusText(Wild.IsFeatureEnabled("autoaccept")))
         Print("Quest Auto-Hand-In: " .. StatusText(Wild.IsFeatureEnabled("autohandin")))
@@ -758,11 +709,15 @@ subcommands.quests = function(args)
             Print("Usage: /wild quests [accept|handin] on|off")
         end
     end
-end
-subcommands.quest = subcommands.quests
+end, { "quest" })
 
--- /wild gossip [single|quest|delve|skip on|off]
-subcommands.gossip = function(args)
+RegisterCommand("gossip", {
+    { "[on|off]", "Show gossip settings, or set all supported gossip automation." },
+    { "delve on|off", "Set automatic selection of delve options. Retail only." },
+    { "quest on|off", "Set automatic selection of quest options." },
+    { "single on|off", "Set automatic selection when an NPC offers one option." },
+    { "skip on|off", "Set automatic selection of options that skip dialog or content." },
+}, function(args)
     if #args == 0 then
         local g = Wild.db and Wild.db.gossip
         if not g then Print("Gossip settings unavailable.") return end
@@ -809,17 +764,31 @@ subcommands.gossip = function(args)
             Print("Usage: /wild gossip [single|quest|delve|skip] on|off")
         end
     end
-end
+end)
 
--- Simple on/off features that don't have subcommands
-for _, feat in ipairs({ "autoloot", "autoconfirmrole", "autoacceptqueue", "lfgfilters", "autoaccept", "autohandin" }) do
-    if not subcommands[feat] then
-        subcommands[feat] = function(args) HandleGenericFeature(feat, args) end
-    end
-end
+RegisterFeatureCommand("auctionhouse", "Show or set default Auction House filters.", { "ah" })
+RegisterFeatureCommand("autoaccept", "Show or set automatic quest acceptance.")
+RegisterFeatureCommand("autoacceptqueue", "Show or set automatic acceptance of queue role checks. Retail only.")
+RegisterFeatureCommand("autoconfirmrole", "Show or set automatic role confirmation when invited. Retail only.")
+RegisterFeatureCommand("autohandin", "Show or set automatic quest hand-in.")
+RegisterFeatureCommand("autoloot", "Show or set WoW's Auto-Loot setting.")
+RegisterFeatureCommand("autoreply", "Show or set automatic replies to Mythic+ whispers. Retail only.")
+RegisterFeatureCommand("autorolecheck", "Show or set automatic acceptance of queue role checks. Retail only.")
+RegisterFeatureCommand("bankcharacter", "Show or set Character Bank automation.")
+RegisterFeatureCommand("bankguild", "Show or set Guild Bank automation.")
+RegisterFeatureCommand("craftingorders", "Show or set default Crafting Orders filters.", { "co" })
+RegisterFeatureCommand("delve", "Show or set automatic selection of the first power option in delves. Retail only.")
+RegisterFeatureCommand("durabilitybags", "Show or set durability overlays on items in bags.")
+RegisterFeatureCommand("durabilityequipped", "Show or set durability overlays on equipped items.")
+RegisterFeatureCommand("durabilitytotal", "Show or set the total durability overlay.")
+RegisterFeatureCommand("inboxkeepunread", "Show or set whether deleting empty mail keeps unread letters.")
+RegisterFeatureCommand("lfgfilters", "Legacy command. LFG Result Filters are not available.")
+RegisterFeatureCommand("mailautosend", "Show or set whether Mail rules run when you open a mailbox.")
+RegisterFeatureCommand("reputation", "Show or set automatic collapse of reputation headers.", { "rep" })
+RegisterFeatureCommand("speed", "Show or set the movement speed display. Normal running speed is 100 percent.")
+RegisterFeatureCommand("tooltip", "Show or set item tooltip enhancements.")
 
--- /wild find <name> — search for items across all characters
-subcommands.find = function(args)
+RegisterCommand("find", { { "<name>", "Search for items across all characters by name." } }, function(args)
     if #args == 0 then
         Print("Usage: /wild find <item name>")
         return
@@ -837,11 +806,12 @@ subcommands.find = function(args)
         if r.total > 0 then detail = string.format("%dx total (%s)", r.total, detail) end
         Wild.Print(string.format("  %s — %s", display, detail))
     end
-end
-subcommands.search = subcommands.find
+end, { "search" })
 
--- /wild volume [on|off|timeout [seconds]]
-subcommands.volume = function(args)
+RegisterCommand("volume", {
+    { "[on|off]", "Show or set whether the volume control button appears." },
+    { "timeout [<seconds>]", "Show or set the volume panel timeout. Set it to 0 to keep the panel open." },
+}, function(args)
     if #args <= 1 and HandleGenericFeature("volume", args) then return end
     if args[1] and args[1]:lower() == "timeout" and #args <= 2 then
         if not Wild.db then PrintWarn("Volume settings have not loaded yet."); return end
@@ -855,11 +825,14 @@ subcommands.volume = function(args)
         return
     end
     PrintWarn("Usage: /wild volume on|off|timeout [seconds]. Use 0 to keep the panel open.")
-end
-subcommands.vol = subcommands.volume
+end, { "vol" })
 
--- /wild durability [on|off|equipped|total|bags]  (alias: dur)
-subcommands.durability = function(args)
+RegisterCommand("durability", {
+    { "[on|off]", "Show or set all durability overlays." },
+    { "bags on|off", "Show or hide durability on items in bags." },
+    { "equipped on|off", "Show or hide durability on equipped items." },
+    { "total on|off", "Show or hide the total durability overlay." },
+}, function(args)
     if #args == 0 then
         local db = Wild.db and Wild.db.durability
         if not db then Print("Durability settings unavailable.") return end
@@ -899,11 +872,12 @@ subcommands.durability = function(args)
     else
         Print("Usage: /wild durability [equipped|total|bags] on|off")
     end
-end
-subcommands.dur = subcommands.durability
+end, { "dur" })
 
--- /wild datastore [status|clear|refresh] — manage cross-character datastore
-subcommands.datastore = function(args)
+RegisterCommand("datastore", {
+    { "[status]", "Show the state of the cross-character item store." },
+    { "refresh", "Scan the current character's bags again." },
+}, function(args)
     local sub = args[1] and args[1]:lower() or "status"
 
     if sub == "status" then
@@ -921,54 +895,64 @@ subcommands.datastore = function(args)
     else
         Print("Usage: /wild datastore [status|refresh]")
     end
-end
-subcommands.ds = subcommands.datastore
+end, { "ds" })
 
--- /wild delay [setting] [seconds]
-subcommands.delay = function(args)
-    local DELAY_SETTINGS = {
-        rule            = { key = "ruleDelay",          label = "Rule delay" },
-        pass            = { key = "passDelay",          label = "Pass delay" },
-        bankstart       = { key = "bankStartDelay",     label = "Bank start delay" },
-        guildbankstart  = { key = "guildBankStartDelay",label = "Guild bank start delay" },
-        sellinterval    = { key = "sellInterval",       label = "Sell interval" },
-        sellstart       = { key = "sellStartDelay",     label = "Sell start delay" },
-        mailstart       = { key = "mailStartDelay",     label = "Mail start delay" },
-        mailbatch       = { key = "mailBatchDelay",     label = "Mail batch delay" },
-        destroystart    = { key = "destroyStartDelay",  label = "Destroy start delay" },
-        preloadtimeout  = { key = "preloadTimeout",     label = "Preload timeout" },
+do
+    local settings = {
+        { name = "rule", key = "ruleDelay", label = "Rule delay" },
+        { name = "pass", key = "passDelay", label = "Pass delay" },
+        { name = "bankstart", key = "bankStartDelay", label = "Bank start delay" },
+        { name = "guildbankstart", key = "guildBankStartDelay", label = "Guild bank start delay" },
+        { name = "sellinterval", key = "sellInterval", label = "Sell interval" },
+        { name = "sellstart", key = "sellStartDelay", label = "Sell start delay" },
+        { name = "mailstart", key = "mailStartDelay", label = "Mail start delay" },
+        { name = "mailbatch", key = "mailBatchDelay", label = "Mail batch delay" },
+        { name = "destroystart", key = "destroyStartDelay", label = "Destroy start delay" },
+        { name = "preloadtimeout", key = "preloadTimeout", label = "Preload timeout" },
     }
+    local forms = { { "", "Show all timing settings." } }
+    local byName, names = {}, {}
+    for _, setting in ipairs(settings) do
+        byName[setting.name] = setting
+        names[#names + 1] = setting.name
+        forms[#forms + 1] = {
+            setting.name .. " [<seconds>]",
+            "Show or set the " .. setting.label:lower() .. ". Use 0.1 to 1 second in steps of 0.1.",
+        }
+    end
 
-    local sub = args[1] and args[1]:lower() or nil
-
-    if not sub then
-        -- Show all current values
-        print("|cff00ccff--- Wild Timing Settings ---|r")
-        local order = { "rule", "pass", "bankstart", "guildbankstart", "sellinterval", "sellstart", "mailstart", "mailbatch", "destroystart", "preloadtimeout" }
-        for _, name in ipairs(order) do
-            local s = DELAY_SETTINGS[name]
-            Print(s.label .. ": " .. (Wild.db.advanced[s.key] or 0.3) .. "s")
+    RegisterCommand("delay", forms, function(args)
+        local sub = args[1] and args[1]:lower()
+        if not sub then
+            print("|cff00ccff--- Wild Timing Settings ---|r")
+            for _, setting in ipairs(settings) do
+                Print(setting.label .. ": " .. (Wild.db.advanced[setting.key] or 0.3) .. "s")
+            end
+            return
         end
-        return
-    end
 
-    local setting = DELAY_SETTINGS[sub]
-    if not setting then
-        Print("Unknown delay setting: " .. sub .. ". Options: rule, pass, bankstart, guildbankstart, sellinterval, sellstart, mailstart, mailbatch, destroystart, preloadtimeout")
-        return
-    end
+        local setting = byName[sub]
+        if not setting then
+            Print("Unknown delay setting: " .. sub .. ". Options: " .. table.concat(names, ", "))
+            return
+        end
 
-    local val = tonumber(args[2])
-    if not val then
-        Print(setting.label .. ": " .. (Wild.db.advanced[setting.key] or 0.3) .. "s")
-        return
-    end
-    val = math.max(0.1, math.min(1.0, math.floor(val * 10 + 0.5) / 10))
-    Wild.SetSetting("advanced." .. setting.key, val)
-    Print(setting.label .. " set to " .. val .. "s.")
+        local val = tonumber(args[2])
+        if not val then
+            Print(setting.label .. ": " .. (Wild.db.advanced[setting.key] or 0.3) .. "s")
+            return
+        end
+        val = math.max(0.1, math.min(1.0, math.floor(val * 10 + 0.5) / 10))
+        Wild.SetSetting("advanced." .. setting.key, val)
+        Print(setting.label .. " set to " .. val .. "s.")
+    end)
 end
 
-subcommands.log = function(args)
+RegisterCommand("log", {
+    { "", "Show the count of saved log entries." },
+    { "clear", "Clear saved actions, warnings, and diagnostics." },
+    { "show [<filter>]", "Show the last 20 matching log entries in chat." },
+}, function(args)
     local sub = args[1] and args[1]:lower() or ""
     if sub == "clear" then
         Wild.ClearLog()
@@ -986,7 +970,7 @@ subcommands.log = function(args)
     else
         Print(string.format("Log: %d saved entries. Actions and failures are always saved; debug adds diagnostics. Use /wild log show [filter] or /wild log clear.", Wild.GetLogCount()))
     end
-end
+end)
 
 -- ============================================================
 -- Main dispatcher
@@ -994,18 +978,12 @@ end
 
 function Wild.HandleSlashCommand(msg)
     msg = strtrim(msg or "")
-    if msg == "" then
-        Wild.OpenSettings()
-        return
-    end
-
     local args = ParseArgs(msg)
-    local cmd = tremove(args, 1):lower()
+    local cmd = (tremove(args, 1) or ""):lower()
+    local handler = commandHandlers[cmd]
 
-    if subcommands[cmd] then
-        subcommands[cmd](args, msg)
-    elseif Wild.FEATURES[cmd] then
-        HandleGenericFeature(cmd, args)
+    if handler then
+        handler(args, msg)
     else
         PrintWarn("Unknown command: " .. cmd .. ". Type /wild help for a list.")
     end
@@ -1044,7 +1022,14 @@ do
         table.insert(Wild.db.eventTrace, entry)
     end)
 
-    subcommands.trace = function(args)
+    RegisterCommand("trace", {
+        { "", "Open the Commands page to find event trace commands." },
+        { "clear", "Clear saved event trace entries." },
+        { "filter [<text>]", "Record only events with matching names. Omit text to clear the filter." },
+        { "show", "Show the last 50 event trace entries in chat." },
+        { "start", "Start recording events." },
+        { "stop", "Stop recording events." },
+    }, function(args)
         local sub = args[1] and args[1]:lower() or ""
 
         if sub == "start" then
@@ -1091,21 +1076,33 @@ do
                 Wild.Print("  " .. Wild.db.eventTrace[i])
             end
 
+        elseif sub == "" then
+            OpenCommands()
         else
-            Print("/wild trace start — Start recording events")
-            Print("/wild trace stop — Stop recording")
-            Print("/wild trace filter <text> — Only log events matching text")
-            Print("/wild trace filter — Clear filter")
-            Print("/wild trace show — Show last 50 entries in chat")
-            Print("/wild trace clear — Clear the log")
-            Print("Log is saved to WildDB.eventTrace in saved variables.")
+            PrintWarn("Unknown trace command: " .. sub .. ". Use /wild help to find trace commands.")
         end
-    end
+    end)
 end
 
 -- ============================================================
 -- Register slash command
 -- ============================================================
 
-SLASH_WILD1 = "/wild"
+SLASH_WILD1 = WILD_SLASH
 SlashCmdList["WILD"] = Wild.HandleSlashCommand
+SLASH_WILDDUNGEONBAR1 = "/wbar"
+SlashCmdList["WILDDUNGEONBAR"] = function()
+    Wild.ToggleDungeonBar()
+end
+AddCatalogEntry(SLASH_WILDDUNGEONBAR1, "Switch Dungeon Bar visibility.")
+
+table.sort(commandCatalog, function(left, right) return left.syntax < right.syntax end)
+
+--- Return copies of the alphabetized command syntax and descriptions.
+function Wild.GetCommandCatalog()
+    local entries = {}
+    for index, entry in ipairs(commandCatalog) do
+        entries[index] = { syntax = entry.syntax, description = entry.description }
+    end
+    return entries
+end

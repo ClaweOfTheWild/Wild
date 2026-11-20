@@ -197,8 +197,8 @@ local function AddNumberInput(initializer, setting, minimum, maximum, format, se
     end)
 end
 
-StaticPopupDialogs.WILD_NATIVE_COMMAND = {
-    text = "Direct clipboard copy is not available here. Press Ctrl+C to copy this command.",
+StaticPopupDialogs.WILD_COPY_COMMAND = {
+    text = "Press Ctrl+C to copy the command syntax. Replace any placeholders before you run the command.",
     button1 = CLOSE or "Close",
     hasEditBox = true,
     editBoxWidth = 300,
@@ -207,6 +207,7 @@ StaticPopupDialogs.WILD_NATIVE_COMMAND = {
     hideOnEscape = true,
     OnShow = function(self, command)
         local editBox = self:GetEditBox()
+        editBox:SetNumeric(false)
         editBox:SetMaxLetters(0)
         editBox:SetText(command)
         editBox:SetFocus()
@@ -215,14 +216,71 @@ StaticPopupDialogs.WILD_NATIVE_COMMAND = {
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
 }
 
-local function AddSettingCommand(category, key, name, getCommand, parent)
-    local command = AddButton(category.layout, name, "/", function()
-        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, getCommand())
-    end)
-    function command:GetTooltip()
-        return getCommand() .. "\nClick / to select this command, then press Ctrl+C to copy it."
+local function BuildCommandList(page)
+    local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Commands")
+
+    local hint = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    hint:SetPoint("RIGHT", page, "RIGHT", -28, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Click a command to select its syntax for copying. [ ] marks optional arguments. " ..
+        "< > marks a value to enter. || separates choices.")
+
+    local scroll = CreateFrame("ScrollFrame", nil, page, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -12)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 12)
+    local list = CreateFrame("Frame", nil, scroll)
+    list:SetSize(1, 1)
+    scroll:SetScrollChild(list)
+
+    local rows = {}
+    local previous
+    for _, entry in ipairs(Wild.GetCommandCatalog()) do
+        local syntax = entry.syntax
+        local row = CreateFrame("Button", nil, list)
+        row:SetPoint("TOPLEFT", previous or list, previous and "BOTTOMLEFT" or "TOPLEFT")
+        row:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+        row:SetScript("OnClick", function()
+            StaticPopup_Show("WILD_COPY_COMMAND", nil, nil, syntax)
+        end)
+
+        local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("TOPLEFT", 6, -4)
+        label:SetJustifyH("LEFT")
+        label:SetNonSpaceWrap(true)
+        label:SetText(("|cffffd100%s|r\n%s"):format(
+            (syntax:gsub("|", "||")), (entry.description:gsub("|", "||"))))
+        row.label = label
+        rows[#rows + 1] = row
+        previous = row
     end
-    ConfigureInitializer(command, category, key, parent)
+
+    local function Resize(_, width)
+        if width <= 12 then return end
+        list:SetWidth(width)
+        local height = 0
+        for _, row in ipairs(rows) do
+            row.label:SetWidth(width - 12)
+            local rowHeight = math.ceil(row.label:GetStringHeight()) + 8
+            row:SetSize(width, rowHeight)
+            height = height + rowHeight
+        end
+        list:SetHeight(height)
+    end
+    scroll:HookScript("OnSizeChanged", Resize)
+    Resize(scroll, scroll:GetWidth())
+end
+
+local function CreateCommandsPage()
+    local page = CreateFrame("Frame")
+    page:Hide()
+    TrackCategory(Settings.RegisterCanvasLayoutSubcategory(rootCategory, page, "Commands"))
+    page:SetScript("OnShow", function(self)
+        BuildCommandList(self)
+        self:SetScript("OnShow", nil)
+    end)
 end
 
 local function ApplyContainerID(popup)
@@ -480,7 +538,8 @@ local function CreateAdvancedPage()
             delay[3], nil, nil, nil, { roundTenths = true })
     end
     AddCheckbox(category, "advanced.debug", "Enable debug mode",
-        "Save extra diagnostic messages without printing scans or planned actions to chat. Confirmed intent actions and failures are always saved. Use /wild log show [filter] to read the last 20 matching entries.")
+        "Save extra diagnostic messages without printing scans or planned actions to chat. " ..
+        "Confirmed intent actions and failures are always saved.")
 end
 
 local FILTERS = {
@@ -544,30 +603,18 @@ local function CreateMailPage()
         "Take items and gold from incoming mail automatically when the mailbox opens. " ..
         "Hold the intent rule bypass key until the mailbox opens to skip collection for that visit. " ..
         "Using Wild Mail stops further automatic collection for the visit.", "mail")
-    local autoSend = AddCheckbox(category, "mail.autoSend", "Run Mail rules on open",
+    AddCheckbox(category, "mail.autoSend", "Run Mail rules on open",
         "Send bag items that match enabled Mail rules when you open a mailbox. " ..
         "Hold the rule bypass key on open to skip automatic sending for that visit. " ..
         "You can still use Process rules on the Send tab.", "mailautosend")
-    AddSettingCommand(category, "mail.autoSend", "Automatic Mail rules command", function()
-        return "/wild mail autosend " .. (Wild.IsFeatureEnabled("mailautosend") and "on" or "off")
-    end, autoSend)
-    local browser = AddCheckbox(category, "mail.showInboxBrowser", "Use Wild mailbox",
+    AddCheckbox(category, "mail.showInboxBrowser", "Use Wild mailbox",
         "Replace the native mailbox window with List, Items, and Send tabs. " ..
         "This skips Wild's automatic collection of incoming mail for the visit.", "inbox")
-    AddSettingCommand(category, "mail.showInboxBrowser", "Wild mailbox command", function()
-        return "/wild inbox " .. (Wild.IsFeatureEnabled("inbox") and "on" or "off")
-    end, browser)
-    local sort = AddDropdown(category, "mail.inboxSort", "Attachment sort order", Settings.VarType.String,
+    AddDropdown(category, "mail.inboxSort", "Attachment sort order", Settings.VarType.String,
         Wild.INBOX_SORT_OPTIONS, "Sort the mail attachment grid without changing the order of letters in the Inbox.")
-    AddSettingCommand(category, "mail.inboxSort", "Attachment sort order command", function()
-        return "/wild inbox sort " .. Wild.GetSetting("mail.inboxSort")
-    end, sort)
-    local keepUnread = AddCheckbox(category, "mail.keepUnread", "Keep unread mail when deleting empty mail",
+    AddCheckbox(category, "mail.keepUnread", "Keep unread mail when deleting empty mail",
         "Delete empty mail always skips letters with items or gold. Turn this on to also keep unread letters.",
         "inboxkeepunread")
-    AddSettingCommand(category, "mail.keepUnread", "Keep unread mail command", function()
-        return "/wild inbox keepunread " .. (Wild.IsFeatureEnabled("inboxkeepunread") and "on" or "off")
-    end, keepUnread)
 end
 
 local function CreateLootPage()
@@ -773,14 +820,11 @@ local function CreateVolumePage()
     local category = AddPage("Volume")
     local enabled = AddCheckbox(category, "volumeControl.enabled", "Enable Volume Button",
         "Show a draggable Wild icon. Left-click for volume controls; right-click for Wild settings.", "volume")
-    local timeout = AddNumber(category, "volumeControl.autoHideDelay", "Auto-hide timeout (seconds)", 0, 30, 0.5,
+    AddNumber(category, "volumeControl.autoHideDelay", "Auto-hide timeout (seconds)", 0, 30, 0.5,
         "Hide the volume panel after this many seconds. Opening it starts the timer; each click or adjustment " ..
         "restarts it. The timer waits while you hold a control. Set 0 to keep the panel open. The number " ..
-        "field also accepts delays above 30 seconds. Command: /wild volume timeout <seconds>.",
+        "field also accepts delays above 30 seconds.",
         nil, nil, enabled, { allowAboveMaximum = true })
-    AddSettingCommand(category, "volumeControl.autoHideDelay", "Auto-hide timeout command", function()
-        return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")
-    end, timeout)
 end
 
 local function CreateDurabilityPage()
@@ -865,17 +909,15 @@ local function Initialize()
     rootCategory.layout = layout
     TrackCategory(rootCategory)
     AddHeader(layout, "Wild settings",
-        "Choose a category to configure Wild. Changes apply immediately.")
+        "Choose a category to configure Wild. Changes apply immediately. See Commands for slash command help.")
     AddCheckbox(category, "includeReagentBag", "Include reagent bag",
         "Include your reagent bag when scanning player bags for automation rules.")
-    local bypass = AddDropdown(category, "intentBypassModifier", "Intent rule bypass key", Settings.VarType.String, {
+    AddDropdown(category, "intentBypassModifier", "Intent rule bypass key", Settings.VarType.String, {
         { "NONE", NONE_KEY }, { "SHIFT", SHIFT_KEY }, { "CTRL", CTRL_KEY }, { "ALT", ALT_KEY },
     }, "Hold this key until a bank, guild bank, vendor, or mailbox opens. Wild does not start intent rules for that visit. " ..
         "At the mailbox, this key also skips automatic collection of incoming mail. " ..
         "Auto-repair and Warband auto-deposits still use their own settings.")
-    AddSettingCommand(category, "intentBypassModifier", "Intent rule bypass key command", function()
-        return "/wild intents bypass " .. Wild.GetSetting("intentBypassModifier"):lower()
-    end, bypass)
+    CreateCommandsPage()
     CreateLFGPage()
     CreateCirclePage()
     CreateSpeedPage()

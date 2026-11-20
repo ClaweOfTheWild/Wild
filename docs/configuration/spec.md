@@ -6,8 +6,8 @@ description: Players understand and use Wild through clear controls, complete sl
 # Doc-less configuration - Spec
 
 Wild gives players the information they need to understand, configure, and use
-its functionality without leaving the game. Each setting or action has a command
-icon. Complex options have an information icon.
+its functionality without leaving the game. One alphabetical catalog shows
+the slash commands. Complex options have an information icon.
 
 **Doc-less** means a separate player manual is not required. It does not mean
 developer documentation is absent.
@@ -34,6 +34,7 @@ interface also prevents a player from using an equivalent slash command.
 | User | Job |
 | --- | --- |
 | A player who is unfamiliar with Wild | Understand an option and use it correctly inside the game |
+| A player who wants to find a command | Find its syntax, purpose, and requirements in one list |
 | A player who uses slash commands | Inspect state, change settings, and request supported actions without a configuration window |
 | A player who needs extra help | Find the requirements, effects, and examples beside the relevant control |
 
@@ -48,19 +49,18 @@ interface also prevents a player from using an equivalent slash command.
 - All player-requested actions and queries, including creating, editing,
   ordering, and removing configurable records.
 - Controls in native Settings, richer editors, and other Wild feature panels.
-- Command hints, command copying, and additional information at the relevant
-  control.
+- The command catalog, command copying, and additional information at the
+  relevant control.
 
 In this specification, **functionality** means behavior a player can configure,
 request, or inspect. Internal helper functions are not separate player actions.
-Ordinary navigation, scrolling, closing a window, and the command and information
-icons themselves do not require additional command icons.
+Ordinary navigation, scrolling, closing a window, and information controls
+do not require equivalent commands.
 
 **Out of scope**
 
 - Installation before Wild is available in the game.
-- A documentation website, a separate in-game manual, or a particular visual
-  layout for help.
+- A documentation website or a separate in-game manual.
 - Changes to the purpose, defaults, or automation rules of existing features.
 
 ## Non-goals
@@ -120,70 +120,51 @@ Scenario: A text setting preserves its value
   And no text is silently removed or changed
 ```
 
-### FR3 - Each control reveals its command {#fr3}
+### FR3 - One alphabetical catalog shows every command {#fr3}
 
-Each setting or action control in scope MUST have an associated, visible command
-icon. Hovering over the icon MUST show the slash command for that setting or
-action, including its required arguments. Command and information icons MUST be
-distinguishable without relying only on color.
+Wild MUST show every slash command in one list on the **Commands** page.
+The list MUST be in alphabetical order by command syntax. Players MUST be able
+to open the page from Settings and through `/wild help`.
 
-For a saved setting, the command MUST reproduce its saved value, not toggle it
-or use an unsaved draft. For an action, the command MUST identify the action and
-its selected target. A command sequence MUST show every required step.
-
-The hint MUST reflect a changed saved value or selected target before the next
-copy action. If no valid saved value or complete action input exists, the hint
-MUST identify the missing information. It MUST NOT present an incomplete command
-as ready to run.
+The list MUST include available forms, aliases, arguments, purpose, and
+applicable restrictions. Any addition or change to player functionality MUST
+include its corresponding command and catalog entry in the same change.
+Settings and action controls MUST NOT repeat command syntax in buttons or
+tooltips.
 
 #### Behavioral scenarios
 
 ```gherkin
-Scenario: A command hint reproduces a saved setting
-  Given automatic repair is saved as off
-  When the player hovers over its command icon
-  Then the hint shows the command that sets automatic repair to off
-  And it does not show a toggle command or the command that turns repair on
+Scenario: A player finds a command without inspecting settings controls
+  Given Wild supports more than one slash command
+  When the player enters /wild help
+  Then Wild opens the Commands page from Settings
+  And it shows every supported command and alias in alphabetical order
+  And each entry explains its syntax and purpose
 
-Scenario: A saved value changes while its control is visible
-  Given a setting's saved value changes through a slash command
-  When the player next inspects or copies the control's command
-  Then the offered command reproduces the changed saved value
-  And it does not use a rounded display value or an unsaved draft
+Scenario: Wild adds a player action
+  Given Wild adds a supported action
+  When the player opens Commands
+  Then the action's command appears in alphabetical order
+  And the action control does not have a command icon or command tooltip
 ```
 
-### FR4 - A player can copy the offered command {#fr4}
+### FR4 - A player can copy command syntax {#fr4}
 
-Clicking the command icon MUST copy the complete offered command when the game
-permits direct copying. The copied text MUST be usable command text without
-display formatting, missing arguments, or silent truncation.
-
-When direct copying is unavailable or fails, the player MUST be able to select
-and copy the complete command manually inside the game. Wild MUST explain why
-manual copying is needed and the required copy action. Showing text for manual
-copying MUST NOT be reported as a completed clipboard copy.
+Players MUST be able to select and copy complete command syntax in the catalog.
+Copied syntax MUST contain no color codes or truncation. Wild MUST show which
+arguments are optional and which values the player must enter before running a
+command. If the player must copy the text manually, Wild MUST give that
+instruction and MUST NOT report that it copied the command.
 
 #### Behavioral scenarios
 
 ```gherkin
-Scenario: Direct copying is permitted
-  Given a command hint offers a complete command
-  And the game permits direct copying
-  When the player clicks the command icon
-  Then the clipboard contains the offered command without display formatting
-
-Scenario Outline: A player needs manual copying
-  Given the next direct copy <outcome>
-  When the player clicks the command icon
-  Then the complete command is available for selection and manual copying
-  And Wild explains why manual copying is needed
-  And the player receives instructions for that action
-  And Wild does not claim that a clipboard copy has occurred
-
-  Examples:
-    | outcome           |
-    | is not permitted  |
-    | does not complete |
+Scenario: A player selects command syntax to copy
+  Given a catalog entry has an argument with more than one choice
+  When the player selects the entry
+  Then Wild makes the full syntax available for copying as plain text
+  And the syntax identifies each choice
 ```
 
 ### FR5 - Complex options provide additional information in place {#fr5}
@@ -284,7 +265,7 @@ or overwrite an unfinished edit.
 ```gherkin
 Scenario: A player asks for help during an unfinished edit
   Given a player has an unsaved rule edit
-  When the player views information and copies an available saved-state command
+  When the player opens Commands and copies command syntax
   Then the unsaved edit remains intact
   And no setting is changed or saved by those interactions
   And those interactions do not execute a gameplay action or the offered command
@@ -297,12 +278,11 @@ Scenario: A player asks for help during an unfinished edit
 
 ```gherkin
 Scenario: A player restores a setting with its copied command
-  Given a player saves center-circle opacity as 75 percent
-  When the player uses the command icon to obtain and copy its command
-  Then the command represents 75 percent
+  Given center-circle opacity is 30 percent
+  When the player copies its command syntax from Commands
+  Then the syntax identifies the opacity argument in percent
   And copying does not change the setting
-  When the player changes opacity to 30 percent
-  And explicitly runs the copied command
+  When the player enters 75 for the argument and runs the command
   Then the saved setting and its interface show 75 percent
   And the player does not need an external manual
 ```

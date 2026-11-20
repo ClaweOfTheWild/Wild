@@ -269,8 +269,6 @@ local tests = {
         Wild.HandleSlashCommand("status")
         local status = table.concat(messages, "\n")
         assert(status:find("Speed Indicator", 1, true))
-        Wild.HandleSlashCommand("help")
-        assert(table.concat(messages, "\n"):find("/wild speed on|off", 1, true))
     end },
     { "settings checkbox uses saved state and the shared feature toggle", function()
         local Wild, state, _, _, Overlay, _, SpeedPanel = NewEnvironment()

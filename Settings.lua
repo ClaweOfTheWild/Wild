@@ -1757,12 +1757,12 @@ local function CreateDungeonBarTab(namespace)
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     desc:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     desc:SetJustifyH("LEFT")
-    desc:SetText("|cff888888A draggable bar with ready check, pull timers, and other M+ utilities. Toggle with |cffffffff/wbar|r.|r")
+    desc:SetText("|cff888888A draggable bar with ready check, pull timers, and other dungeon utilities.|r")
 
     local enableCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
     enableCB:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", -2, -16)
     enableCB.Text:SetText("Enable Dungeon Bar")
-    enableCB.tooltipText = "Show the dungeon bar. You can also toggle it with /wbar."
+    enableCB.tooltipText = "Show the dungeon bar."
 
     enableCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
@@ -2179,12 +2179,6 @@ local function CreateDialogKeyTab()
     warning:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     warning:SetJustifyH("LEFT")
     warning:SetText("|cffff6600Warning: With this option enabled, the key permanently destroys the item shown in the destroy popup, including valuable and quest items. The popup stays open until you press the key or cancel it. Other typed confirmations are never bypassed.|r")
-
-    local commands = sc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    commands:SetPoint("TOPLEFT", warning, "BOTTOMLEFT", -22, -20)
-    commands:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
-    commands:SetJustifyH("LEFT")
-    commands:SetText("|cff888888/wild dialog on|off\n/wild dialog key SPACE\n/wild dialog destroy on|off|r")
 
     local capture = CreateFrame("Frame", nil, panel)
     capture:SetFrameStrata("TOOLTIP")
@@ -2725,7 +2719,7 @@ local function CreateIntentsTab()
     local debugCB = CreateFrame("CheckButton", nil, sc, "InterfaceOptionsCheckButtonTemplate")
     debugCB:SetPoint("TOPLEFT", preloadTimeoutHint, "BOTTOMLEFT", -2, -20)
     debugCB.Text:SetText("Enable debug mode")
-    debugCB.tooltipText = "Save extra diagnostic messages without printing scans or planned actions to chat. Confirmed intent actions and failures are always saved. Use /wild log show [filter] to read the last 20 matching entries."
+    debugCB.tooltipText = "Save extra diagnostic messages without printing scans or planned actions to chat."
 
     debugCB:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
@@ -2737,7 +2731,7 @@ local function CreateIntentsTab()
     debugHint:SetPoint("TOPLEFT", debugCB, "BOTTOMLEFT", 22, -4)
     debugHint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     debugHint:SetJustifyH("LEFT")
-    debugHint:SetText("|cff888888Actions and failures are always saved in WildDB.log. Debug adds scan details. /wild log show [filter] shows the last 20 matches; /wild log clear clears the history.|r")
+    debugHint:SetText("|cff888888Confirmed actions and failures are always saved. Debug mode also saves scan details.|r")
 
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.advanced then
@@ -5255,32 +5249,12 @@ local function CreateVolumeTab()
         self:ClearFocus()
     end)
 
-    local function GetCommand()
-        return "/wild volume timeout " .. Wild.GetSetting("volumeControl.autoHideDelay")
-    end
-    local command = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    command:SetSize(24, 22)
-    command:SetPoint("LEFT", timeout, "RIGHT", 8, 0)
-    command:SetText("/")
-    command:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Saved timeout command")
-        GameTooltip:AddLine(GetCommand(), 1, 1, 1)
-        GameTooltip:AddLine("Click / to select this command, then press Ctrl+C to copy it.", nil, nil, nil, true)
-        GameTooltip:Show()
-    end)
-    command:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    command:SetScript("OnClick", function()
-        StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, GetCommand())
-    end)
-
     local hint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     hint:SetPoint("TOPLEFT", timeoutLabel, "BOTTOMLEFT", 0, -12)
     hint:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
     hint:SetJustifyH("LEFT")
     hint:SetText("|cff888888The timer starts when the volume panel opens. Each click or adjustment restarts it. " ..
-        "It waits while you hold a control. Set 0 to keep the panel open. Press Enter to save.\n" ..
-        "/wild volume timeout <seconds>|r")
+        "It waits while you hold a control. Set 0 to keep the panel open. Press Enter to save.|r")
 
     panel:SetScript("OnShow", function()
         if Wild.db and Wild.db.volumeControl then
@@ -5426,7 +5400,7 @@ local function CreateSpeedTab()
     hint:SetPoint("TOPLEFT", enabledCB, "BOTTOMLEFT", 22, -4)
     hint:SetPoint("RIGHT", sc, "RIGHT", -16, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText("|cff888888Shows a yellow double-chevron speed icon and percentage in a fixed-width frame sized for four digits plus %. Drag it to reposition it. The position is saved across sessions. Shows -- when the game restricts speed data.\n\nSlash command: /wild speed on|off|r")
+    hint:SetText("|cff888888Shows a yellow double-chevron speed icon and percentage in a fixed-width frame sized for four digits plus %. Drag it to reposition it. The position is saved across sessions. Shows -- when the game restricts speed data.|r")
 
     panel:SetScript("OnShow", function()
         enabledCB:SetChecked(Wild.IsFeatureEnabled("speed"))

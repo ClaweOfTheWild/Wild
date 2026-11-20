@@ -428,9 +428,3 @@ eventFrame:SetScript("OnEvent", function()
         end
     end
 end)
-
--- Slash shortcut
-SLASH_WILDDUNGEONBAR1 = "/wbar"
-SlashCmdList["WILDDUNGEONBAR"] = function()
-    Wild.ToggleDungeonBar()
-end

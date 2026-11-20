@@ -611,6 +611,10 @@ for _, forever in ipairs({ false, true }) do
     assert(mail.findIcon(100) and mail.findIcon(101) and mail.findIcon(102),
         "Show attachments from several messages together without opening a letter")
     assert(mail.button("List") and mail.button("Items") and mail.button("Send"), "The mailbox has three top tabs")
+    for _, page in ipairs({ "List", "Send", "Items" }) do
+        assert(mail.button(page)):Click()
+        assert(not mail.button("/"), page .. " has no command icon")
+    end
     assert(not mail.hasText("Private note"), "The grid does not list letters without attachments")
     local cake = assert(mail.findIcon(101, 2), "The icon shows the stack count")
     cake.scripts.OnEnter(cake)

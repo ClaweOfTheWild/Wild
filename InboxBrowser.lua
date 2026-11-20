@@ -92,24 +92,6 @@ local function CreateButton(parent, width, text, callback)
     return button
 end
 
-local function CreateCommandButton(parent, getCommand, help)
-    local button = CreateButton(parent, 20, "/", function()
-        local command = getCommand()
-        if command then StaticPopup_Show("WILD_NATIVE_COMMAND", nil, nil, command) end
-    end)
-    button:SetScript("OnEnter", function(self)
-        local command = getCommand()
-        if not command then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if help then GameTooltip:AddLine(help, 1, 1, 1, true) end
-        GameTooltip:AddLine(EscapeText(command), 1, 1, 1)
-        GameTooltip:AddLine("Click /, then press Ctrl+C to copy.", 1, 0.82, 0)
-        GameTooltip:Show()
-    end)
-    button:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    return button
-end
-
 local function SetInboxTooltip(owner, message, slot)
     if not IsBrowserVisible() or not message or not Inbox.SameMessage(message, ReadCurrentMessage(message.index)) then return end
     local item = FindAttachment(message, slot)
@@ -515,14 +497,11 @@ local function CreateSendActions()
         panel.ruleStatus:SetText(message or RULE_INSTRUCTIONS)
     end)
     process:SetPoint("BOTTOMLEFT")
-    local runCommand = CreateCommandButton(panel.sendActions, function() return "/wild mail run" end)
-    runCommand:SetPoint("LEFT", process, "RIGHT", 4, 0)
     panel.ruleStatus = CreateText(panel.sendActions, "GameFontHighlightSmall")
     panel.ruleStatus:SetPoint("TOPLEFT")
     panel.ruleStatus:SetPoint("TOPRIGHT")
     panel.ruleStatus:SetText(RULE_INSTRUCTIONS)
     panel.sendActions:SetScript("OnHide", function()
-        HideOwnedTooltip(runCommand)
         panel.ruleStatus:SetText(RULE_INSTRUCTIONS)
     end)
 end
@@ -551,14 +530,19 @@ local function CreateBulkActions()
             Wild.RunInboxBulk(action.key)
         end)
         button:SetScript("OnMouseDown", function(self) self.pressedRevision = inboxRevision end)
-        button:SetScript("OnHide", function(self) self.pressedRevision = nil end)
+        button:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(action.help, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        button:SetScript("OnLeave", HideOwnedTooltip)
+        button:SetScript("OnHide", function(self)
+            self.pressedRevision = nil
+            HideOwnedTooltip(self)
+        end)
         if previous then button:SetPoint("LEFT", previous, "RIGHT", 6, 0) else button:SetPoint("BOTTOMLEFT") end
         panel.bulkButtons[action.key] = button
-        previous = CreateCommandButton(footer, function()
-            return "/wild inbox " .. action.key .. (next(selected) and " selected" or " all")
-        end, action.help)
-        previous:SetPoint("LEFT", button, "RIGHT", 2, 0)
-        previous:SetScript("OnHide", HideOwnedTooltip)
+        previous = button
     end
 end
 
@@ -587,13 +571,6 @@ local function CreateListChecks()
                     UpdateRowChecks()
                 end
             end)
-            local command = CreateCommandButton(check, function()
-                if check.index then
-                    return ("/wild inbox select %d %s"):format(check.index, selected[check.index] and "off" or "on")
-                end
-            end, "Select this letter for bulk actions, or clear its selection.")
-            command:SetPoint("RIGHT", check, "LEFT", -2, 0)
-            command:SetScript("OnHide", HideOwnedTooltip)
             panel.rowChecks[#panel.rowChecks + 1] = check
         end
     end
@@ -612,11 +589,6 @@ local function CreateItemsPage()
     if panel.search.Instructions then panel.search.Instructions:SetText("Sender, subject, or attachment") end
     panel.search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     panel.search:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    local command = CreateCommandButton(panel.items, function()
-        local search = strtrim(panel.search:GetText())
-        return search ~= "" and "/wild inbox search " .. search or "/wild inbox search"
-    end)
-    command:SetPoint("LEFT", panel.search, "RIGHT", 4, 0)
     panel.summary = CreateText(panel.items, "GameFontHighlightSmall")
     panel.summary:SetPoint("TOPLEFT", 12, -35)
     panel.summary:SetPoint("TOPRIGHT", -12, -35)
@@ -641,7 +613,6 @@ local function CreateItemsPage()
     panel.gridScroll:HookScript("OnVerticalScroll", function(_, offset) BindGridIcons(offset) end)
     panel.items:SetScript("OnHide", function()
         panel.search:ClearFocus()
-        HideOwnedTooltip(command)
     end)
     panel.search:HookScript("OnTextChanged", function(self)
         query = Lower(strtrim(self:GetText()))

@@ -80,6 +80,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         end
     end
     function methods:GetChildren() return unpack(self.children) end
+    function methods:GetRegions() return unpack(self.regions) end
     function methods:GetObjectType() return self.kind end
     function methods:SetParent(parent)
         if self.parent then
@@ -120,6 +121,10 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
     end
     function methods:GetText() return self.text or "" end
+    function methods:GetStringHeight()
+        local _, lineBreaks = self:GetText():gsub("\n", "\n")
+        return (lineBreaks + 1) * 12
+    end
     function methods:HasText() return self:GetText() ~= "" end
     function methods:SetChecked(value) self.checked = value end
     function methods:GetChecked() return self.checked end
@@ -167,14 +172,18 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetScale",
         "SetValueStep", "SetObeyStepOnDrag", "SetTexture", "SetColorTexture", "SetTextInsets",
         "SetMultiLine", "SetNormalTexture", "SetHighlightTexture", "SetPushedTexture",
-        "SetClipsChildren", "RegisterForDrag", "HighlightText",
+        "SetClipsChildren", "RegisterForDrag", "HighlightText", "SetNonSpaceWrap",
     }) do
         methods[name] = function() end
     end
     local function Region(kind)
-        return setmetatable({ kind = kind, children = {}, scripts = {}, shown = true }, { __index = methods })
+        return setmetatable({ kind = kind, children = {}, regions = {}, scripts = {}, shown = true }, { __index = methods })
     end
-    function methods:CreateFontString() return Region("FontString") end
+    function methods:CreateFontString()
+        local text = Region("FontString")
+        self.regions[#self.regions + 1] = text
+        return text
+    end
     function methods:CreateTexture() return Region("Texture") end
     env.CreateFrame = function(kind, name, parent, template)
         if name then assert(env[name] == nil, "Duplicate frame name " .. name) end
@@ -505,10 +514,80 @@ local function FindMenuEntry(menu, value)
 end
 
 local tests = {
+    { "help opens the same alphabetical command catalog in both clients without changing settings", function()
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local Wild, state, env = NewEnvironment({ speed = { enabled = true } }, nil, mode)
+            env.SlashCmdList.WILD("")
+            Equal(state.selected:GetName(), "Wild")
+            state.pending = "unapplied game setting"
+            local saved = Copy(Wild.db)
+            env.SlashCmdList.WILD("help")
+            Equal(state.selected:GetName(), "Commands")
+            Equal(state.selected:GetParentCategory(), state.root)
+            Equal(state.opens, 1)
+            Equal(state.pending, "unapplied game setting")
+            local page = assert(state.layouts.Commands.frame)
+            local scroll = assert(FindChild(state, page, function(frame) return frame.kind == "ScrollFrame" end))
+            local rows, commandNames, previous = {}, {}
+            for _, row in ipairs({ scroll.scrollChild:GetChildren() }) do
+                local label = assert(row:GetRegions())
+                local syntax, description = label:GetText():match("^(.-)\n(.+)$")
+                syntax = assert(syntax):gsub("^|c%x%x%x%x%x%x%x%x", ""):gsub("|r$", ""):gsub("||", "|")
+                assert(description and description ~= "", syntax .. " needs a description")
+                assert(not previous or previous < syntax, syntax .. " is duplicated or out of order")
+                rows[syntax] = row
+                local name = syntax:match("^/wild (%l+)")
+                if name then commandNames[name] = true end
+                previous = syntax
+            end
+            for _, syntax in ipairs({
+                "/wbar", "/wild", "/wild help", "/wild bank warband on|off", "/wild casts unlock",
+                "/wild containers default [on|off]", "/wild speed [on|off]",
+                "/wild delay mailbatch [<seconds>]", "/wild inbox delete [all|selected]", "/wild log",
+                "/wild search <name>", "/wild trace filter [<text>]",
+            }) do
+                assert(rows[syntax], "Missing catalog row: " .. syntax)
+            end
+            for feature in pairs(Wild.FEATURES) do
+                assert(commandNames[feature], "Missing feature command: " .. feature)
+            end
+            env.SlashCmdList.WILD("native commands")
+            Equal(state.selected.layout.frame, page)
+            local toggles = 0
+            Wild.ToggleDungeonBar = function() toggles = toggles + 1 end
+            env.SlashCmdList.WILDDUNGEONBAR("")
+            Equal(toggles, 1, "The listed /wbar shortcut still toggles the bar")
+            Wild.OpenNativeSettings("Commands")
+            local messageCount = #state.messages
+            rows["/wild inbox delete [all|selected]"]:Click()
+            Equal(state.popup.editBox:GetText(), "/wild inbox delete [all|selected]")
+            Equal(state.popup.editBox:HasFocus(), true)
+            rows["/wild reset"]:Click()
+            Equal(state.popup.editBox:GetText(), "/wild reset")
+            Equal(#state.messages, messageCount, "Selecting syntax does not report a clipboard copy")
+            Same(Wild.db, saved)
+            Equal(state.pending, "unapplied game setting")
+        end
+    end },
+    { "command icons and command hints are absent from configuration controls", function()
+        local Wild, state, _, _, _, Load = NewEnvironment()
+        for _, layout in pairs(state.layouts) do
+            for _, initializer in ipairs(layout.initializers) do
+                assert(initializer.data.buttonText ~= "/", "Use the Commands page instead of a command icon")
+                local tooltip = initializer.data.tooltip
+                if type(tooltip) == "string" then
+                    assert(not tooltip:find("/wild", 1, true), "Keep command syntax in the Commands page")
+                end
+            end
+        end
+        Load("Settings.lua")
+        local volume = Wild.CreateSettingsCanvas("Volume")
+        Equal(FindChild(state, volume, function(frame) return frame.kind == "Button" and frame:GetText() == "/" end), nil)
+    end },
     { "registers both native list and lazy canvas pages once without changing saved values", function()
         local Wild, state, _, _, Fire = NewEnvironment({ speed = { enabled = false } })
         Equal(state.root.name, "Wild")
-        Equal(#state.categories, 27)
+        Equal(#state.categories, 28)
         for _, page in ipairs({
             "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key",
             "Events", "Darkmoon Faire", "Saltheril's Soiree", "Containers",
@@ -522,7 +601,7 @@ local tests = {
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        Equal(#state.categories, 27)
+        Equal(#state.categories, 28)
         Equal(state.speedUpdates, 0)
         Equal(state.circleUpdates, 0)
     end },
@@ -540,7 +619,7 @@ local tests = {
         state.root = nil
         state.settings = {}
         loader.scripts.OnEvent(loader, "PLAYER_LOGIN")
-        Equal(#state.categories, originalCount + 27)
+        Equal(#state.categories, originalCount + 28)
         Equal(loader.events.PLAYER_LOGIN, nil)
     end },
     { "native feature controls and slash commands share saved settings and update functions", function()
@@ -553,7 +632,7 @@ local tests = {
         Equal(state.speedUpdates, 2)
         Equal(state.updates[#state.updates], "WILD_speed_enabled")
     end },
-    { "the intent bypass key defaults to Shift and its command reproduces the saved native choice", function()
+    { "the intent bypass key defaults to Shift and shares its value with the slash command", function()
         for _, mode in ipairs({ "retail", "forever" }) do
             local Wild, state, _, Setting = NewEnvironment(nil, nil, mode)
             local key = Setting("intentBypassModifier")
@@ -569,16 +648,6 @@ local tests = {
             assert(state.messages[#state.messages]:find("Shift, Ctrl, Alt, or None", 1, true))
             Wild.HandleSlashCommand("intents bypass")
             assert(state.messages[#state.messages]:find("ALT", 1, true))
-            local command
-            for _, initializer in ipairs(key.category.layout.initializers) do
-                if initializer.data.name == "Intent rule bypass key command" then command = initializer end
-            end
-            assert(command and command.data.buttonText == "/", "The bypass key has a command icon")
-            assert(command:GetTooltip():find("/wild intents bypass alt", 1, true))
-            key:SetValue("CTRL")
-            command.data.buttonClick()
-            Equal(state.popup.editBox:GetText(), "/wild intents bypass ctrl")
-            Equal(key:GetValue(), "CTRL")
             key:SetValueToDefault()
             Equal(key:GetValue(), "SHIFT")
             local _, _, _, SavedSetting = NewEnvironment({ intentBypassModifier = "NONE" }, nil, mode)
@@ -625,25 +694,6 @@ local tests = {
         Equal(input:HasFocus(), true)
         assert(state.messages[#state.messages]:find("0 or greater", 1, true))
     end },
-    { "the volume timeout command icon offers the saved value without running it", function()
-        local Wild, state, _, Setting = NewEnvironment()
-        local command
-        for _, initializer in ipairs(state.layouts.Volume.initializers) do
-            if initializer.data.name == "Auto-hide timeout command" then command = initializer end
-        end
-        assert(command, "The volume timeout has an associated command icon")
-        Equal(command.data.buttonText, "/")
-        Setting("volumeControl.autoHideDelay"):SetValue(2.5)
-        assert(command:GetTooltip():find("/wild volume timeout 2.5", 1, true))
-        Wild.SetSetting("volumeControl.autoHideDelay", 90.25)
-        assert(command:GetTooltip():find("/wild volume timeout 90.25", 1, true))
-        local saved, messages = Copy(Wild.db), #state.messages
-        command.data.buttonClick()
-        Equal(state.popup.editBox:GetText(), "/wild volume timeout 90.25")
-        Equal(state.popup.editBox:HasFocus(), true)
-        Equal(#state.messages, messages, "Manual copying is not reported as clipboard success")
-        Same(Wild.db, saved)
-    end },
     { "the volume canvas edits the same timeout without overwriting focused text on refresh", function()
         local Wild, state, _, Setting, _, Load = NewEnvironment()
         Load("Settings.lua")
@@ -659,33 +709,6 @@ local tests = {
         Wild.SetSetting("volumeControl.autoHideDelay", 0)
         panel:OnRefresh()
         Equal(input:GetText(), "0")
-    end },
-    { "the volume canvas command icon copies saved state rather than a focused draft", function()
-        local Wild, state, env, _, _, Load = NewEnvironment()
-        local lines = {}
-        env.GameTooltip = {
-            SetOwner = function() end,
-            AddLine = function(_, line) lines[#lines + 1] = line end,
-            Show = function() end,
-            Hide = function() end,
-        }
-        Load("Settings.lua")
-        local panel = Wild.CreateSettingsCanvas("Volume")
-        panel:OnRefresh()
-        local input = assert(FindChild(state, panel, function(frame) return frame.kind == "EditBox" end))
-        local command = assert(FindChild(state, panel, function(frame)
-            return frame.kind == "Button" and frame:GetText() == "/"
-        end))
-        input:SetText("9")
-        input:SetFocus()
-        Wild.HandleSlashCommand("volume timeout 2.5")
-        panel:OnRefresh()
-        Equal(input:GetText(), "9")
-        command.scripts.OnEnter(command)
-        Equal(lines[2], "/wild volume timeout 2.5")
-        command:Click()
-        Equal(state.popup.editBox:GetText(), "/wild volume timeout 2.5")
-        Equal(Wild.GetSetting("volumeControl.autoHideDelay"), 2.5)
     end },
     { "container controls share persistent defaults and independent per-ID choices", function()
         local Wild, state, _, Setting, _, Load = NewEnvironment({
@@ -781,27 +804,15 @@ local tests = {
         Equal(state.inboxUpdates, 1)
         Wild.HandleSlashCommand("inbox off")
         Equal(setting:GetValue(), false)
-
-        for _, initializer in ipairs(state.layouts.Mail.initializers) do
-            if initializer.data.name == "Wild mailbox command" then
-                assert(initializer:GetTooltip():find("/wild inbox off", 1, true))
-                initializer.data.buttonClick()
-                Equal(state.popup.editBox:GetText(), "/wild inbox off")
-                Equal(setting:GetValue(), false)
-                return
-            end
-        end
-        error("The Wild mailbox setting needs a command icon")
     end },
     { "the mail sort dropdown and its command change the same saved order", function()
         local Wild, state, _, Setting = NewEnvironment()
         local sort = Setting("mail.inboxSort")
         Equal(sort:GetValue(), "inbox")
 
-        local dropdown, command
+        local dropdown
         for _, initializer in ipairs(state.layouts.Mail.initializers) do
             if initializer.data.setting == sort then dropdown = initializer.data end
-            if initializer.data.name == "Attachment sort order command" then command = initializer end
         end
         Equal(assert(dropdown).kind, "Dropdown")
         local options = {}
@@ -811,9 +822,6 @@ local tests = {
         Equal(Wild.IsFeatureEnabled("inbox"), false, "Sorting does not enable the browser")
 
         Wild.HandleSlashCommand("inbox sort size")
-        assert(assert(command):GetTooltip():find("/wild inbox sort size", 1, true))
-        command.data.buttonClick()
-        Equal(state.popup.editBox:GetText(), "/wild inbox sort size")
         Equal(sort:GetValue(), "size")
         Wild.HandleSlashCommand("inbox sort invalid")
         Equal(sort:GetValue(), "size")
@@ -822,33 +830,21 @@ local tests = {
         Equal(Wild.GetSetting("mail.inboxSort"), "inbox")
     end },
     { "outgoing mail automation is a separate opt-in setting", function()
-        local Wild, state, _, Setting = NewEnvironment()
+        local Wild, _, _, Setting = NewEnvironment()
         local autoSend = Setting("mail.autoSend")
         Equal(autoSend:GetValue(), false)
         autoSend:SetValue(true)
         Equal(Wild.GetSetting("mail.autoSend"), true)
         Equal(Wild.GetSetting("mail.autoOpen"), false)
-        local command
-        for _, initializer in ipairs(state.layouts.Mail.initializers) do
-            if initializer.data.name == "Automatic Mail rules command" then command = initializer end
-        end
-        assert(assert(command):GetTooltip():find("/wild mail autosend on", 1, true))
-        command.data.buttonClick()
-        Equal(state.popup.editBox:GetText(), "/wild mail autosend on")
         Wild.HandleSlashCommand("mail autosend off")
         Equal(autoSend:GetValue(), false)
     end },
     { "keeping unread empty mail is configurable from native settings and chat", function()
-        local Wild, state, _, Setting = NewEnvironment()
+        local Wild, _, _, Setting = NewEnvironment()
         local keepUnread = Setting("mail.keepUnread")
         Equal(keepUnread:GetValue(), false)
         keepUnread:SetValue(true)
         Equal(Wild.GetSetting("mail.keepUnread"), true)
-        local command
-        for _, initializer in ipairs(state.layouts.Mail.initializers) do
-            if initializer.data.name == "Keep unread mail command" then command = initializer end
-        end
-        assert(assert(command):GetTooltip():find("/wild inbox keepunread on", 1, true))
         Wild.HandleSlashCommand("inbox keepunread off")
         Equal(keepUnread:GetValue(), false)
     end },
@@ -1358,16 +1354,12 @@ local tests = {
         Equal(state.opens, 1)
         Equal(env.WildSettingsFrame, nil)
     end },
-    { "the native landing page and command help contain no standalone entry points", function()
-        local Wild, state = NewEnvironment()
+    { "the native landing page contains no standalone entry points", function()
+        local _, state = NewEnvironment()
         for _, initializer in ipairs(state.layouts.Wild.initializers) do
             assert(initializer.data.buttonText ~= "Open Standalone Settings")
             assert(initializer.data.name ~= "Compare interfaces")
         end
-        Wild.HandleSlashCommand("help")
-        local help = table.concat(state.messages, "\n")
-        assert(help:find("/wild - Open WoW Settings > AddOns > Wild", 1, true))
-        assert(not help:find("Toggle settings window", 1, true))
     end },
     { "navigating an already open native panel does not discard pending game settings", function()
         local Wild, state = NewEnvironment()

@@ -53,7 +53,7 @@ Bank scanning covers:
 6. **Reagent bag always included by default.** Use `Wild.GetPlayerBags()` to get the correct bag list.
 
 The [configuration specification](../docs/configuration/spec.md) defines the
-player-facing contract for configuration, command hints, copying, and in-game
+player-facing contract for configuration, the command catalog, copying, and in-game
 help. Follow that contract when changing these surfaces.
 
 ## Intent / Rule Engine
@@ -135,39 +135,17 @@ To sell equipment whose upgrade ceiling is below your currently equipped gear, c
 
 ## Slash Commands
 
-Primary command: `/wild`
+`/wild` opens Wild settings. `/wild help` opens **Wild > Commands**, the
+alphabetical command catalog. Do not add command icons or command syntax to
+other control tooltips.
 
-```
-/wild                       — Open WoW Settings > AddOns > Wild
-/wild native [page]         — Open native WoW Settings; for example, /wild native speed
-/wild help                  — Print available commands
-/wild client                — Show the detected Retail or Forever mode
-/wild <feature> on|off      — Enable/disable a feature
-/wild <feature> <setting>   — Get or set a specific setting
-/wild bank run              — Manually trigger bank filter rules (while bank is open)
-/wild bank rules            — List configured filter rules
-/wild repair on|off         — Toggle auto-repair
-/wild repair guild on|off   — Toggle guild funds
-/wild loot on|off           — Toggle quick loot
-/wild containers            — Open container settings
-/wild containers default on|off — Set the default for newly discovered container IDs
-/wild containers add <id> [on|off] — Add an ID; disabled unless on is specified
-/wild containers <id> on|off — Change an ID's saved opening choice
-/wild containers list|scan  — List choices or rescan and retry containers
-/wild lfg on|off            — Toggle LFG quick apply
-/wild autoreply on|off      — Toggle Mythic+ whisper replies (Retail)
-/wild dialog on|off         — Toggle manual keyboard confirmation of popups, queues, and delve entry
-/wild dialog key SPACE      — Set a keyboard key (modifier chords such as CTRL-F2 also work)
-/wild dialog destroy on|off — Allow item destruction without typing DELETE
-/wild circle on|off         — Toggle center circle
-/wild circle size <n>       — Set circle size
-/wild circle opacity <n>    — Set circle opacity (0-100)
-/wild circle color <r> <g> <b> — Set circle color (0-1 floats)
-/wild circle offset <x> <y> — Set circle offset
-/wild reset                 — Reset all settings to defaults
-```
-
-Slash command parsing uses `ParseArgs` + `OnOff` helpers (see `SlashCommands.lua`).
+`SlashCommands.lua` owns both dispatch and catalog entries. Use
+`RegisterCommand` to declare the handler, each supported syntax form, and its
+description. Use `RegisterFeatureCommand` for simple on/off features. Include
+aliases, required inputs, and client restrictions where applicable. When you
+add a form to an existing handler, add its catalog entry in the same change.
+`Wild.GetCommandCatalog()` returns sorted copies of the syntax and description
+for each entry.
 
 ## Public API
 
@@ -230,7 +208,8 @@ Wild.FormatGold(copper)
 2. Add it to `Wild.toc` **before** `Settings.lua`.
 3. Add default values to the `defaults` table in `Core.lua`.
 4. Expose enable/disable and configuration via `Wild.*` functions.
-5. Add slash command handlers in `SlashCommands.lua`.
+5. Add slash commands and catalog entries for each player-facing setting,
+   action, or query in `SlashCommands.lua`.
 6. Add a native page in `NativeSettings.lua`, using standard Settings controls wherever possible. Use a canvas editor in `Settings.lua` only for richer controls.
 7. All state reads/writes go through `Wild.db`. Use shared setters and notify native controls and editors after directly changing rule or actor tables.
 

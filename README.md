@@ -6,7 +6,9 @@ call its public functions on the `Wild` table. It targets Retail 12.1.5
 (`120105`) and Forever 1.60.1 (`16001`) using the game's Lua 5.1 environment
 without addon libraries.
 
-Open **Settings > AddOns > Wild** with `/wild`. Use `/wild help` for commands.
+Open **Settings > AddOns > Wild** with `/wild`. Select **Commands** or enter
+`/wild help` to see the alphabetical command list. Click a command and press
+Ctrl+C to copy its syntax. Replace placeholders before you run it.
 Settings are stored in `WildDB`; the settings UI, slash commands, and public
 setters share that store.
 
@@ -164,21 +166,10 @@ Using Wild Mail stops Wild's automatic collection of incoming mail for the
 rest of that visit. Enable Wild Mail before you open a mailbox if you want to
 prevent collection from starting.
 
-| Command | Behavior |
-| --- | --- |
-| `/wild inbox` | Show the saved mailbox setting |
-| `/wild inbox on\|off` | Use Wild Mail or the standard mailbox |
-| `/wild inbox show\|hide` | Open Items or return to the standard mailbox for this visit |
-| `/wild inbox search [text]` | Open Items and apply a filter, or clear it if text is omitted |
-| `/wild inbox sort [inbox\|name\|sender\|size]` | Show or save the attachment sort order |
-| `/wild inbox select <message> on\|off` | Check or uncheck a loaded letter by its inbox number |
-| `/wild inbox open\|return\|delete [all\|selected]` | Run a bulk action. Omit the scope to use the current selection, or all loaded mail if none are checked. |
-| `/wild inbox keepunread [on\|off]` | Show or set whether bulk deletion keeps unread letters |
-| `/wild inbox read <message>` | Read a numbered letter in chat and mark it as read |
-| `/wild inbox take <message> <slot>` | Request one stack after reading its letter; hover over an icon for the mail and slot numbers |
-| `/wild mail on\|off` | Turn automatic collection of incoming mail on or off |
-| `/wild mail autosend [on\|off]` | Show or set whether Mail rules run on open |
-| `/wild mail run` | Run Mail rules at the open mailbox, even when the standard mailbox is in use |
+For example, `/wild inbox search Honey Cake` opens **Items** and filters the
+grid. Hover over an icon for its mail and slot numbers. To take slot 2 from
+letter 3, enter `/wild inbox read 3`, then `/wild inbox take 3 2`. The first
+command marks the letter as read. See **Commands** for all mailbox commands.
 
 Use `Wild.ShowInboxBrowser("Honey Cake")`, `Wild.ReadInboxMessage(3)`, and
 `Wild.TakeInboxAttachment(3, 2)` for the equivalent Lua calls. These return
@@ -206,15 +197,8 @@ stays available. The button uses the same green W as Wild's addon-list icon.
 Open **Settings > AddOns > Wild > Volume** with `/wild native volume`.
 **Auto-hide timeout (seconds)** sets the delay. Its number field accepts
 fractions and values above the slider's 30-second range. Set `0` to keep the
-panel open until you close it. The `/` command icon shows the command for the
-saved timeout. Click it to select the command, then press Ctrl+C to copy it.
-This does not run the command.
-
-| Command | Behavior |
-| --- | --- |
-| `/wild volume timeout` | Show the saved timeout |
-| `/wild volume timeout 2.5` | Hide the panel after 2.5 seconds without another interaction |
-| `/wild volume timeout 0` | Turn off panel auto-hide |
+panel open until you close it. For example, `/wild volume timeout 2.5` sets
+the delay to 2.5 seconds. Omit the number to see the saved delay.
 
 `Wild.SetSetting("volumeControl.autoHideDelay", 2.5)` uses the same saved value
 and updates an open panel immediately. It returns `true` for a finite number
@@ -254,16 +238,9 @@ exceptions before receiving an item. Only items the game identifies as loot
 containers in player bags are opened; adding an arbitrary item ID does not make
 Wild use that item.
 
-| Command | Behavior |
-| --- | --- |
-| `/wild containers default on` | Open and enable newly discovered IDs |
-| `/wild containers default off` | Discover new IDs but leave them disabled |
-| `/wild containers add 12345` | Save ID `12345` with auto-open disabled |
-| `/wild containers add 12345 on` | Add or update ID `12345` with auto-open enabled |
-| `/wild containers 12345 on` | Enable opening for that ID |
-| `/wild containers 12345 off` | Disable opening for that ID |
-| `/wild containers list` | Print saved IDs and their opening choices |
-| `/wild containers scan` | Rescan bags and retry IDs stopped by a safety timeout |
+For example, `/wild containers add 12345` saves ID `12345` with auto-open off.
+Enter `/wild containers 12345 on` to turn auto-open on for that ID. See
+**Commands** for all container commands.
 
 Opening waits during combat, casting, channeling, other looting, NPC
 interactions, and item-transfer windows such as a merchant, bank, mailbox, or
@@ -532,9 +509,9 @@ Volume fixtures cover opening without adjustments, interaction resets, held
 controls, cancellation, and shared timeout settings. A live client check must
 confirm slider dragging and panel layout.
 For the mailbox, [verify layout, selective collection, and sending in both clients](docs/mailbox/design.md#testing-strategy).
-Native settings fixtures cover inline numeric entry, limits, units, draft
-cancellation, and row reuse. Check number-field placement and scrolling in
-both clients.
+Native settings fixtures cover inline numeric entry, draft cancellation, row
+reuse, and alphabetical command discovery and copying. Check number-field
+placement and command list scrolling in both clients.
 
 ## Sources
 

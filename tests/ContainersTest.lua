@@ -611,8 +611,6 @@ local tests = {
         local count = #Wild.GetContainers()
         Wild.HandleSlashCommand("containers add invalid")
         Equal(#Wild.GetContainers(), count)
-        Wild.HandleSlashCommand("help")
-        assert(table.concat(state.messages, "\n"):find("/wild containers", 1, true))
     end },
     { "the opener loads before slash commands and native settings", function()
         local file = assert(io.open("Wild.toc", "r"))
