@@ -392,6 +392,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     Wild.UpdateScreenCenterCircle = function() state.circleUpdates = state.circleUpdates + 1 end
     Wild.UpdateCastHistory = function() state.castUpdates = state.castUpdates + 1 end
     Wild.UpdateSoireeAdvisor = function() state.soireeUpdates = state.soireeUpdates + 1 end
+    Wild.UpdateInboxBrowser = function() state.inboxUpdates = (state.inboxUpdates or 0) + 1 end
     Wild.UpdateVolumeControl = function() state.volumeUpdates = state.volumeUpdates + 1 end
     Wild.ShowSoireeAdvisor = function() state.soireeShows = (state.soireeShows or 0) + 1 end
     Wild.UpdateDialogKey = function() end
@@ -770,6 +771,27 @@ local tests = {
         Equal(#Wild.GetContainers(), 0)
         Wild.SetContainerAutoOpen(100, false)
         Equal(Wild.db.containers.items[100], false)
+    end },
+    { "native mail browser settings and slash commands share the saved choice", function()
+        local Wild, state, _, Setting = NewEnvironment()
+        local setting = Setting("mail.showInboxBrowser")
+        Equal(setting:GetValue(), false)
+        setting:SetValue(true)
+        Equal(Wild.IsFeatureEnabled("inbox"), true)
+        Equal(state.inboxUpdates, 1)
+        Wild.HandleSlashCommand("inbox off")
+        Equal(setting:GetValue(), false)
+
+        for _, initializer in ipairs(state.layouts.Mail.initializers) do
+            if initializer.data.name == "Mail browser command" then
+                assert(initializer:GetTooltip():find("/wild inbox off", 1, true))
+                initializer.data.buttonClick()
+                Equal(state.popup.editBox:GetText(), "/wild inbox off")
+                Equal(setting:GetValue(), false)
+                return
+            end
+        end
+        error("The mail browser setting needs a command icon")
     end },
     { "Soiree native controls slash commands and generic setters share the opt-in setting", function()
         local Wild, state, _, Setting = NewEnvironment()

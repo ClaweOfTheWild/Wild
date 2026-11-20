@@ -109,6 +109,40 @@ inventory total. The recipient's next complete inbox check replaces these
 estimates with the attachments the game shows. Wild hides expired inbox
 attachments and removes unverified sends from the results after 30 days.
 
+## Find and take an attachment
+
+Open a mailbox and click **Browse Mail** beside WoW's **Inbox**. Search by
+sender, subject, or attachment name. Select a message to read its text and
+see its attachments and enclosed money. Browsing and searching do not mark
+messages as read. Selecting a message marks only that message as read.
+
+Click **Take** next to an attachment to request that stack only. Other
+attachments and enclosed money stay in the inbox. Use the WoW inbox to take
+C.O.D. attachments and confirm the charge. The browser shows how many
+messages WoW has loaded and updates when the inbox changes.
+
+Use `/wild inbox on` or **Settings > AddOns > Wild > Mail > Show the mail
+browser automatically** to open the pane on each visit. This option starts
+off. Opening the pane stops Wild's automatic collection of incoming mail for
+that visit. If automatic collection is enabled, turn on automatic browser
+display before opening the mailbox to stop collection from starting. Outgoing
+mail rules do not change.
+
+| Command | Behavior |
+| --- | --- |
+| `/wild inbox` | Show the saved automatic display setting |
+| `/wild inbox on\|off` | Set automatic display |
+| `/wild inbox show\|hide` | Show or hide the browser for the current visit |
+| `/wild inbox search [text]` | Open the browser and apply a filter, or clear it if text is omitted |
+| `/wild inbox read <message>` | Read a message by its displayed number |
+| `/wild inbox take <message> <slot>` | Request one attachment from the selected message; use the numbers shown in the pane |
+
+Use `Wild.ShowInboxBrowser("Honey Cake")`, `Wild.ReadInboxMessage(3)`, and
+`Wild.TakeInboxAttachment(3, 2)` for the equivalent Lua calls. These return
+`true` when the request is made, or `false` with a warning. A successful take
+request is not confirmation from the game. Use `Wild.HideInboxBrowser()` to
+close the browser. The setting is `mail.showInboxBrowser`.
+
 ## Volume panel timeout
 
 Enable the green W button with `/wild volume on`. Left-click it to open the
@@ -425,6 +459,7 @@ lua tests\ContainersTest.lua
 lua tests\ForeverCompatibilityTest.lua
 lua tests\RetailCompatibilityTest.lua
 lua tests\IntentLoggingTest.lua
+lua tests\InboxBrowserTest.lua
 lua tests\SoireePlannerTest.lua
 lua tests\SoireeAdvisorTest.lua
 lua tests\NativeSettingsTest.lua
@@ -437,14 +472,16 @@ totals, history retention, and unchanged vendor intervals. They also cover
 container discovery and event sequencing, plus the Soiree API shapes and manual
 fallback. Mail fixtures cover native send-field preparation and full Forever
 recipient names. Inventory fixtures cover confirmed sends, incomplete inbox
-data, and storage refreshes. WoW APIs are simulated because they are
-unavailable outside the client.
+data, and storage refreshes. Browser fixtures cover search, selective reading,
+single-attachment requests, and collection interlocks. WoW APIs are simulated
+because they are unavailable outside the client.
 A live Retail and Forever check must confirm merchant refusals, full banks,
 mail acknowledgments, deletion prompts, and displayed results. The local
 fixtures do not establish live server behavior or complete Soiree reward data.
 Volume fixtures cover opening without adjustments, interaction resets, held
 controls, cancellation, and shared timeout settings. A live client check must
 confirm slider dragging and panel layout.
+For the mail browser, [verify layout and selective collection in both clients](docs/mailbox/design.md#testing-strategy).
 Native settings fixtures cover inline numeric entry, limits, units, draft
 cancellation, and row reuse. Check number-field placement and scrolling in
 both clients.

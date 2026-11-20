@@ -542,7 +542,14 @@ local function CreateMailPage()
     local category = AddPage("Mail")
     AddCheckbox(category, "mail.autoOpen", "Auto-open mailbox",
         "Take items and gold from incoming mail automatically when the mailbox opens. " ..
-        "Hold the intent rule bypass key until the mailbox opens to skip collection for that visit.", "mail")
+        "Hold the intent rule bypass key until the mailbox opens to skip collection for that visit. " ..
+        "Opening Browse Mail stops any further Wild collection for the visit.", "mail")
+    local browser = AddCheckbox(category, "mail.showInboxBrowser", "Show the mail browser automatically",
+        "Show loaded messages beside the Inbox tab. Search by sender, subject, or attachment name. " ..
+        "This skips Wild's automatic collection of incoming mail for the visit. It does not change send rules.", "inbox")
+    AddSettingCommand(category, "mail.showInboxBrowser", "Mail browser command", function()
+        return "/wild inbox " .. (Wild.IsFeatureEnabled("inbox") and "on" or "off")
+    end, browser)
 end
 
 local function CreateLootPage()

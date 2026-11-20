@@ -11,3 +11,4 @@ each requirement is met.
 | Capability | Purpose |
 | --- | --- |
 | [Configuration](configuration/index.md) | Understand settings, use slash commands, and get help without leaving the game |
+| [Inbox browsing](mailbox/index.md) | Find and take individual attachments from the current character's mailbox |

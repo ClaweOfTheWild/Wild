@@ -6,10 +6,11 @@ local ADDON_NAME, Wild = ...
 -- ============================================================
 
 local function AutoOpenMail(visit)
-    if not Wild.db.mail or not Wild.db.mail.autoOpen then return end
+    if not Wild.db.mail or not Wild.db.mail.autoOpen
+        or visit.inboxBrowserOpened or Wild.IsFeatureEnabled("inbox") then return end
 
     local function OpenNext()
-        if visit.closed then return end
+        if visit.closed or visit.inboxBrowserOpened then return end
         local numItems = GetInboxNumItems()
         if numItems == 0 then return end
         AutoLootMailItem(1)

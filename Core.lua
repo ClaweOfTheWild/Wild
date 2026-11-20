@@ -208,6 +208,7 @@ local defaults = {
     },
     mail = {
         autoOpen = false,
+        showInboxBrowser = false,
     },
     volumeControl = {
         enabled = false,
@@ -754,6 +755,7 @@ local FEATURES = {
     auctionhouse     = { key = "auctionHouse.enabled" },
     craftingorders   = { key = "craftingOrders.enabled" },
     mail             = { key = "mail.autoOpen" },
+    inbox            = { key = "mail.showInboxBrowser", onToggle = function() Wild.UpdateInboxBrowser() end },
     dungeonbar       = { key = "dungeonBar.enabled" },
     autoreply        = { key = "autoReply.enabled" },
     autoaccept       = { key = "quests.autoAccept" },
@@ -921,6 +923,7 @@ function Wild.SetSetting(key, value, source)
     SetNestedValue(Wild.db, key, value)
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
+    if (key == "mail" or key == "mail.showInboxBrowser") and Wild.UpdateInboxBrowser then Wild.UpdateInboxBrowser() end
     if (key == "volumeControl" or key:match("^volumeControl%.")) and Wild.UpdateVolumeControl then
         Wild.UpdateVolumeControl()
     end
@@ -962,6 +965,7 @@ function Wild.ResetSettings()
     if Wild.UpdateVolumeControl then Wild.UpdateVolumeControl() end
     if Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
+    if Wild.UpdateInboxBrowser then Wild.UpdateInboxBrowser() end
     if Wild.SetQuickLoot then Wild.SetQuickLoot(Wild.db.lootQuickLoot) end
     Wild.NotifySettingsChanged()
     print("|cff00ccffWild:|r All settings reset to defaults.")

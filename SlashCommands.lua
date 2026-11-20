@@ -51,6 +51,7 @@ local FEATURE_NAMES = {
     tooltip          = "Tooltip Enhancements",
     auctionhouse     = "Auction House Defaults",
     craftingorders   = "Crafting Orders Defaults",
+    inbox            = "Automatic Mail Browser",
     dungeonbar       = "Dungeon Bar",
     autoreply        = "Mythic+ Auto-Reply",
     autoaccept       = "Quest Auto-Accept",
@@ -185,6 +186,10 @@ subcommands.help = function()
     Print("/wild log clear — Clear saved actions, warnings, and diagnostics")
     print(" ")
     Print("/wild find <name> — Search items across all characters")
+    Print("/wild inbox on|off|show|hide - Control the searchable mail browser")
+    Print("/wild inbox search [text] - Filter by sender, subject, or attachment")
+    Print("/wild inbox read <message> - View a numbered result and mark it as read")
+    Print("/wild inbox take <message> <slot> - Take one attachment from the selected message")
     Print("/wild datastore — Show cross-character datastore status")
     Print("/wild datastore refresh — Re-scan current character's bags")
     print(" ")
@@ -207,7 +212,7 @@ subcommands.status = function()
         "circle", "casthistory", "repair", "loot", "autoloot",
         "bank", "bankcharacter", "bankguild",
         "reputation", "delve", "tooltip",
-        "auctionhouse", "craftingorders", "dungeonbar", "autoreply", "autoaccept", "autohandin", "volume",
+        "auctionhouse", "craftingorders", "inbox", "dungeonbar", "autoreply", "autoaccept", "autohandin", "volume",
         "durabilityequipped", "durabilitytotal", "durabilitybags",
         "speed", "dialog", "soiree",
     }
@@ -283,6 +288,23 @@ end
 subcommands.speed = function(args)
     if HandleGenericFeature("speed", args) then return end
     PrintWarn("Usage: /wild speed [on|off]")
+end
+
+subcommands.inbox = function(args, message)
+    local action = args[1] and args[1]:lower()
+    if action == "search" then
+        Wild.ShowInboxBrowser(message:match("^%S+%s+%S+%s*(.*)$") or "")
+    elseif action == "show" and #args == 1 then
+        Wild.ShowInboxBrowser()
+    elseif action == "hide" and #args == 1 then
+        Wild.HideInboxBrowser()
+    elseif action == "read" and #args == 2 and args[2]:match("^%d+$") then
+        Wild.ReadInboxMessage(tonumber(args[2]))
+    elseif action == "take" and #args == 3 and args[2]:match("^%d+$") and args[3]:match("^%d+$") then
+        Wild.TakeInboxAttachment(tonumber(args[2]), tonumber(args[3]))
+    elseif #args > 1 or not HandleGenericFeature("inbox", args) then
+        PrintWarn("Use /wild help for inbox commands. Read and take require the numbers shown in Browse Mail.")
+    end
 end
 
 subcommands.soiree = function(args)
@@ -938,7 +960,7 @@ function Wild.HandleSlashCommand(msg)
     local cmd = tremove(args, 1):lower()
 
     if subcommands[cmd] then
-        subcommands[cmd](args)
+        subcommands[cmd](args, msg)
     elseif Wild.FEATURES[cmd] then
         HandleGenericFeature(cmd, args)
     else
