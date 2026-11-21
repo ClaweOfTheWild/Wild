@@ -137,7 +137,7 @@ local tests = {
         local Wild, state, _, Put = NewEnvironment("forever")
         for _, bag in ipairs({ 6, 12, 13, 14 }) do Put(bag, bag == 6 and 1 or bag - 10) end
         Wild.SnapshotBank()
-        local snapshot = Wild.db.datastore.characters[Wild.GetCharKey()].bank
+        local snapshot = Wild.GetClientData().datastore.characters[Wild.GetCharKey()].bank
         local count = 0
         for _, item in ipairs(snapshot) do count = count + item.count end
         Equal(count, 10)
@@ -182,7 +182,7 @@ local tests = {
         local Wild, _, _, Put = NewEnvironment("forever")
         Put(-1, 5)
         Wild.SnapshotBags()
-        local snapshot = Wild.db.datastore.characters[Wild.GetCharKey()].bags
+        local snapshot = Wild.GetClientData().datastore.characters[Wild.GetCharKey()].bags
         Equal(#snapshot, 1)
         Equal(snapshot[1].bag, -1)
         Equal(snapshot[1].count, 5)
@@ -190,14 +190,15 @@ local tests = {
     { "inaccessible banks do not replace saved snapshots with empty data", function()
         local Wild, state = NewEnvironment("forever")
         local previous = { { itemID = 100, count = 7 } }
-        Wild.db.datastore.warband.bank = previous
-        Wild.db.datastore.warband.updated = 77
+        local datastore = Wild.GetClientData().datastore
+        datastore.warband.bank = previous
+        datastore.warband.updated = 77
         Wild.SnapshotWarbandBank()
-        Equal(Wild.db.datastore.warband.bank, previous)
-        Equal(Wild.db.datastore.warband.updated, 77)
+        Equal(datastore.warband.bank, previous)
+        Equal(datastore.warband.updated, 77)
         state.bankTypes[0] = false
         local character = { bank = previous, bankUpdated = 77 }
-        Wild.db.datastore.characters[Wild.GetCharKey()] = character
+        datastore.characters[Wild.GetCharKey()] = character
         Wild.SnapshotBank()
         Equal(character.bank, previous)
         Equal(character.bankUpdated, 77)
@@ -207,9 +208,10 @@ local tests = {
         state.bankTypes[2] = true
         Put(23, 7)
         Wild.SnapshotWarbandBank()
-        Equal(#Wild.db.datastore.warband.bank, 1)
-        Equal(Wild.db.datastore.warband.bank[1].bag, 23)
-        Equal(Wild.db.datastore.warband.bank[1].count, 7)
+        local bank = Wild.GetClientData().datastore.warband.bank
+        Equal(#bank, 1)
+        Equal(bank[1].bag, 23)
+        Equal(bank[1].count, 7)
     end },
     { "Forever actor matching and inventory keys preserve first and last names", function()
         local Wild, state = NewEnvironment("forever")

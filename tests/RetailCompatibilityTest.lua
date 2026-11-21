@@ -6,7 +6,14 @@ local function Equal(actual, expected, message)
         ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
 end
 
-local function NewEnvironment(mode)
+local function Copy(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for key, child in pairs(value) do copy[key] = Copy(child) end
+    return copy
+end
+
+local function NewEnvironment(mode, saved, build)
     local link = "|cff0070dd|Hitem:100::::::::90:::::1:1001|h[Test armor]|h|r"
     local state = {
         link = link, queries = {}, bags = {}, equipment = {}, guild = {}, logs = {},
@@ -16,7 +23,6 @@ local function NewEnvironment(mode)
         tooltipText = {}, chat = {},
     }
     local Wild = {
-        db = { intents = {}, advanced = {} },
         GetPlayerBags = function() return { 0, 5 } end,
         GetEffectiveSellPrice = function() return 100 end,
         Log = function(_, message) state.logs[#state.logs + 1] = message end,
@@ -24,6 +30,13 @@ local function NewEnvironment(mode)
     local env = setmetatable({
         WOW_PROJECT_ID = mode == "forever" and 18 or 1,
         WOW_PROJECT_MAINLINE = 1, WOW_PROJECT_CAMELOT = 18,
+        WildDB = saved,
+        GetBuildInfo = function()
+            if mode == "forever" then return "1.60.1", "70755", "", 16001 end
+            if build then return "12.1.6", build, "", 120106 end
+            return "12.1.5", "70391", "", 120105
+        end,
+        wipe = function(tbl) for key in pairs(tbl) do tbl[key] = nil end end,
         Enum = {
             BagIndex = {
                 Characterbanktab = -2, ReagentBag = 5,
@@ -171,6 +184,7 @@ local function NewEnvironment(mode)
             if frame.events[event] and frame.OnEvent then frame:OnEvent(event, ...) end
         end
     end
+    Fire("ADDON_LOADED", "Wild")
     return Wild, state, Item, Fire, env
 end
 
@@ -249,7 +263,7 @@ local tests = {
         Fire("GUILDBANKFRAME_OPENED")
         state.guild[1] = { Item(6) }
         Fire("GUILDBANKBAGSLOTS_CHANGED")
-        local datastore = Wild.db.datastore
+        local datastore = Wild.GetClientData().datastore
         local character = datastore.characters["Test-Realm"]
         Equal(#character.bags, 2)
         Equal(character.bags[2].bag, 5)
@@ -264,6 +278,57 @@ local tests = {
         Equal(datastore.warband.bank[1].count, 5)
         Equal(datastore.guilds["Test Guild-Realm"].bank[1].count, 6)
         Equal(#state.queries, 5)
+    end },
+    { "inventory and confirmed mail stay with their client when the saved file is copied", function()
+        local retail, state, Item, Fire, env = NewEnvironment()
+        retail.SetSetting("includeReagentBag", false)
+        retail.db.intents[1] = { action = "mail", recipient = "Alt-Realm" }
+        state.bags[0], state.bags[12] = { Item(9) }, { Item(3) }
+        retail.SnapshotBags()
+        retail.SnapshotWarbandBank()
+        Fire("MAIL_SHOW")
+        state.sent = { Item(7) }
+        env.SendMail("Alt", "Saved send", "")
+        Fire("MAIL_SEND_SUCCESS")
+
+        local forever, other, OtherItem, FireOther = NewEnvironment("forever", Copy(retail.db))
+        Equal(forever.GetSetting("includeReagentBag"), false)
+        Equal(forever.db.intents[1].recipient, "Alt-Realm")
+        Equal(#forever.FindItems("armor"), 0)
+        Equal(#forever.GetItemEntries(100, "bags", "Test-Realm"), 0)
+        other.bags[0] = { OtherItem(2) }
+        forever.SnapshotBags()
+        Equal(forever.GetItemTotal(100), 2)
+
+        other.character = "Alt"
+        FireOther("MAIL_SHOW")
+        FireOther("MAIL_INBOX_UPDATE")
+        local reloaded = NewEnvironment("retail", Copy(forever.db), "70400")
+        local total, _, sent = reloaded.GetItemTotal(100)
+        Equal(total, 12, "Retail must retain its own counts across a patch and ignore Forever's")
+        Equal(#sent, 1)
+        Equal(sent[1].count, 7)
+
+        forever.ResetSettings()
+        Equal(forever.GetItemTotal(100), 0)
+        local afterReset = NewEnvironment("retail", Copy(forever.db))
+        Equal(afterReset.GetItemTotal(100), 12, "Reset on a different client must not remove Retail observations")
+    end },
+    { "untagged inventory and unknown data formats are preserved without being used", function()
+        local item = { itemID = 100, name = "Test armor", count = 9 }
+        local old = { characters = { ["Test-Realm"] = { bags = { item } } } }
+        local future = { datastore = old }
+        local Wild, state, Item = NewEnvironment("retail", {
+            datastore = old, clientData = { retail = { [2] = future } },
+        })
+        Equal(#Wild.FindItems("armor"), 0)
+        state.bags[0] = { Item(3) }
+        Wild.SnapshotBags()
+        Equal(Wild.GetItemTotal(100), 3)
+        Equal(Wild.db.legacyClientData[1].datastore.characters["Test-Realm"].bags[1].count, 9)
+        Wild.ResetSettings()
+        Equal(Wild.db.clientData.retail[2], future)
+        Equal(Wild.db.legacyClientData[1].datastore, old)
     end },
     { "inventory keeps alt bags, reagent bags excluded from rules, and equipped items", function()
         local Wild, state, Item, Fire = NewEnvironment()
@@ -323,7 +388,6 @@ local tests = {
     end },
     { "only acknowledged sends appear, even for an unvisited recipient and after closing mail", function()
         local Wild, state, Item, Fire, env = NewEnvironment()
-        Fire("ADDON_LOADED", "Wild")
         Wild.db.tooltip.lines = { crossCharCount = "always" }
         Fire("MAIL_SHOW")
         state.sent = { Item(3) }
@@ -403,7 +467,6 @@ local tests = {
     end },
     { "item tooltips show mailbox counts when the client supplies only the item ID", function()
         local Wild, state, Item, Fire, env = NewEnvironment()
-        Fire("ADDON_LOADED", "Wild")
         Wild.db.tooltip.lines = { crossCharCount = "always" }
         Fire("MAIL_SHOW")
         state.inbox = { { items = { Item(6) }, attachmentCount = 1, daysLeft = 5 } }

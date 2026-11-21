@@ -91,6 +91,20 @@ clients' `WTF` folders or install a second Wild copy over the junction.
 Deleting or editing files through either addon path changes the master too;
 the junction is not a backup.
 
+### Saved data
+
+Wild keeps settings and rules in the existing `SavedVariables\Wild.lua` file.
+Inventory snapshots, sent-mail estimates, and per-item container choices
+are stored separately in that file by client family (`retail` or `forever`).
+Normal client updates do not clear them. If you copy the file to the other
+client, Wild uses the copied settings and rules but ignores the other
+client's item records.
+
+On the first load after this change, Wild archives older item records that
+have no client tag. It does not guess where they came from. Sign in on each
+character and visit its bank and mailbox to rebuild the active records.
+Use `/wild datastore status` to see which client's inventory Wild is using.
+
 ## Cross-character inventory
 
 Open `/wild native tooltips` and set **Cross-Character Count** to **Always** or
@@ -240,9 +254,15 @@ and open them automatically when safe.
 
 Use **Edit Container List**, or the **Containers > Container List** child page,
 to change each item's checkbox. Checked items open; unchecked items stay
-unopened. Each saved choice applies to that item ID across characters and
-survives reloads. Changing the discovery default never changes existing choices:
-an individually enabled container still opens when the discovery default is off.
+unopened. Each saved choice applies to that item ID across characters on the
+same client and survives reloads. Changing the discovery default never changes
+existing choices: an individually enabled container still opens when the
+discovery default is off.
+
+Use `/wild containers legacy` to review container choices archived from an
+older file with no client tag. An archived ID starts disabled when Wild finds
+it in your bags, even if the discovery default is on. To use an old choice,
+set it for this client by item ID or change its checkbox after discovery.
 
 **Add by Item ID** saves an ID with auto-open disabled, even if you do not own
 the container yet and the discovery default is on. This lets you configure
@@ -265,8 +285,9 @@ change. An open loot window can remain under your control beyond this timeout.
 The shared **Include reagent bag** setting applies to discovery and item selection.
 
 The native page's Defaults restore the discovery default without clearing the
-list or changing per-item choices. The explicit `/wild reset` clears the list
-along with Wild's other settings; later bag scans rediscover items disabled.
+list or changing per-item choices. The explicit `/wild reset` resets settings
+and clears this client's container list and inventory records. It preserves
+other clients' records and the archive. Later bag scans rediscover items disabled.
 
 ### Container Lua API
 
@@ -283,6 +304,8 @@ advance. `Wild.GetSetting("containers.items.12345")` reads its boolean choice;
 `Wild.SetSetting("containers.items.12345", true)` uses the same per-ID setter.
 IDs must be whole numbers from `1` to `2147483647`. Names load asynchronously;
 an unknown name is displayed as its item ID without changing the saved choice.
+Failed background lookups do not print warnings in chat. Wild still warns if
+an item ID fails to load when you set its choice directly.
 
 ## Plan a Saltheril's Soiree week
 

@@ -11,13 +11,15 @@ local function Copy(value)
     return result
 end
 
-local function NewEnvironment(saved, coreOnly)
+local function NewEnvironment(saved, coreOnly, mode)
     local state = {
         frames = {}, bags = { [0] = {}, [5] = {} }, uses = {}, timers = {},
         messages = {}, logs = {}, requested = {}, uncached = {}, now = 100, bagReads = 0,
     }
     local env = setmetatable({
         WildDB = saved,
+        WOW_PROJECT_ID = mode == "forever" and 18 or 1,
+        WOW_PROJECT_MAINLINE = 1, WOW_PROJECT_CAMELOT = 18,
         SlashCmdList = {},
         tremove = table.remove,
         Enum = { BagIndex = { ReagentBag = 5 } },
@@ -138,7 +140,7 @@ local tests = {
     { "new containers default to not opening", function()
         local Wild = NewEnvironment(nil, true)
         Equal(Wild.db.containers.autoOpenNew, false)
-        Equal(next(Wild.db.containers.items), nil)
+        Equal(next(Wild.GetSetting("containers.items")), nil)
         Equal(Wild.GetDefaultSetting("containers.autoOpenNew"), false)
     end },
     { "disabled discovery remembers unique loot containers without using other items", function()
@@ -148,9 +150,9 @@ local tests = {
         Put(0, 3, 999, 1, false)
         Put(5, 1, 200)
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(Wild.db.containers.items[100], false)
-        Equal(Wild.db.containers.items[200], false)
-        Equal(Wild.db.containers.items[999], nil)
+        Equal(Wild.GetSetting("containers.items.100"), false)
+        Equal(Wild.GetSetting("containers.items.200"), false)
+        Equal(Wild.GetSetting("containers.items.999"), nil)
         Equal(#state.uses, 0)
         local items = Wild.GetContainers()
         Equal(#items, 2)
@@ -158,15 +160,15 @@ local tests = {
         Equal(items[1].autoOpen, false)
         Equal(items[2].itemID, 200)
         items[1].autoOpen = true
-        Equal(Wild.db.containers.items[100], false, "List results are not a second configuration store")
+        Equal(Wild.GetSetting("containers.items.100"), false, "List results are not a second configuration store")
     end },
     { "the enabled default saves every discovery before opening one container", function()
         local Wild, state, Fire, Put = NewEnvironment({ containers = { autoOpenNew = true } })
         Put(0, 1, 100)
         Put(5, 1, 200)
         state.onUse = function()
-            Equal(Wild.db.containers.items[100], true)
-            Equal(Wild.db.containers.items[200], true)
+            Equal(Wild.GetSetting("containers.items.100"), true)
+            Equal(Wild.GetSetting("containers.items.200"), true)
         end
         Fire("PLAYER_ENTERING_WORLD")
         Equal(#state.uses, 1)
@@ -175,13 +177,15 @@ local tests = {
     { "saved per-item choices override either discovery default", function()
         for _, default in ipairs({ false, true }) do
             local Wild, state, Fire, Put = NewEnvironment({
-                containers = { autoOpenNew = default, items = { [100] = false, [200] = true } },
+                containers = { autoOpenNew = default },
             })
+            assert(Wild.SetContainerAutoOpen(100, false))
+            assert(Wild.SetContainerAutoOpen(200, true))
             Put(0, 1, 100)
             Put(0, 2, 200)
             Fire("PLAYER_ENTERING_WORLD")
-            Equal(Wild.db.containers.items[100], false)
-            Equal(Wild.db.containers.items[200], true)
+            Equal(Wild.GetSetting("containers.items.100"), false)
+            Equal(Wild.GetSetting("containers.items.200"), true)
             Equal(#state.uses, 1)
             Equal(state.uses[1].itemID, 200)
         end
@@ -191,17 +195,17 @@ local tests = {
         Put(0, 1, 100)
         Fire("PLAYER_ENTERING_WORLD")
         Wild.SetSetting("containers.autoOpenNew", true)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
         Equal(#state.uses, 0)
         Put(0, 2, 200)
         Fire("BAG_UPDATE_DELAYED")
-        Equal(Wild.db.containers.items[200], true)
+        Equal(Wild.GetSetting("containers.items.200"), true)
         Equal(state.uses[1].itemID, 200)
         Wild.SetSetting("containers.autoOpenNew", false)
         Put(0, 3, 300)
         Fire("BAG_UPDATE_DELAYED")
-        Equal(Wild.db.containers.items[200], true)
-        Equal(Wild.db.containers.items[300], false)
+        Equal(Wild.GetSetting("containers.items.200"), true)
+        Equal(Wild.GetSetting("containers.items.300"), false)
     end },
     { "an ID can be disabled before the container is ever received", function()
         local Wild, state, Fire, Put = NewEnvironment({ containers = { autoOpenNew = true } })
@@ -210,7 +214,7 @@ local tests = {
         Fire("PLAYER_ENTERING_WORLD")
         Put(0, 1, 100)
         Fire("BAG_UPDATE_DELAYED")
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
         Equal(#state.uses, 0)
     end },
     { "enabling a known item works while the discovery default remains off", function()
@@ -246,14 +250,66 @@ local tests = {
         assert(state.bagReads > 0, "Bag changes still discover containers while opening is off")
     end },
     { "choices survive reload without being replaced by defaults", function()
-        local Wild = NewEnvironment({ containers = { autoOpenNew = true, items = { [100] = false, [200] = true } } })
+        local Wild = NewEnvironment({ containers = { autoOpenNew = true } })
+        assert(Wild.SetContainerAutoOpen(100, false))
+        assert(Wild.SetContainerAutoOpen(200, true))
         local reloaded, state, Fire, Put = NewEnvironment(Copy(Wild.db))
         Put(0, 1, 100)
         Put(0, 2, 200)
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(reloaded.db.containers.items[100], false)
-        Equal(reloaded.db.containers.items[200], true)
+        Equal(reloaded.GetSetting("containers.items.100"), false)
+        Equal(reloaded.GetSetting("containers.items.200"), true)
         Equal(state.uses[1].itemID, 200)
+    end },
+    { "copied container choices do not trigger lookups or opens in the other client", function()
+        local retail = NewEnvironment()
+        assert(retail.SetSetting("containers", { autoOpenNew = false, items = { [100] = true, [200] = false } }))
+        local forever, state, Fire, Put = NewEnvironment(Copy(retail.db), nil, "forever")
+        state.uncached[100] = true
+        Fire("PLAYER_ENTERING_WORLD")
+        Equal(state.requested[100], nil, "Do not request a saved ID from the other client")
+        Equal(forever.GetSetting("containers.items.100"), nil)
+        state.uncached[100] = nil
+        Put(0, 1, 100)
+        Fire("BAG_UPDATE_DELAYED")
+        Equal(forever.GetSetting("containers.items.100"), false)
+        Equal(#state.uses, 0)
+        assert(forever.SetSetting("containers.items", { [200] = true, [300] = true }))
+        local returned, other, EnterRetail = NewEnvironment(Copy(forever.db))
+        other.uncached[300] = true
+        EnterRetail("PLAYER_ENTERING_WORLD")
+        Equal(other.requested[300], nil)
+        Equal(returned.GetSetting("containers").items[100], true)
+        Equal(returned.GetSetting("containers").items[200], false)
+        Equal(returned.GetSetting("containers.items.300"), nil)
+    end },
+    { "untagged choices can be reviewed and do not open containers even with discovery on", function()
+        local Wild, state, Fire, Put = NewEnvironment({
+            containers = { autoOpenNew = true, items = { [100] = true, [200] = false, [300] = true } },
+        }, nil, "forever")
+        state.uncached[300] = true
+        Equal(#Wild.GetContainers(), 0)
+        Wild.HandleSlashCommand("containers legacy")
+        assert(table.concat(state.messages, "\n"):find("300", 1, true))
+        Equal(state.requested[300], nil)
+        Put(0, 1, 100)
+        Put(0, 2, 200)
+        Fire("PLAYER_ENTERING_WORLD")
+        Equal(state.requested[300], nil)
+        Equal(#state.uses, 0)
+        Equal(Wild.GetSetting("containers.items.100"), false)
+        Equal(Wild.GetSetting("containers.items.200"), false)
+        local archived = Wild.GetLegacyContainerChoices()
+        Equal(archived[100], true)
+        Equal(archived[200], false)
+        assert(Wild.SetContainerAutoOpen(100, true))
+        Equal(state.uses[1].itemID, 100)
+        local reloaded = NewEnvironment(Copy(Wild.db), nil, "forever")
+        Equal(reloaded.GetSetting("containers.items.100"), true)
+        Equal(#reloaded.db.legacyClientData, 1, "Reload must not rearchive migrated choices")
+        reloaded.ResetSettings()
+        Equal(#reloaded.GetContainers(), 0)
+        Equal(reloaded.GetLegacyContainerChoices()[200], false)
     end },
     { "invalid IDs and nonboolean choices are rejected with a warning", function()
         local Wild, state = NewEnvironment()
@@ -263,7 +319,7 @@ local tests = {
             Equal(#state.messages, before + 1)
         end
         Equal(Wild.SetContainerAutoOpen(100, "off"), false)
-        Equal(next(Wild.db.containers.items), nil)
+        Equal(next(Wild.GetSetting("containers.items")), nil)
     end },
     { "only the shared player-bag selection is scanned", function()
         local Wild, state, Fire, Put = NewEnvironment({ includeReagentBag = false })
@@ -271,12 +327,12 @@ local tests = {
         Put(5, 1, 200)
         Put(12, 1, 300)
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(Wild.db.containers.items[100], false)
-        Equal(Wild.db.containers.items[200], nil)
-        Equal(Wild.db.containers.items[300], nil)
+        Equal(Wild.GetSetting("containers.items.100"), false)
+        Equal(Wild.GetSetting("containers.items.200"), nil)
+        Equal(Wild.GetSetting("containers.items.300"), nil)
         Wild.SetSetting("includeReagentBag", true)
         Fire("BAG_UPDATE_DELAYED")
-        Equal(Wild.db.containers.items[200], false)
+        Equal(Wild.GetSetting("containers.items.200"), false)
         Equal(#state.uses, 0)
     end },
     { "combat still discovers containers and opening resumes after combat", function()
@@ -284,7 +340,7 @@ local tests = {
         state.combat = true
         Put(0, 1, 100)
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Equal(#state.uses, 0)
         state.combat = false
         Fire("PLAYER_REGEN_ENABLED")
@@ -295,7 +351,7 @@ local tests = {
         local item = Put(0, 1, 100)
         item.isLocked = true
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Equal(#state.uses, 0)
         item.isLocked = false
         Fire("ITEM_UNLOCKED", 0, 1)
@@ -308,11 +364,11 @@ local tests = {
         Fire("PLAYER_ENTERING_WORLD")
         Fire("BAG_UPDATE_DELAYED")
         Equal(state.requested[100], 1)
-        Equal(Wild.db.containers.items[100], nil)
+        Equal(Wild.GetSetting("containers.items.100"), nil)
         Equal(#state.uses, 0)
         state.uncached[100], item.hasLoot = nil, true
         Fire("ITEM_DATA_LOAD_RESULT", 100, true)
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Equal(#state.uses, 1)
     end },
     { "synchronous item loading does not lose the event needed to discover a container", function()
@@ -326,7 +382,7 @@ local tests = {
         end
         Fire("PLAYER_ENTERING_WORLD")
         Equal(state.requested[100], 1)
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Equal(#state.uses, 1)
     end },
     { "preconfigured IDs request missing names and preserve failed-load choices", function()
@@ -335,9 +391,26 @@ local tests = {
         Wild.SetContainerAutoOpen(100, false)
         Equal(state.requested[100], 1)
         Fire("ITEM_DATA_LOAD_RESULT", 100, false)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
         assert(state.messages[#state.messages]:find("100", 1, true))
         Equal(#state.uses, 0)
+    end },
+    { "background lookup failures preserve choices without warning in chat", function()
+        local Wild = NewEnvironment()
+        assert(Wild.SetContainerAutoOpen(100, false))
+        local reloaded, state, Fire = NewEnvironment(Copy(Wild.db))
+        state.uncached[100] = true
+        Fire("PLAYER_ENTERING_WORLD")
+        Equal(state.requested[100], 1)
+        Fire("ITEM_DATA_LOAD_RESULT", 100, false)
+        Equal(#state.messages, 0)
+        assert(state.logs[#state.logs]:find("100", 1, true))
+        Equal(reloaded.GetSetting("containers.items.100"), false)
+        assert(reloaded.SetContainerAutoOpen(100, true))
+        Equal(state.requested[100], 2, "An explicit edit can retry a failed lookup")
+        Fire("ITEM_DATA_LOAD_RESULT", 100, false)
+        assert(state.messages[#state.messages]:find("100", 1, true))
+        Equal(reloaded.GetSetting("containers.items.100"), true)
     end },
     { "cooldowns wait for a cooldown update instead of polling", function()
         local _, state, Fire, Put = NewEnvironment({ containers = { autoOpenNew = true } })
@@ -391,7 +464,7 @@ local tests = {
         Fire("PLAYER_ENTERING_WORLD")
         Put(0, 1, 200)
         Fire("BAG_UPDATE_DELAYED")
-        Equal(Wild.db.containers.items[200], true)
+        Equal(Wild.GetSetting("containers.items.200"), true)
         Equal(#state.uses, 2)
         Equal(state.uses[2].itemID, 200)
     end },
@@ -402,7 +475,7 @@ local tests = {
             Put(0, 1, 999, 1, false)
         end
         Fire("PLAYER_ENTERING_WORLD")
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Equal(#state.uses, 0)
     end },
     { "unconfirmed opens warn once and do not stall other containers", function()
@@ -450,7 +523,7 @@ local tests = {
             env[name]:Show()
             Put(0, 1, 100)
             Fire("PLAYER_ENTERING_WORLD")
-            Equal(Wild.db.containers.items[100], true)
+            Equal(Wild.GetSetting("containers.items.100"), true)
             Equal(#state.uses, 0, name .. " blocks item use")
             env[name]:Hide()
             Fire("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 1)
@@ -487,7 +560,7 @@ local tests = {
             state[case[1]] = "A player spell"
             Put(0, 1, 100)
             Fire("PLAYER_ENTERING_WORLD")
-            Equal(Wild.db.containers.items[100], true)
+            Equal(Wild.GetSetting("containers.items.100"), true)
             Equal(#state.uses, 0)
             state[case[1]] = nil
             Fire(case[2], "party1")
@@ -550,7 +623,7 @@ local tests = {
         item.stackCount = 1
         Fire("BAG_UPDATE_DELAYED")
         Equal(#state.uses, 1)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
     end },
     { "sorting into an excluded reagent bag is not proof of opening", function()
         local _, state, Fire, Put, Timeout = NewEnvironment({
@@ -587,7 +660,7 @@ local tests = {
         item.stackCount = 1
         Fire("BAG_UPDATE_DELAYED")
         Equal(Wild.db.containers.autoOpenNew, false)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
         Equal(#state.uses, 1)
     end },
     { "slash commands configure defaults and individual IDs through the same store", function()
@@ -595,13 +668,13 @@ local tests = {
         Wild.HandleSlashCommand("containers default on")
         Equal(Wild.db.containers.autoOpenNew, true)
         Wild.HandleSlashCommand("containers add 100")
-        Equal(Wild.db.containers.items[100], false, "Manual additions start disabled even when discovery opens")
+        Equal(Wild.GetSetting("containers.items.100"), false, "Manual additions start disabled even when discovery opens")
         Wild.HandleSlashCommand("containers add 200 on")
-        Equal(Wild.db.containers.items[200], true)
+        Equal(Wild.GetSetting("containers.items.200"), true)
         Wild.HandleSlashCommand("containers 100 on")
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Wild.HandleSlashCommand("containers 200 off")
-        Equal(Wild.db.containers.items[200], false)
+        Equal(Wild.GetSetting("containers.items.200"), false)
         Wild.HandleSlashCommand("containers default off")
         Equal(Wild.db.containers.autoOpenNew, false)
         Wild.HandleSlashCommand("containers list")

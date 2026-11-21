@@ -2,7 +2,6 @@
 local ADDON_NAME, Wild = ...
 
 local CONFIRMATION_TIMEOUT = 5
-local MAX_ITEM_ID = 2147483647
 local BLOCKING_FRAMES = {
     "MerchantFrame", "BankFrame", "GuildBankFrame", "MailFrame", "TradeFrame",
     "AuctionHouseFrame", "ItemInteractionFrame", "ScrappingMachineFrame", "VoidStorageFrame",
@@ -17,8 +16,7 @@ local hasEnabledContainers = false
 local interactions = {}
 local observedFrames = {}
 local failedItems = {}
-local requestedData = {}
-local pendingData = {}
+local itemDataRequests = {}
 local pendingOpen
 local ScanBags
 
@@ -26,11 +24,28 @@ local function Warn(message)
     Wild.Print("|cffff6600Wild:|r " .. message)
 end
 
-local function RequestItemData(itemID)
-    if requestedData[itemID] or C_Item.IsItemDataCachedByID(itemID) then return end
-    requestedData[itemID] = true
-    pendingData[itemID] = true
+local function RequestItemData(itemID, manual)
+    local request = itemDataRequests[itemID]
+    if request == "manual" or request == "background" then
+        if manual then itemDataRequests[itemID] = "manual" end
+        return
+    end
+    if (request == "done" and not manual) or C_Item.IsItemDataCachedByID(itemID) then return end
+    itemDataRequests[itemID] = manual and "manual" or "background"
     C_Item.RequestLoadItemDataByID(itemID)
+end
+
+function Wild.GetLegacyContainerChoices()
+    local choices = {}
+    for _, backup in ipairs(Wild.db and Wild.db.legacyClientData or {}) do
+        if type(backup.containerItems) == "table" then
+            for id, enabled in pairs(backup.containerItems) do
+                local itemID = Wild.NormalizeContainerItemID(id)
+                if itemID and type(enabled) == "boolean" then choices[itemID] = enabled end
+            end
+        end
+    end
+    return choices
 end
 
 local function ClearPendingOpen()
@@ -86,8 +101,9 @@ local function CanOpenContainers()
 end
 
 local function IsReady(bag, slot, info)
+    local items = Wild.GetSetting("containers.items")
     if not info.hasLoot or info.isLocked or failedItems[info.itemID]
-        or Wild.db.containers.items[info.itemID] ~= true
+        or not items or items[info.itemID] ~= true
         or not C_Item.IsItemDataCachedByID(info.itemID) then
         return false
     end
@@ -95,24 +111,28 @@ local function IsReady(bag, slot, info)
     return duration == 0 or (enabled ~= 0 and start + duration <= GetTime())
 end
 
-local function ScanPass()
+local function ScanPass(items)
     local discovered = 0
     local candidates = {}
-    for itemID in pairs(Wild.db.containers.items) do RequestItemData(itemID) end
+    local legacyChoices
+    for itemID in pairs(items) do RequestItemData(itemID) end
     for _, bag in ipairs(Wild.GetPlayerBags()) do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
                 RequestItemData(info.itemID)
                 if info.hasLoot then
-                    if Wild.db.containers.items[info.itemID] == nil then
-                        local enabled = Wild.db.containers.autoOpenNew == true
-                        Wild.db.containers.items[info.itemID] = enabled
+                    if items[info.itemID] == nil then
+                        -- Unknown-origin choices cannot enable opening or override a prior "off".
+                        local autoOpenNew = Wild.GetSetting("containers.autoOpenNew") == true
+                        if autoOpenNew and not legacyChoices then legacyChoices = Wild.GetLegacyContainerChoices() end
+                        local enabled = autoOpenNew and legacyChoices[info.itemID] == nil
+                        items[info.itemID] = enabled
                         discovered = discovered + 1
                         Wild.Log("Containers", "Discovered item ID " .. info.itemID ..
                             "; auto-open " .. (enabled and "enabled." or "disabled."))
                     end
-                    if Wild.db.containers.items[info.itemID] == true and not failedItems[info.itemID] then
+                    if items[info.itemID] == true and not failedItems[info.itemID] then
                         candidates[#candidates + 1] = {
                             bag = bag, slot = slot, itemID = info.itemID, hyperlink = info.hyperlink,
                         }
@@ -148,8 +168,9 @@ local function ScanQueuedChanges()
     local discovered = 0
     repeat
         rescanRequested = false
-        if not inWorld or not Wild.db then return discovered end
-        discovered = discovered + ScanPass()
+        local items = Wild.GetSetting("containers.items")
+        if not inWorld or not items then return discovered end
+        discovered = discovered + ScanPass(items)
     until not rescanRequested
     return discovered
 end
@@ -167,18 +188,18 @@ end
 
 function Wild.SetContainerAutoOpen(itemID, enabled, source)
     if not Wild.db then Warn("Container settings have not loaded yet."); return false end
-    if type(itemID) == "string" and itemID:match("^%d+$") then itemID = tonumber(itemID) end
-    if type(itemID) ~= "number" or itemID ~= itemID or itemID < 1 or itemID > MAX_ITEM_ID or itemID % 1 ~= 0 then
-        Warn("Container item ID must be a whole number from 1 to " .. MAX_ITEM_ID .. ".")
-        return false
-    end
+    local items = Wild.GetSetting("containers.items")
+    if not items then Warn("Container choices are not available on this client."); return false end
+    local reason
+    itemID, reason = Wild.NormalizeContainerItemID(itemID)
+    if not itemID then Warn(reason); return false end
     if type(enabled) ~= "boolean" then
         Warn("Container auto-open must be true or false.")
         return false
     end
-    Wild.db.containers.items[itemID] = enabled
+    items[itemID] = enabled
     failedItems[itemID] = nil
-    RequestItemData(itemID)
+    RequestItemData(itemID, true)
     Wild.NotifySettingsChanged("containers.items", source)
     ScanBags()
     return true
@@ -186,7 +207,7 @@ end
 
 function Wild.GetContainers()
     local items = {}
-    for itemID, enabled in pairs(Wild.db and Wild.db.containers.items or {}) do
+    for itemID, enabled in pairs(Wild.GetSetting("containers.items") or {}) do
         local name, link = C_Item.GetItemInfo(itemID)
         items[#items + 1] = {
             itemID = itemID, autoOpen = enabled == true, name = name or ("Item " .. itemID), link = link,
@@ -198,8 +219,11 @@ end
 
 function Wild.ScanContainers()
     if not Wild.db then Warn("Container settings have not loaded yet."); return false end
+    if not Wild.GetSetting("containers.items") then Warn("Container choices are not available on this client."); return false end
     wipe(failedItems)
-    wipe(requestedData)
+    for itemID, request in pairs(itemDataRequests) do
+        if request == "done" then itemDataRequests[itemID] = nil end
+    end
     return ScanBags()
 end
 
@@ -241,17 +265,20 @@ frame:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
         interactions[arg1] = nil
     elseif event == "ITEM_DATA_LOAD_RESULT" then
-        if not pendingData[arg1] then return end
-        pendingData[arg1] = nil
-        if Wild.db and Wild.db.containers.items[arg1] ~= nil then
-            if not arg2 then
+        local request = itemDataRequests[arg1]
+        if request ~= "manual" and request ~= "background" then return end
+        itemDataRequests[arg1] = "done"
+        local items = Wild.GetSetting("containers.items")
+        local isSaved = items and items[arg1] ~= nil
+        if not arg2 then
+            if request == "manual" and isSaved then
                 Warn("Could not load item data for container ID " .. arg1 ..
                     ". Check the ID; its saved opening choice is unchanged.")
+            else
+                Wild.Log("Containers", "Could not load item data for item ID " .. arg1 .. ".")
             end
-            Wild.NotifySettingsChanged("containers.items")
-        elseif not arg2 then
-            Wild.Log("Containers", "Could not load bag item data for item ID " .. arg1 .. ".")
         end
+        if isSaved then Wild.NotifySettingsChanged("containers.items") end
     end
     local discoveryEvent = event == "PLAYER_ENTERING_WORLD" or event == "BAG_UPDATE_DELAYED"
         or event == "ITEM_DATA_LOAD_RESULT"

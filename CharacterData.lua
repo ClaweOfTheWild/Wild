@@ -60,19 +60,12 @@ local function GetGuildKey()
     return guildName .. "-" .. GetRealmName()
 end
 
-local function EnsureDatastore()
-    if not Wild.db then return nil end
-    if not Wild.db.datastore then Wild.db.datastore = {} end
-    if not Wild.db.datastore.characters then Wild.db.datastore.characters = {} end
-    if not Wild.db.datastore.guilds then Wild.db.datastore.guilds = {} end
-    if not Wild.db.datastore.warband then Wild.db.datastore.warband = {} end
-    if not Wild.db.datastore.sentMail then Wild.db.datastore.sentMail = {} end
-    return Wild.db.datastore
+local function GetDatastore()
+    local data = Wild.GetClientData()
+    return data and data.datastore
 end
 
-local function EnsureCharacterStore(charKey)
-    local ds = EnsureDatastore()
-    if not ds then return nil end
+local function EnsureCharacterStore(ds, charKey)
     if not ds.characters[charKey] then
         ds.characters[charKey] = {
             bags = {},
@@ -131,9 +124,9 @@ end
 
 --- Replace the active character's carried-item snapshot, including read-only bags.
 function Wild.SnapshotBags()
-    if not Wild.db then return end
-    local store = EnsureCharacterStore(GetCharKey())
-    if not store then return end
+    local ds = GetDatastore()
+    if not ds then return end
+    local store = EnsureCharacterStore(ds, GetCharKey())
     local items = {}
     for _, bag in ipairs(Wild.GetPlayerStorageBags()) do
         AppendContainerItems(items, bag)
@@ -144,8 +137,9 @@ end
 
 --- Replace the active character's equipment snapshot.
 function Wild.SnapshotEquipment()
-    if not Wild.db then return end
-    local store = EnsureCharacterStore(GetCharKey())
+    local ds = GetDatastore()
+    if not ds then return end
+    local store = EnsureCharacterStore(ds, GetCharKey())
     local items = {}
     for slot = INVSLOT_FIRST_EQUIPPED or 1, INVSLOT_LAST_EQUIPPED or 19 do
         local itemID = GetInventoryItemID("player", slot)
@@ -161,27 +155,29 @@ end
 
 --- Replace the personal bank snapshot only when the client exposes its contents.
 function Wild.SnapshotBank()
-    if not Wild.db or not C_Bank.CanViewBank(Enum.BankType.Character) then return end
+    local ds = GetDatastore()
+    if not ds or not C_Bank.CanViewBank(Enum.BankType.Character) then return end
     local items = ReadBankContainers(CHARACTER_BANK_BAGS, REAGENT_BANK_BAG)
     if not items then return end
-    local store = EnsureCharacterStore(GetCharKey())
+    local store = EnsureCharacterStore(ds, GetCharKey())
     store.bank = items
     store.bankUpdated = time()
 end
 
 --- Replace the shared Warband bank snapshot only when its contents are available.
 function Wild.SnapshotWarbandBank()
-    if not Wild.db or not C_Bank.CanViewBank(Enum.BankType.Account) then return end
+    local ds = GetDatastore()
+    if not ds or not C_Bank.CanViewBank(Enum.BankType.Account) then return end
     local items = ReadBankContainers(ACCOUNT_BANK_TABS)
     if not items then return end
-    local ds = EnsureDatastore()
     ds.warband.bank = items
     ds.warband.updated = time()
 end
 
 --- Replace the selected guild tab without rewriting tabs the client has not loaded.
 function Wild.SnapshotGuildBank()
-    if not Wild.db or not isGuildBankOpen then return end
+    local ds = GetDatastore()
+    if not ds or not isGuildBankOpen then return end
     local guildKey = GetGuildKey()
     if not guildKey then return end
     local tab = GetCurrentGuildBankTab()
@@ -206,7 +202,6 @@ function Wild.SnapshotGuildBank()
         end
     end
 
-    local ds = EnsureDatastore()
     local guild = ds.guilds[guildKey] or {}
     for _, item in ipairs(guild.bank or {}) do
         if item.tab ~= tab then items[#items + 1] = item end
@@ -267,15 +262,16 @@ local function ReadInbox()
 end
 
 local function SnapshotInbox()
-    if not Wild.db then return end
+    local ds = GetDatastore()
+    if not ds then return end
     local items, observedAt, isComplete = ReadInbox()
     if not items then return end
     local charKey = GetCharKey()
-    local store = EnsureCharacterStore(charKey)
+    local store = EnsureCharacterStore(ds, charKey)
     store.mail, store.mailUpdated = items, observedAt
     -- Unloaded messages may still contain items from a recorded send.
     if isComplete then
-        Wild.db.datastore.sentMail[NormalizeMailAddress(charKey)] = nil
+        ds.sentMail[NormalizeMailAddress(charKey)] = nil
     end
 end
 
@@ -296,7 +292,7 @@ local function CaptureOutgoingMail(address)
 end
 
 local function RecordSentMail(batch)
-    local ds = EnsureDatastore()
+    local ds = GetDatastore()
     if not ds then return end
     local sent = ds.sentMail[batch.key] or { recipient = batch.recipient, items = {} }
     local expiresAt = time() + SENT_MAIL_RETENTION
@@ -308,7 +304,7 @@ local function RecordSentMail(batch)
 end
 
 local function PruneSentMail()
-    local ds = Wild.db and Wild.db.datastore
+    local ds = GetDatastore()
     local now = time()
     for key, sent in pairs(ds and ds.sentMail or {}) do
         local unexpiredItems = {}
@@ -347,7 +343,7 @@ local function VisitInventory(ds, visit)
 end
 
 local function CollectItemResults(matches)
-    local ds = Wild.db and Wild.db.datastore
+    local ds = GetDatastore()
     if not ds then return {} end
     local results, byID, rowsByID = {}, {}, {}
     local now = time()
@@ -403,7 +399,7 @@ end
 --- Get entries for a specific item in a specific character+location.
 --- Useful for the intent engine to inspect remote item details.
 function Wild.GetItemEntries(itemID, location, key)
-    local ds = Wild.db and Wild.db.datastore
+    local ds = GetDatastore()
     if not ds then return {} end
 
     local entries = {}
@@ -464,11 +460,12 @@ local function FormatSnapshotTime(updated)
 end
 
 function Wild.GetDatastoreSummary()
-    local ds = Wild.db and Wild.db.datastore
+    local ds = GetDatastore()
     if not ds then return "Datastore not initialized." end
 
     local lines = {}
     lines[#lines + 1] = "|cff00ccff--- Wild Datastore ---|r"
+    lines[#lines + 1] = "Client: " .. Wild.GetClientMode()
 
     -- Characters
     if ds.characters then

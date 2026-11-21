@@ -123,7 +123,6 @@ local defaults = {
     lootAutoLootModifier = "SHIFT",
     containers = {
         autoOpenNew = false,
-        items = {},
     },
     reputationCollapseMode = "off",
     reputationCollapsedHeaders = {},
@@ -238,12 +237,6 @@ local defaults = {
         characters = {},
         labels = {},
     },
-    datastore = {
-        characters = {},
-        guilds = {},
-        warband = {},
-        sentMail = {},
-    },
     advanced = {
         debug = false,
         ruleDelay = 0.3,          -- seconds to wait before processing the next intent/rule
@@ -261,6 +254,17 @@ local defaults = {
         entries = {},
         nextIndex = 1,
     },
+}
+
+local CLIENT_DATA_SCHEMA_VERSION = 1
+local clientDataDefaults = {
+    datastore = {
+        characters = {},
+        guilds = {},
+        warband = {},
+        sentMail = {},
+    },
+    containerItems = {},
 }
 
 local function CopySettingValue(value)
@@ -284,6 +288,39 @@ local function ApplyDefaults(target, source)
             target[k] = CopySettingValue(v)
         end
     end
+end
+
+local function ArchiveUntaggedClientData(db)
+    local items
+    if type(db.containers) == "table" then items = db.containers.items end
+    if db.datastore == nil and items == nil then return end
+
+    -- Older files can already have been copied between clients.
+    db.legacyClientData = db.legacyClientData or {}
+    table.insert(db.legacyClientData, { datastore = db.datastore, containerItems = items })
+    db.datastore = nil
+    if items ~= nil then db.containers.items = nil end
+end
+
+local function InitializeClientData(db)
+    local client = Wild.GetClientMode()
+    if client == "unsupported" then return end
+    db.clientData = db.clientData or {}
+    db.clientData[client] = db.clientData[client] or {}
+    local versions = db.clientData[client]
+    versions[CLIENT_DATA_SCHEMA_VERSION] = versions[CLIENT_DATA_SCHEMA_VERSION] or {}
+    ApplyDefaults(versions[CLIENT_DATA_SCHEMA_VERSION], clientDataDefaults)
+end
+
+local function GetClientDataVersions(db)
+    local client = Wild.GetClientMode()
+    if client == "unsupported" then return end
+    return db and db.clientData and db.clientData[client]
+end
+
+function Wild.GetClientData()
+    local versions = GetClientDataVersions(Wild.db)
+    return versions and versions[CLIENT_DATA_SCHEMA_VERSION]
 end
 
 -- Initialize saved variables on login
@@ -381,7 +418,9 @@ frame:SetScript("OnEvent", function(self, event, addon)
         end
     end
 
+    ArchiveUntaggedClientData(WildDB)
     ApplyDefaults(WildDB, defaults)
+    InitializeClientData(WildDB)
     Wild.db = WildDB
     if not IsInboxSortOrder(Wild.db.mail.inboxSort) then
         Wild.db.mail.inboxSort = defaults.mail.inboxSort
@@ -902,13 +941,73 @@ local INTENT_BYPASS_KEYS = {
     ALT = function() return IsAltKeyDown() end,
 }
 
+function Wild.NormalizeContainerItemID(itemID)
+    local MAX_ITEM_ID = 2147483647
+    if type(itemID) == "string" and itemID:match("^%d+$") then itemID = tonumber(itemID) end
+    if type(itemID) == "number" and itemID >= 1 and itemID <= MAX_ITEM_ID and itemID % 1 == 0 then
+        return itemID
+    end
+    return nil, "Container item ID must be a whole number from 1 to " .. MAX_ITEM_ID .. "."
+end
+
 function Wild.GetSetting(key)
     if not Wild.db then return nil end
+    local itemKey = key:match("^containers%.items%.(.*)$")
+    if key == "containers" or key == "containers.items" or itemKey then
+        local data = Wild.GetClientData()
+        local items = data and data.containerItems
+        if key == "containers" then
+            local settings = CopySettingValue(Wild.db.containers)
+            settings.items = items
+            return settings
+        end
+        if itemKey then return GetNestedValue(items, itemKey) end
+        return items
+    end
     return GetNestedValue(Wild.db, key)
 end
 
 function Wild.GetDefaultSetting(key)
-    return CopySettingValue(GetNestedValue(defaults, key))
+    if key == "containers.items" then return {} end
+    local value = CopySettingValue(GetNestedValue(defaults, key))
+    if key == "containers" then value.items = {} end
+    return value
+end
+
+local function SetContainerSettings(key, value)
+    if type(value) ~= "table" then
+        Wild.Print("|cffff6600Wild:|r Container settings must be a table.")
+        return false
+    end
+    local choices = key == "containers.items" and value or value.items
+    if choices ~= nil then
+        local data = Wild.GetClientData()
+        if not data then
+            Wild.Print("|cffff6600Wild:|r Container choices are not available on this client.")
+            return false
+        end
+        if type(choices) ~= "table" then
+            Wild.Print("|cffff6600Wild:|r Container choices must be a table of item IDs and booleans.")
+            return false
+        end
+        local items = {}
+        for key, enabled in pairs(choices) do
+            local itemID, reason = Wild.NormalizeContainerItemID(key)
+            if not itemID or type(enabled) ~= "boolean" then
+                Wild.Print("|cffff6600Wild:|r " .. (reason or "Container auto-open must be true or false."))
+                return false
+            end
+            items[itemID] = enabled
+        end
+        data.containerItems = items
+    end
+    if key == "containers" then
+        local settings = CopySettingValue(value)
+        settings.items = nil
+        ApplyDefaults(settings, defaults.containers)
+        Wild.db.containers = settings
+    end
+    return true
 end
 
 function Wild.NotifySettingsChanged(key, source)
@@ -934,9 +1033,11 @@ function Wild.SetSetting(key, value, source)
     if key == "dialogKey.key" and Wild.SetDialogKey then
         return Wild.SetDialogKey(value, source)
     end
-    local containerID = key:match("^containers%.items%.(%d+)$")
-    if containerID and Wild.SetContainerAutoOpen then
-        return Wild.SetContainerAutoOpen(containerID, value, source)
+    local containerID = key:match("^containers%.items%.(.*)$")
+    if containerID then
+        if Wild.SetContainerAutoOpen then return Wild.SetContainerAutoOpen(containerID, value, source) end
+        Wild.Print("|cffff6600Wild:|r Container settings have not loaded yet.")
+        return false
     end
     if key == "volumeControl.autoHideDelay" and
        (type(value) ~= "number" or value ~= value or value < 0 or value == math.huge) then
@@ -956,7 +1057,11 @@ function Wild.SetSetting(key, value, source)
         Wild.Print("|cffff6600Wild:|r Choose an attachment sort order: inbox, name, sender, or size.")
         return false
     end
-    SetNestedValue(Wild.db, key, value)
+    if key == "containers" or key == "containers.items" then
+        if not SetContainerSettings(key, value) then return false end
+    else
+        SetNestedValue(Wild.db, key, value)
+    end
     if key:match("^dialogKey%.") and Wild.UpdateDialogKey then Wild.UpdateDialogKey() end
     if (key == "soiree" or key:match("^soiree%.")) and Wild.UpdateSoireeAdvisor then Wild.UpdateSoireeAdvisor() end
     if (key == "mail" or key == "mail.showInboxBrowser") and Wild.UpdateInboxBrowser then Wild.UpdateInboxBrowser() end
@@ -994,8 +1099,13 @@ end
 
 function Wild.ResetSettings()
     if not Wild.db then return end
+    local clientData, legacyClientData = Wild.db.clientData, Wild.db.legacyClientData
+    local versions = GetClientDataVersions(Wild.db)
+    if versions then versions[CLIENT_DATA_SCHEMA_VERSION] = nil end
     wipe(Wild.db)
+    Wild.db.clientData, Wild.db.legacyClientData = clientData, legacyClientData
     ApplyDefaults(Wild.db, defaults)
+    InitializeClientData(Wild.db)
     if Wild.UpdateScreenCenterCircle then Wild.UpdateScreenCenterCircle() end
     if Wild.UpdateCastHistory then Wild.UpdateCastHistory() end
     if Wild.UpdateSpeedIndicator then Wild.UpdateSpeedIndicator() end

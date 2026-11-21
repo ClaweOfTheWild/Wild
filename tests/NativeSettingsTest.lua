@@ -711,9 +711,9 @@ local tests = {
         Equal(input:GetText(), "0")
     end },
     { "container controls share persistent defaults and independent per-ID choices", function()
-        local Wild, state, _, Setting, _, Load = NewEnvironment({
-            containers = { items = { [100] = false, [200] = true } },
-        })
+        local Wild, state, _, Setting, _, Load = NewEnvironment()
+        assert(Wild.SetContainerAutoOpen(100, false))
+        assert(Wild.SetContainerAutoOpen(200, true))
         Load("Settings.lua")
         Equal(state.layouts.Containers.frame, nil)
         Equal(Setting("containers.autoOpenNew"):GetDefaultValue(), false)
@@ -731,7 +731,7 @@ local tests = {
         Equal(Checkbox(200):GetChecked(), true)
         Checkbox(100):SetChecked(true)
         Checkbox(100):Click()
-        Equal(Wild.db.containers.items[100], true)
+        Equal(Wild.GetSetting("containers.items.100"), true)
         Wild.HandleSlashCommand("containers 200 off")
         Equal(Checkbox(200):GetChecked(), false)
         Wild.HandleSlashCommand("containers add 300")
@@ -750,7 +750,7 @@ local tests = {
         action.buttonClick()
         state.popup.editBox:SetText("100")
         Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup), false)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
         action.buttonClick()
         state.popup.editBox:SetText("invalid")
         Equal(env.StaticPopupDialogs[state.popup.which].OnAccept(state.popup), true)
@@ -782,18 +782,18 @@ local tests = {
         Same(Wild.db, saved)
     end },
     { "native container defaults preserve discovered IDs and never apply the opening default retroactively", function()
-        local Wild, _, _, Setting = NewEnvironment({
-            containers = { autoOpenNew = true, items = { [100] = true, [200] = false } },
-        })
+        local Wild, _, _, Setting = NewEnvironment({ containers = { autoOpenNew = true } })
+        assert(Wild.SetContainerAutoOpen(100, true))
+        assert(Wild.SetContainerAutoOpen(200, false))
         Setting("containers.autoOpenNew"):SetValueToDefault()
         Equal(Wild.db.containers.autoOpenNew, false)
-        Equal(Wild.db.containers.items[100], true)
-        Equal(Wild.db.containers.items[200], false)
+        Equal(Wild.GetSetting("containers.items.100"), true)
+        Equal(Wild.GetSetting("containers.items.200"), false)
         Equal(#Wild.GetContainers(), 2)
         Wild.ResetSettings()
         Equal(#Wild.GetContainers(), 0)
         Wild.SetContainerAutoOpen(100, false)
-        Equal(Wild.db.containers.items[100], false)
+        Equal(Wild.GetSetting("containers.items.100"), false)
     end },
     { "native mail browser settings and slash commands share the saved choice", function()
         local Wild, state, _, Setting = NewEnvironment()
@@ -971,12 +971,12 @@ local tests = {
         local intent, actor, character = {}, {}, {}
         Wild.db.intents[1] = intent
         Wild.db.actors.characters.Test = actor
-        Wild.db.datastore.characters.Test = character
+        Wild.GetClientData().datastore.characters.Test = character
         Setting("speed.enabled"):SetValue(true)
         Setting("speed.enabled"):SetValueToDefault()
         Equal(Wild.db.intents[1], intent)
         Equal(Wild.db.actors.characters.Test, actor)
-        Equal(Wild.db.datastore.characters.Test, character)
+        Equal(Wild.GetClientData().datastore.characters.Test, character)
         Equal(Wild.db.speed.enabled, false)
         Equal(state.layouts["Intent Rules"].frame.OnDefault, nil)
         Equal(state.layouts.Actors.frame.OnDefault, nil)

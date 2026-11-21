@@ -159,7 +159,7 @@ RegisterCommand("client", { { "", "Show the detected WoW client mode." } }, func
     Print("Client mode: " .. Wild.GetClientMode())
 end)
 
-RegisterCommand("reset", { { "", "Reset Wild settings to their defaults." } }, function()
+RegisterCommand("reset", { { "", "Reset Wild settings and clear this client's collected item data and container list." } }, function()
     Wild.ResetSettings()
 end)
 
@@ -176,6 +176,7 @@ RegisterCommand("containers", {
     { "add <itemID> [on|off]", "Save a container item ID. Auto-open is off unless you specify on." },
     { "default [on|off]", "Show or set auto-open for newly discovered containers only." },
     { "list", "Show saved container IDs and their auto-open settings." },
+    { "legacy", "Show archived container choices from older files with no client tag." },
     { "scan", "Scan bags for containers and retry containers that timed out." },
 }, function(args)
     if #args == 0 then Wild.OpenSettings("Containers"); return end
@@ -198,6 +199,17 @@ RegisterCommand("containers", {
             Print((item.link or item.name) .. " (ID " .. item.itemID .. "): auto-open " .. StatusText(item.autoOpen))
         end
         return
+    elseif sub == "legacy" and #args == 1 then
+        local choices, ids = Wild.GetLegacyContainerChoices(), {}
+        for itemID in pairs(choices) do ids[#ids + 1] = itemID end
+        if #ids == 0 then Print("No archived container choices."); return end
+        table.sort(ids)
+        Print("Archived container choices (unknown client; not active):")
+        for _, itemID in ipairs(ids) do
+            Print("ID " .. itemID .. ": auto-open was " .. StatusText(choices[itemID]))
+        end
+        Print("Use /wild containers add <itemID> [on|off] to save a choice for this client.")
+        return
     elseif sub == "scan" and #args == 1 then
         Wild.ScanContainers()
         return
@@ -216,7 +228,7 @@ RegisterCommand("containers", {
             return
         end
     end
-    PrintWarn("Usage: /wild containers [default on|off|add <itemID> [on|off]|<itemID> on|off|list|scan]")
+    PrintWarn("Usage: /wild containers [default on|off|add <itemID> [on|off]|<itemID> on|off|list|legacy|scan]")
 end)
 
 RegisterCommand("mail", {
@@ -879,7 +891,7 @@ RegisterCommand("durability", {
 end, { "dur" })
 
 RegisterCommand("datastore", {
-    { "[status]", "Show the state of the cross-character item store." },
+    { "[status]", "Show this client's cross-character item store." },
     { "refresh", "Scan the current character's bags again." },
 }, function(args)
     local sub = args[1] and args[1]:lower() or "status"
@@ -894,6 +906,7 @@ RegisterCommand("datastore", {
             end
         end
     elseif sub == "refresh" then
+        if not Wild.GetClientData() then PrintWarn("Datastore not initialized for this client."); return end
         Wild.SnapshotBags()
         Print("Bags refreshed for current character.")
     else

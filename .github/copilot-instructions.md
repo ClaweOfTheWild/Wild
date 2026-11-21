@@ -19,7 +19,7 @@ Wild is a World of Warcraft Retail and Forever quality-of-life addon written in 
 ## Architecture
 
 - **Addon table**: `local ADDON_NAME, Wild = ...` at the top of every file. All public API and state lives on `Wild`.
-- **Saved variables**: `WildDB` is the single persistent store (declared in `Wild.toc`). Referenced as `Wild.db` after `ADDON_LOADED`. All settings read/write through `Wild.db`. Saved variables are the **source of truth** for all settings.
+- **Saved variables**: `WildDB` is the single persistent store (declared in `Wild.toc`). Referenced as `Wild.db` after `ADDON_LOADED`. Settings and rules stay at the root. `Wild.GetClientData()` selects the current client family and data schema for inventory snapshots, sent-mail estimates, and container choices. Untagged records are archived, not used as current data.
 - **Load order** is defined in [Wild.toc](../Wild.toc). `Core.lua` loads first (defaults, migrations), `NativeSettings.lua` registers native Settings pages, and `Settings.lua` loads last (canvas editor factories). New feature files go **before** `Settings.lua`.
 - **Defaults** for new settings go in the `defaults` table in `Core.lua`. Defaults are deep-merged on load via `ApplyDefaults`.
 
@@ -37,7 +37,7 @@ Bank scanning covers:
 ### Bag Container Opening
 
 - `Containers.lua` discovers player-bag items with `C_Container.GetContainerItemInfo(...).hasLoot`. Discovery continues when opening is off and respects `Wild.GetPlayerBags()`.
-- `Wild.db.containers.autoOpenNew` defaults to `false`. `Wild.db.containers.items[itemID]` stores each boolean choice, including explicit `false` entries. Test for `nil` when discovering an ID; changing the discovery default must never overwrite an existing choice.
+- `Wild.db.containers.autoOpenNew` defaults to `false`. `Wild.GetSetting("containers.items")` returns the current client's boolean choices, including explicit `false` entries. Test for `nil` when discovering an ID; changing the discovery default must never overwrite an existing choice. Rediscovered IDs from the untagged archive start disabled.
 - Manual ID additions start disabled independently of the discovery default. `Wild.SetContainerAutoOpen(itemID, enabled)` validates, saves, notifies, and applies per-ID changes. `Wild.GetContainers()` returns sorted display records, and `Wild.ScanContainers()` rescans and permits retries after an opening timeout.
 - Opening uses `C_Container.UseContainerItem` only for enabled loot containers, one at a time, after revalidating the bag slot. It waits for confirmed consumption, item data, locks, cooldowns, loot closure, and safe player/context state. Never let contextual right-click behavior sell, mail, trade, or bank a container instead.
 - Reuse the shared item-action evidence helpers, including physical bags excluded from selection. Chain through bag, item-data, loot, interaction, and player-state events; timers are confirmation safety timeouts only. Preserve synchronous completion events without reentrant item uses.

@@ -633,13 +633,13 @@ local function CreateContainersPage()
     AddCheckbox(category, "containers.autoOpenNew", "Auto-open newly discovered containers",
         "Save newly discovered bag containers with auto-open enabled and open them when safe. " ..
         "Off by default: containers are still added to the list, but remain unopened. " ..
-        "Changing this default never changes saved per-item choices.")
+        "Changing this default never changes saved per-item choices or enables an archived ID.")
     AddButton(layout, "Configure a container in advance", "Add by Item ID", function()
         StaticPopup_Show("WILD_CONTAINER_ID")
     end, "Add a container ID with auto-open disabled, even before you receive the item.")
     AddButton(layout, "Known containers", "Edit Container List", function()
         Wild.OpenNativeSettings("Container List")
-    end, "Enable or disable auto-open for each discovered or manually added container ID.")
+    end, "Enable or disable auto-open for each discovered or manually added container ID on this client.")
     AddCanvas("Container List", "containers.items", nil, nil, category)
 end
 
