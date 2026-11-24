@@ -534,6 +534,110 @@ local function FindItemSearchLauncher(env, state)
     end)
 end
 
+local function InstallItemSearchList(env, pageSize)
+    env.CreateScrollBoxListLinearView = function()
+        return {
+            SetElementExtent = function() end,
+            SetElementInitializer = function(self, _, initializer) self.initialize = initializer end,
+        }
+    end
+    env.CreateDataProvider = function(items) return items end
+    local scroll
+    env.ScrollUtil = { InitScrollBoxListWithScrollBar = function(frame, _, view)
+        scroll = frame
+        local rows, items, first = {}, {}, 1
+        local function ShowPage()
+            for index = 1, math.max(#rows, pageSize or #items) do
+                local row = rows[index]
+                local item = items[first + index - 1]
+                if item then
+                    if not row then
+                        row = env.CreateFrame("Frame", nil, scroll)
+                        function row:GetElementData() return self.item end
+                        rows[index] = row
+                    end
+                    row.item = item
+                    row:Show()
+                    view.initialize(row, item)
+                elseif row then
+                    row:Hide()
+                    row.item = nil
+                end
+            end
+        end
+        function scroll:SetDataProvider(provider, retainPosition)
+            items = provider
+            if not retainPosition then first = 1 end
+            ShowPage()
+        end
+        function scroll:ScrollToEnd()
+            first = math.max(1, #items - (pageSize or #items) + 1)
+            ShowPage()
+        end
+        function scroll:ForEachFrame(callback)
+            for _, row in ipairs(rows) do
+                if row:IsVisible() then callback(row, row.item) end
+            end
+        end
+    end }
+    return function() return assert(scroll) end
+end
+
+local function HasRegionText(frame, text)
+    for _, region in ipairs({ frame:GetRegions() }) do
+        if region:IsShown() and region:GetText() == text then return true end
+    end
+    return false
+end
+
+local function NewColdItemSearch(mode, count, recordedNames)
+    local Wild, state, env, _, Fire, Load = NewEnvironment(nil, nil, mode)
+    env.Enum.BagIndex = {}
+    env.GameTooltip = { IsOwned = function() return false end }
+    env.time = function() return 100 end
+    local cache, requests, timers = {}, {}, {}
+    env.C_Item.IsItemDataCachedByID = function(id) return cache[id] ~= nil end
+    env.C_Item.GetItemNameByID = function(id) return cache[id] and cache[id].name end
+    env.C_Item.GetItemIconByID = function(id) return cache[id] and cache[id].icon end
+    env.C_Item.RequestLoadItemDataByID = function(id) requests[#requests + 1] = id end
+    env.C_Timer.NewTimer = function(_, callback)
+        local timer = { callback = callback, Cancel = function(self) self.cancelled = true end }
+        timers[#timers + 1] = timer
+        return timer
+    end
+    local GetList = InstallItemSearchList(env, 1)
+    Load("CharacterData.lua")
+    Load("ItemSearch.lua")
+    local bank = {}
+    for index = 1, count do
+        local id = index * 100
+        bank[index] = { itemID = id, count = 1, name = recordedNames and recordedNames[id] or "?" }
+    end
+    Wild.GetClientData().datastore.characters["Alt-Realm"] = { bank = bank }
+    Wild.OpenItemSearch()
+    local panel = env.WildItemSearchWindow
+    local search = assert(FindChild(state, panel, function(frame) return frame.kind == "EditBox" end))
+    local list = GetList()
+    return {
+        panel = panel, search = search, list = list, requests = requests, timers = timers,
+        Update = function()
+            for _, frame in ipairs(state.frames) do
+                local update = frame:GetScript("OnUpdate")
+                if frame:IsVisible() and update then update(frame, 1 / 60) end
+            end
+        end,
+        Complete = function(id, name, icon)
+            if name then cache[id] = { name = name, icon = icon } end
+            Fire("ITEM_DATA_LOAD_RESULT", id, name ~= nil)
+        end,
+        Row = function()
+            return FindChild(state, list, function(frame)
+                return frame:IsVisible() and frame.GetElementData
+            end)
+        end,
+    }
+end
+
 local tests = {
     { "help opens the same alphabetical command catalog in both clients without changing settings", function()
         for _, mode in ipairs({ "retail", "forever" }) do
@@ -654,23 +758,7 @@ local tests = {
             env.C_Item.GetItemNameByID = function(itemID) if itemID == 100 then return "Test armor" end end
             env.C_Item.GetItemIconByID = function(itemID) if itemID == 100 then return 134400 end end
             env.C_Item.GetItemInfoInstant = function() end
-            env.CreateScrollBoxListLinearView = function()
-                return {
-                    SetElementExtent = function() end,
-                    SetElementInitializer = function(self, _, initializer) self.initialize = initializer end,
-                }
-            end
-            env.CreateDataProvider = function(items) return items end
-            env.ScrollUtil = { InitScrollBoxListWithScrollBar = function(scroll, _, view)
-                function scroll:SetDataProvider(items)
-                    for _, row in ipairs({ self:GetChildren() }) do row:Hide() end
-                    for _, item in ipairs(items) do
-                        local row = env.CreateFrame("Frame", nil, self)
-                        function row:GetElementData() return item end
-                        view.initialize(row, item)
-                    end
-                end
-            end }
+            InstallItemSearchList(env)
             local tooltip = env.CreateFrame("GameTooltip")
             tooltip:Hide()
             env.GameTooltip = tooltip
@@ -769,6 +857,84 @@ local tests = {
             Equal(window:IsShown(), true, "A locked launcher still opens Item Search")
             Equal(env.SettingsPanel:IsShown(), false)
         end
+    end },
+    { "item browsing loads details on scroll without applying old results to a reused row", function()
+        local browser = NewColdItemSearch("retail", 3)
+        browser.Update()
+        Same(browser.requests, { 100 })
+        assert(HasRegionText(assert(browser.Row()), "ID: 100"))
+
+        browser.list:ScrollToEnd()
+        browser.Update()
+        Same(browser.requests, { 100, 300 })
+        browser.Complete(100, "Warm armor", 134400)
+        browser.Update()
+        local row = assert(browser.Row())
+        assert(HasRegionText(row, "ID: 300"))
+        assert(not HasRegionText(row, "Warm armor"), "A late result must not change a reused row")
+        browser.Complete(300, "Cold reagent", 134401)
+        browser.Update()
+        assert(HasRegionText(row, "Cold reagent"), "Update the name without waiting for another scroll")
+        local hasIcon
+        for _, region in ipairs({ row:GetRegions() }) do hasIcon = hasIcon or region.texture == 134401 end
+        assert(hasIcon, "Update the icon when WoW loads it")
+        Same(browser.requests, { 100, 300 })
+    end },
+    { "item name search includes previously uncached items outside the visible rows", function()
+        local browser = NewColdItemSearch("forever", 3)
+        browser.search:SetText("armor")
+        browser.Update()
+        assert(HasRegionText(browser.panel, "Loading item names..."))
+        Equal(browser.Row(), nil)
+        Equal(#browser.requests, 3)
+
+        browser.search:SetText("REAGENT")
+        browser.Complete(100, "Warm armor")
+        browser.Update()
+        Equal(browser.Row(), nil, "Ignore names that match only the previous filter")
+        browser.Complete(300, "Cold reagent", 134401)
+        browser.Update()
+        assert(HasRegionText(assert(browser.Row()), "Cold reagent"))
+        assert(HasRegionText(browser.Row(), "ID: 300"))
+        Equal(#browser.requests, 3, "Do not request the same item again when the filter changes")
+    end },
+    { "search loads item details for every match, not just the current page", function()
+        local names, remaining = { [1700] = "Potion" }, {}
+        for index = 1, 16 do
+            local id = index * 100
+            names[id] = string.format("Armor %02d", index)
+            remaining[id] = true
+        end
+        local browser = NewColdItemSearch("retail", 17, names)
+        browser.search:SetText("armor")
+        browser.Update()
+        assert(HasRegionText(assert(browser.Row()), "Armor 01"))
+        for index = 1, 16 do
+            local id = assert(browser.requests[index], "Load all matches without requiring a scroll")
+            assert(remaining[id], "Do not request nonmatches or duplicate requests")
+            remaining[id] = nil
+            browser.Complete(id, names[id])
+            browser.Update()
+        end
+        Equal(#browser.requests, 16)
+        assert(HasRegionText(assert(browser.Row()), "Armor 01"), "Loading other pages does not move the visible list")
+    end },
+    { "item name search bounds outstanding requests and continues after a timeout", function()
+        local browser = NewColdItemSearch("retail", 20)
+        browser.search:SetText("reagent")
+        browser.Update()
+        local count = #browser.requests
+        assert(count > 0 and count <= 12, "Start a bounded number of requests")
+        assert(browser.timers[1], "An unanswered request needs a safety timeout")
+        browser.timers[1].callback()
+        browser.Update()
+        Equal(#browser.requests, count + 1, "A timeout frees room for the next request")
+
+        browser.panel:Hide()
+        local afterClose = #browser.requests
+        for index = 2, afterClose do browser.Complete(browser.requests[index]) end
+        browser.Update()
+        Equal(#browser.requests, afterClose, "Do not load more items after the window closes")
     end },
     { "the item search launcher is optional and keeps its drag position and lock after reload", function()
         local function LogInWithItemSearch(state, Load)

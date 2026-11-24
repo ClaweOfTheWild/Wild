@@ -4,6 +4,8 @@ local ADDON_NAME, Wild = ...
 local ROW_HEIGHT = 36
 local ICON_SIZE = 30
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+local MAX_ITEM_LOADS = 12
+local ITEM_LOAD_TIMEOUT = 5
 local BACKDROP = {
     bgFile = "Interface\\Buttons\\WHITE8X8",
     edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -26,7 +28,13 @@ local function ShowResultTooltip(row)
     GameTooltip:Show()
 end
 
-local function SetResult(row, item)
+local function UpdateResultDetails(row, item, loading)
+    row.icon:SetTexture(item.icon or C_Item.GetItemIconByID(item.itemID) or FALLBACK_ICON)
+    row.label:SetText(item.name or C_Item.GetItemNameByID(item.itemID)
+        or (loading and "Loading item..." or "Item name unavailable"))
+end
+
+local function SetResult(row, item, loading)
     if not row.icon then
         row.wildItemSearchResult = true
         row:EnableMouse(true)
@@ -50,8 +58,7 @@ local function SetResult(row, item)
         HideOwnedTooltip(row)
     end
 
-    row.icon:SetTexture(item.icon or C_Item.GetItemIconByID(item.itemID) or FALLBACK_ICON)
-    row.label:SetText(item.name or "Unknown item")
+    UpdateResultDetails(row, item, loading)
     row.idText:SetText("ID: " .. item.itemID)
 end
 
@@ -102,27 +109,140 @@ local function CreateSearchWindow()
     bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 4, 0)
     local view = CreateScrollBoxListLinearView()
     view:SetElementExtent(ROW_HEIGHT)
-    view:SetElementInitializer("Frame", SetResult)
-    ScrollUtil.InitScrollBoxListWithScrollBar(scroll, bar, view)
 
     local empty = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     empty:SetPoint("TOPLEFT", scroll, "TOPLEFT")
 
-    local function Refresh()
-        local query = strtrim(search:GetText())
-        local items = Wild.FindItems(query)
-        empty:SetText(query == "" and "No items recorded yet." or "No matching items in your recorded inventory.")
-        empty:SetShown(#items == 0)
-        scroll:SetDataProvider(CreateDataProvider(items))
+    local requested, pending, completed = {}, {}, {}
+    local pendingCount = 0
+    local matches, nextMatch, unnamed, ProcessLoads
+
+    local function CanRequest(itemID)
+        return not requested[itemID] and not C_Item.IsItemDataCachedByID(itemID)
     end
-    search:HookScript("OnTextChanged", Refresh)
+
+    local function IsLoading(itemID)
+        return pending[itemID] ~= nil or CanRequest(itemID)
+    end
+
+    local function ScheduleLoads()
+        if panel:IsVisible() then panel:SetScript("OnUpdate", ProcessLoads) end
+    end
+
+    local function Refresh(retainPosition)
+        local query = strtrim(search:GetText())
+        local items
+        items, unnamed = Wild.FindItems(query, true)
+        matches, nextMatch = query ~= "" and items or nil, 1
+        if #items == 0 then
+            local status = query == "" and "No items recorded yet." or "No matching items in your recorded inventory."
+            if unnamed and next(unnamed) then
+                status = "No matches in available item names."
+                for itemID in pairs(unnamed) do
+                    if IsLoading(itemID) then
+                        status = "Loading item names..."
+                        break
+                    end
+                end
+            end
+            empty:SetText(status)
+        end
+        empty:SetShown(#items == 0)
+        scroll:SetDataProvider(CreateDataProvider(items), retainPosition)
+    end
+
+    local function CompleteLoad(itemID, success)
+        local timer = pending[itemID]
+        if timer then
+            pending[itemID] = nil
+            pendingCount = pendingCount - 1
+            timer:Cancel()
+        end
+        if success then requested[itemID] = "loaded" end
+        if panel:IsVisible() then
+            completed[itemID] = success
+            ScheduleLoads()
+        end
+    end
+
+    ProcessLoads = function()
+        panel:SetScript("OnUpdate", nil)
+        local changes = completed
+        completed = {}
+        for itemID in pairs(changes) do
+            if unnamed and unnamed[itemID] then
+                Refresh(true)
+                break
+            end
+        end
+
+        local budget = MAX_ITEM_LOADS - pendingCount
+        local function Request(itemID)
+            if budget == 0 or not CanRequest(itemID) then return end
+            budget = budget - 1
+            requested[itemID] = true
+            pendingCount = pendingCount + 1
+            pending[itemID] = C_Timer.NewTimer(ITEM_LOAD_TIMEOUT, function() CompleteLoad(itemID, false) end)
+            C_Item.RequestLoadItemDataByID(itemID)
+        end
+
+        -- Browse the visible page first. Search also resolves unnamed items and loads all matches.
+        scroll:ForEachFrame(function(row, item)
+            if not row:IsVisible() then return end
+            UpdateResultDetails(row, item, IsLoading(item.itemID))
+            if changes[item.itemID] and GameTooltip:IsOwned(row) and GameTooltip:IsShown() then
+                ShowResultTooltip(row)
+            end
+            Request(item.itemID)
+        end)
+        if unnamed then
+            for itemID in pairs(unnamed) do
+                if budget == 0 then break end
+                Request(itemID)
+            end
+        end
+        while matches and budget > 0 and nextMatch <= #matches do
+            local itemID = matches[nextMatch].itemID
+            nextMatch = nextMatch + 1
+            Request(itemID)
+        end
+    end
+
+    view:SetElementInitializer("Frame", function(row, item)
+        local loading = IsLoading(item.itemID)
+        SetResult(row, item, loading)
+        if loading then ScheduleLoads() end
+    end)
+    ScrollUtil.InitScrollBoxListWithScrollBar(scroll, bar, view)
+
+    panel:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    panel:SetScript("OnEvent", function(_, _, itemID, success)
+        local state = requested[itemID]
+        if pending[itemID] or (success and (state == true or (not state and unnamed and unnamed[itemID]))) then
+            CompleteLoad(itemID, success)
+        end
+    end)
+
+    local function ApplyQuery()
+        if not panel:IsVisible() then return end
+        Refresh(false)
+        if matches then ScheduleLoads() end
+    end
+    search:HookScript("OnTextChanged", ApplyQuery)
     search:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
-        Refresh()
+        ApplyQuery()
     end)
     search:SetScript("OnEscapePressed", search.ClearFocus)
-    panel:SetScript("OnShow", Refresh)
+    panel:SetScript("OnShow", function()
+        for itemID in pairs(requested) do
+            if not pending[itemID] then requested[itemID] = nil end
+        end
+        ApplyQuery()
+    end)
     panel:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+        matches, unnamed, completed = nil, nil, {}
         self:StopMovingOrSizing()
         search:ClearFocus()
     end)

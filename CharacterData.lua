@@ -392,7 +392,8 @@ function Wild.GetItemTotal(itemID)
 end
 
 --- Find recorded items by partial name or exact ID. A blank query lists all recorded items.
-function Wild.FindItems(query)
+--- For a name query, includeUnnamed also returns the set of IDs without an available name.
+function Wild.FindItems(query, includeUnnamed)
     if query == nil then query = "" end
     local itemID
     if type(query) == "number" then
@@ -406,7 +407,7 @@ function Wild.FindItems(query)
     local ds = GetDatastore()
     if not ds then return {} end
     local now = time()
-    local results
+    local results, unnamed
     if itemID then
         results = CollectItemResults(ds, now, function(item) return item.itemID == itemID end)
     elseif query == "" then
@@ -414,15 +415,23 @@ function Wild.FindItems(query)
     else
         -- Match names first so the result includes copies from snapshots without a name.
         local lowerQuery, matchedNames = Lower(query), {}
+        if includeUnnamed then unnamed = {} end
         VisitInventory(ds, function(items)
             for _, item in ipairs(items or {}) do
-                if not matchedNames[item.itemID] and IsUnexpired(item, now) then
-                    local name = GetRecordedItemName(item) or C_Item.GetItemNameByID(item.itemID)
-                    if name and Lower(name):find(lowerQuery, 1, true) then matchedNames[item.itemID] = name end
+                local id = item.itemID
+                if not matchedNames[id] and IsUnexpired(item, now) then
+                    local name = GetRecordedItemName(item) or C_Item.GetItemNameByID(id)
+                    if unnamed and (name or unnamed[id] == nil) then unnamed[id] = not name end
+                    if name and Lower(name):find(lowerQuery, 1, true) then matchedNames[id] = name end
                 end
             end
         end)
-        if not next(matchedNames) then return {} end
+        if unnamed then
+            for id, missing in pairs(unnamed) do
+                if not missing then unnamed[id] = nil end
+            end
+        end
+        if not next(matchedNames) then return {}, unnamed end
         results = CollectItemResults(ds, now, function(item) return matchedNames[item.itemID] ~= nil end)
         for _, result in ipairs(results) do result.name = matchedNames[result.itemID] end
     end
@@ -434,7 +443,7 @@ function Wild.FindItems(query)
         local first, second = Lower(a.name or ""), Lower(b.name or "")
         return first < second or (first == second and a.itemID < b.itemID)
     end)
-    return results
+    return results, unnamed
 end
 
 --- Get entries for a specific item in a specific character+location.

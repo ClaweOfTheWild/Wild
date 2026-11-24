@@ -109,9 +109,13 @@ Use `/wild datastore status` to see which client's inventory Wild is using.
 
 Enter `/wild find` to open the Item Search window. It lists all recorded
 items when the search box is empty, with one row per item ID. Enter part of a
-name or the exact item ID to filter the list. Hover over a row to see the game
-tooltip and Wild's recorded locations and quantities. This does not change
-tooltip settings elsewhere.
+name or the exact item ID to filter the list. As you scroll, Wild loads item
+details for the rows that come into view. When you search, it loads details for
+every match, including matches outside the visible list. A name search checks
+items with missing names and adds matches as WoW supplies them. Hover over a
+row to see the game tooltip and Wild's recorded locations and quantities.
+Tooltip settings elsewhere do not change. Item Search lists recorded items,
+not the full WoW item catalog.
 
 Run `/wild itemsearch on` to show the magnifying-glass button. Left-click it
 to open the window. Drag it to move it. Right-click it to open
