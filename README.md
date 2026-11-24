@@ -171,8 +171,11 @@ Deletion includes eligible unread letters by default. To keep them, turn on
 
 The **Outgoing plan** on the left shows each planned message in send order,
 with its recipient, item names, and quantities. It updates when your bags or
-rules change. Select **Process rules** on **Send** to start with an empty
-composer. If the plan changed before Wild starts, review the updated list and
+rules change. Wild skips soulbound items even if they match a Mail rule.
+You do not need an exclusion rule.
+
+Select **Process rules** on **Send** to start with an empty composer.
+If the plan changed before Wild starts, review the updated list and
 select the button again. Wild waits for WoW to confirm each message before
 sending the next. The list shows what remains, and Wild checks the bags again
 for more matches after the last message. WoW confirmation prompts still

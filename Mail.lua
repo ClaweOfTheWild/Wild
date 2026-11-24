@@ -134,6 +134,15 @@ local function ScheduleMailStep(delay, callback)
     RefreshMailRulePlan()
 end
 
+local function IsSoulbound(bag, slot, info)
+    if not info.isBound then return false end
+    if C_Item.IsBoundToAccountUntilEquip(ItemLocation:CreateFromBagAndSlot(bag, slot)) then return false end
+
+    local source = info.hyperlink or info.itemID
+    -- The item link can still describe Warbound until equipped after the item binds.
+    return not C_Item.IsItemBindToAccount(source) or C_Item.IsItemBindToAccountUntilEquip(source)
+end
+
 local function BuildMailQueue()
     if not Wild.db or not Wild.db.intents then return {} end
 
@@ -170,7 +179,8 @@ local function BuildMailQueue()
                             local info = C_Container.GetContainerItemInfo(bag, slot)
                             if info then info.bag = bag; info.slot = slot end
                             local slotKey = bag .. ":" .. slot
-                            if info and info.itemID and not seen[slotKey] and Wild.IntentMatchesItem(subIntent, info.itemID, info, charCtx) then
+                            if info and info.itemID and not seen[slotKey] and not IsSoulbound(bag, slot, info)
+                                and Wild.IntentMatchesItem(subIntent, info.itemID, info, charCtx) then
                                 local stackCount = info.stackCount or 1
                                 seen[slotKey] = true
                                 table.insert(byRecipient[recipient], {
@@ -262,8 +272,20 @@ local function ProcessNextMail()
     bagsUpdated = false
     for _, item in ipairs(items) do
         local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-        local matchesRequest = info and info.itemID == item.itemID and info.hyperlink == item.link
-        if matchesRequest and not info.isLocked then
+        local skipReason
+        if not info or info.itemID ~= item.itemID or info.hyperlink ~= item.link then
+            skipReason = "slot_changed"
+        elseif info.isLocked then
+            skipReason = "item_locked"
+        elseif IsSoulbound(item.bag, item.slot, info) then
+            skipReason = "item_soulbound"
+        end
+
+        if skipReason then
+            Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = { item } }, {
+                source = "bags", target = recipient, recipient = recipient, status = "skipped", reason = skipReason,
+            })
+        else
             C_Container.PickupContainerItem(item.bag, item.slot)
             ClickSendMailItemButton(attached + 1)
             local _, itemID, _, stackCount = GetSendMailItem(attached + 1)
@@ -283,11 +305,6 @@ local function ProcessNextMail()
                 key = link or info.hyperlink or itemID, link = link or info.hyperlink,
                 itemID = itemID, count = stackCount,
             }
-        else
-            Wild.LogUnconfirmedItemActions("Mail", "mail", { entries = { item } }, {
-                source = "bags", target = recipient, recipient = recipient, status = "skipped",
-                reason = matchesRequest and info.isLocked and "item_locked" or "slot_changed",
-            })
         end
     end
 

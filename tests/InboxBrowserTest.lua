@@ -1,4 +1,5 @@
 -- Run from the repository root with Lua 5.1: lua tests\InboxBrowserTest.lua
+-- WoW bag and mail APIs are simulated; no live mail is sent.
 local function Equal(actual, expected)
     assert(actual == expected, "Expected " .. tostring(expected) .. ", got " .. tostring(actual))
 end
@@ -44,9 +45,13 @@ local function NewMailbox(saved, forever)
         },
         C_Mail = { IsCommandPending = function() return state.pending end },
         C_Container = { CalculateTotalNumberOfFreeBagSlots = function() return state.freeSlots or 10 end },
-        C_Item = { RequestLoadItemDataByID = function(itemID)
-            state.itemLoads[#state.itemLoads + 1] = itemID
-        end },
+        C_Item = {
+            RequestLoadItemDataByID = function(itemID) state.itemLoads[#state.itemLoads + 1] = itemID end,
+            IsItemBindToAccount = function() return false end,
+            IsItemBindToAccountUntilEquip = function() return false end,
+            IsBoundToAccountUntilEquip = function() return false end,
+        },
+        ItemLocation = { CreateFromBagAndSlot = function(_, bag, slot) return { bag = bag, slot = slot } end },
         AutoLootMailItem = function() state.bulkCalls = state.bulkCalls + 1 end,
         GetMoneyString = function(copper) return copper .. " copper" end,
         PlaySound = function() end,
@@ -565,7 +570,9 @@ local function MailRule(recipient, itemID)
 end
 
 local function BagItem(itemID, name, count)
-    return { itemID = itemID, hyperlink = "|Hitem:" .. itemID .. "|h[" .. name .. "]|h", stackCount = count }
+    return {
+        itemID = itemID, hyperlink = "|Hitem:" .. itemID .. "|h[" .. name .. "]|h", stackCount = count, isBound = false,
+    }
 end
 
 local function AssertIconOrder(mail, ...)
@@ -852,6 +859,79 @@ do
     mail.advance()
     Equal(mail.state.sent[1].recipient, "Other-Realm")
     Equal(mail.state.sent[1].items[1].stackCount, 5)
+end
+
+for _, forever in ipairs({ false, true }) do
+    local mail = NewMailbox({ mail = { autoSend = true } }, forever)
+    local bags = mail.state.bags
+    local soulbound = BagItem(700, "Test armor", 1)
+    local unbound = BagItem(700, "Test armor", 1)
+    local accountBound = BagItem(701, "Test token", 2)
+    soulbound.isBound, accountBound.isBound = true, true
+    bags[1], bags[2], bags[3] = soulbound, unbound, accountBound
+    mail.env.C_Item.IsItemBindToAccount = function(link) return link == accountBound.hyperlink end
+    mail.wild.db.intents = { MailRule("Alt-Realm", 700), MailRule("Alt-Realm", 701) }
+    local pickup = mail.env.C_Container.PickupContainerItem
+    mail.env.C_Container.PickupContainerItem = function(bag, slot)
+        assert(slot ~= 1, "Mail must not pick up a soulbound item")
+        pickup(bag, slot)
+    end
+
+    mail.open()
+    local plan = mail.wild.GetMailRulePlan()
+    Equal(#plan, 1)
+    Equal(#plan[1].items, 2)
+    Equal(plan[1].items[1].slot, 2)
+    Equal(plan[1].items[2].slot, 3)
+
+    mail.advance()
+    mail.advance()
+    Equal(#mail.state.sent, 1)
+    Equal(#mail.state.sent[1].items, 2)
+    Equal(mail.state.sent[1].items[1], unbound)
+    Equal(mail.state.sent[1].items[2], accountBound)
+    Equal(bags[1], soulbound)
+    mail.fire("BAG_UPDATE_DELAYED")
+    mail.fire("MAIL_SEND_SUCCESS")
+    assert(not mail.wild.IsMailSendBusy(), "Soulbound items must not keep the send queue active")
+end
+
+do
+    local mail = NewMailbox()
+    local bags = mail.state.bags
+    local equipment = BagItem(700, "Test armor", 1)
+    local other = BagItem(700, "Test armor", 1)
+    equipment.isBound, other.isBound = true, true
+    bags[1], bags[2] = equipment, other
+    local untilEquipped = true
+    mail.env.C_Item.IsItemBindToAccount = function(link) return link == equipment.hyperlink end
+    mail.env.C_Item.IsItemBindToAccountUntilEquip = mail.env.C_Item.IsItemBindToAccount
+    mail.env.C_Item.IsBoundToAccountUntilEquip = function(location)
+        return location.bag == 0 and (location.slot == 2 or (location.slot == 1 and untilEquipped))
+    end
+    mail.wild.db.intents = { MailRule("Alt-Realm", 700) }
+    local pickup = mail.env.C_Container.PickupContainerItem
+    mail.env.C_Container.PickupContainerItem = function(bag, slot)
+        assert(slot ~= 1, "Mail must not pick up an item that became soulbound")
+        pickup(bag, slot)
+    end
+
+    mail.open()
+    local plan = mail.wild.GetMailRulePlan()
+    Equal(#plan, 1)
+    Equal(#plan[1].items, 2)
+    Equal(plan[1].items[1].slot, 1)
+    assert(mail.wild.RunMailIntents(plan))
+    untilEquipped = false
+    mail.advance()
+
+    Equal(#mail.state.sent, 1)
+    Equal(#mail.state.sent[1].items, 1)
+    Equal(mail.state.sent[1].items[1], other)
+    Equal(bags[1], equipment)
+    local skipped = mail.wild.GetLogEntries("item_soulbound")
+    Equal(#skipped, 1)
+    Equal(skipped[1].status, "skipped")
 end
 
 do

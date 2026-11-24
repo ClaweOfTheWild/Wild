@@ -115,6 +115,10 @@ is pending. It MUST stop future batches if the mailbox closes. A send counts
 only after confirmation, and a late confirmation MUST NOT restart a stopped
 run.
 
+When Wild scans the bags for outgoing mail, it MUST exclude soulbound items
+even if they match a Mail rule. If a queued item becomes soulbound, Wild MUST
+skip it before pickup.
+
 #### Behavioral scenarios
 
 ```gherkin
