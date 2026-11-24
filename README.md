@@ -107,9 +107,26 @@ Use `/wild datastore status` to see which client's inventory Wild is using.
 
 ## Cross-character inventory
 
-Open `/wild native tooltips` and set **Cross-Character Count** to **Always** or
-**Shift Held**. Hover over an item to see its quantities and locations.
-Use `/wild find <item name>` to search without an item link.
+Enter `/wild find` to open the Item Search window. It lists all recorded
+items when the search box is empty, with one row per item ID. Enter part of a
+name or the exact item ID to filter the list. Hover over a row to see the game
+tooltip and Wild's recorded locations and quantities. This does not change
+tooltip settings elsewhere.
+
+Run `/wild itemsearch on` to show the magnifying-glass button. Left-click it
+to open the window. Drag it to move it. Right-click it to open
+**Settings > AddOns > Wild > Item Search**, where you can show, hide, or lock
+the button. `/wild itemsearch lock` and `/wild itemsearch unlock` also control
+the lock. Wild saves the button's position and lock between sessions. The
+green W button keeps its volume and settings shortcuts.
+
+Enter `/wild find <name or item ID>` to see the same locations in chat.
+`Wild.OpenItemSearch()` opens the window. `Wild.FindItems(query)` returns
+matching item records with grouped locations for the current client. Pass a
+partial name or item ID, or omit the query to list all recorded items.
+
+To see locations on other item tooltips, open `/wild native tooltips` and set
+**Cross-Character Count** to **Always** or **Shift Held**.
 
 Wild saves each character's bags, reagent bag, equipped gear, keyring where
 available, personal bank, and mailbox. It tracks the shared Warband bank and

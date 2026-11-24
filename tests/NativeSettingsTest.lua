@@ -104,6 +104,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     function methods:GetTop() return 400 end
     function methods:GetBottom() return 0 end
     function methods:SetPoint(...) self.point = { ... } end
+    function methods:GetPoint() return unpack(self.point) end
     function methods:ClearAllPoints() self.point = nil end
     function methods:SetAllPoints(parent) self.allPoints = parent end
     function methods:SetScrollChild(child) self.scrollChild = child; child:SetParent(self) end
@@ -125,6 +126,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         local _, lineBreaks = self:GetText():gsub("\n", "\n")
         return (lineBreaks + 1) * 12
     end
+    function methods:GetStringWidth() return #self:GetText() * 6 end
     function methods:HasText() return self:GetText() ~= "" end
     function methods:SetChecked(value) self.checked = value end
     function methods:GetChecked() return self.checked end
@@ -150,7 +152,7 @@ local function NewEnvironment(saved, noFilterEnum, mode)
     function methods:Disable() self.enabled = false end
     function methods:SetEnabled(enabled) self.enabled = enabled end
     function methods:IsEnabled() return self.enabled ~= false end
-    function methods:Click() if self.scripts.OnClick then self.scripts.OnClick(self) end end
+    function methods:Click(button) if self.scripts.OnClick then self.scripts.OnClick(self, button or "LeftButton") end end
     function methods:SetFocus()
         if state.focus == self then return end
         if state.focus then state.focus:ClearFocus() end
@@ -165,14 +167,20 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         end
     end
     function methods:SetPropagateKeyboardInput(value) self.propagate = value end
+    function methods:SetTexture(texture) self.texture = texture end
+    function methods:SetAtlas(atlas) self.atlas = atlas end
+    function methods:RegisterForDrag(button) self.dragButton = button end
+    function methods:StartMoving() self.moving = true end
+    function methods:StopMovingOrSizing() self.moving = false end
     for _, name in ipairs({
         "SetAutoFocus", "SetNumeric", "SetMaxLetters", "SetFontObject", "SetJustifyH",
         "SetJustifyV", "SetTextColor", "SetFrameStrata", "SetFrameLevel", "EnableKeyboard",
         "EnableMouse", "SetClampedToScreen", "SetMovable", "SetResizable", "SetResizeBounds",
-        "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetScale",
-        "SetValueStep", "SetObeyStepOnDrag", "SetTexture", "SetColorTexture", "SetTextInsets",
+        "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetScale", "SetWordWrap",
+        "SetDontSavePosition", "RegisterForClicks",
+        "SetValueStep", "SetObeyStepOnDrag", "SetColorTexture", "SetTextInsets",
         "SetMultiLine", "SetNormalTexture", "SetHighlightTexture", "SetPushedTexture",
-        "SetClipsChildren", "RegisterForDrag", "HighlightText", "SetNonSpaceWrap",
+        "SetClipsChildren", "HighlightText", "SetNonSpaceWrap",
     }) do
         methods[name] = function() end
     end
@@ -184,7 +192,11 @@ local function NewEnvironment(saved, noFilterEnum, mode)
         self.regions[#self.regions + 1] = text
         return text
     end
-    function methods:CreateTexture() return Region("Texture") end
+    function methods:CreateTexture()
+        local texture = Region("Texture")
+        self.regions[#self.regions + 1] = texture
+        return texture
+    end
     env.CreateFrame = function(kind, name, parent, template)
         if name then assert(env[name] == nil, "Duplicate frame name " .. name) end
         local frame = Region(kind)
@@ -513,6 +525,15 @@ local function FindMenuEntry(menu, value)
     end
 end
 
+local function FindItemSearchLauncher(env, state)
+    return FindChild(state, env.UIParent, function(frame)
+        if frame.kind ~= "Button" or frame:GetParent() ~= env.UIParent or not frame:IsVisible() then return end
+        for _, region in ipairs({ frame:GetRegions() }) do
+            if region.atlas == "common-search-magnifyingglass" then return true end
+        end
+    end)
+end
+
 local tests = {
     { "help opens the same alphabetical command catalog in both clients without changing settings", function()
         for _, mode in ipairs({ "retail", "forever" }) do
@@ -544,7 +565,8 @@ local tests = {
                 "/wbar", "/wild", "/wild help", "/wild bank warband on|off", "/wild casts unlock",
                 "/wild containers default [on|off]", "/wild speed [on|off]",
                 "/wild delay mailbatch [<seconds>]", "/wild inbox delete [all|selected]", "/wild log",
-                "/wild search <name>", "/wild trace filter [<text>]",
+                "/wild find [<name|itemID>]", "/wild search [<name|itemID>]", "/wild itemsearch [on|off|lock|unlock]",
+                "/wild trace filter [<text>]",
             }) do
                 assert(rows[syntax], "Missing catalog row: " .. syntax)
             end
@@ -587,10 +609,10 @@ local tests = {
     { "registers both native list and lazy canvas pages once without changing saved values", function()
         local Wild, state, _, _, Fire = NewEnvironment({ speed = { enabled = false } })
         Equal(state.root.name, "Wild")
-        Equal(#state.categories, 28)
+        Equal(#state.categories, 29)
         for _, page in ipairs({
             "LFG", "Center Circle", "Speed", "Cast History", "Advanced", "Loot", "Dialog Key",
-            "Events", "Darkmoon Faire", "Saltheril's Soiree", "Containers",
+            "Events", "Darkmoon Faire", "Saltheril's Soiree", "Containers", "Item Search",
         }) do
             Equal(state.layouts[page].frame, nil, page .. " uses standard controls")
         end
@@ -601,7 +623,7 @@ local tests = {
         local saved = Copy(Wild.db)
         Fire("ADDON_LOADED", "Wild")
         Same(Wild.db, saved)
-        Equal(#state.categories, 28)
+        Equal(#state.categories, 29)
         Equal(state.speedUpdates, 0)
         Equal(state.circleUpdates, 0)
     end },
@@ -619,8 +641,191 @@ local tests = {
         state.root = nil
         state.settings = {}
         loader.scripts.OnEvent(loader, "PLAYER_LOGIN")
-        Equal(#state.categories, originalCount + 28)
+        Equal(#state.categories, originalCount + 29)
         Equal(loader.events.PLAYER_LOGIN, nil)
+    end },
+    { "item search opens in a separate window, lists all items, and retains hover details when filtered", function()
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local enabled = mode == "retail"
+            local Wild, state, env, _, Fire, Load = NewEnvironment({ tooltip = { enabled = enabled } }, nil, mode)
+            env.Enum.BagIndex = {}
+            env.Enum.TooltipDataType = { Item = 0 }
+            env.time = function() return 100 end
+            env.C_Item.GetItemNameByID = function(itemID) if itemID == 100 then return "Test armor" end end
+            env.C_Item.GetItemIconByID = function(itemID) if itemID == 100 then return 134400 end end
+            env.C_Item.GetItemInfoInstant = function() end
+            env.CreateScrollBoxListLinearView = function()
+                return {
+                    SetElementExtent = function() end,
+                    SetElementInitializer = function(self, _, initializer) self.initialize = initializer end,
+                }
+            end
+            env.CreateDataProvider = function(items) return items end
+            env.ScrollUtil = { InitScrollBoxListWithScrollBar = function(scroll, _, view)
+                function scroll:SetDataProvider(items)
+                    for _, row in ipairs({ self:GetChildren() }) do row:Hide() end
+                    for _, item in ipairs(items) do
+                        local row = env.CreateFrame("Frame", nil, self)
+                        function row:GetElementData() return item end
+                        view.initialize(row, item)
+                    end
+                end
+            end }
+            local tooltip = env.CreateFrame("GameTooltip")
+            tooltip:Hide()
+            env.GameTooltip = tooltip
+            local postItem
+            env.TooltipDataProcessor = { AddTooltipPostCall = function(_, callback) postItem = callback end }
+            function tooltip:SetOwner(owner) self.owner = owner end
+            function tooltip:GetOwner() return self.owner end
+            function tooltip:IsOwned(owner) return self.owner == owner end
+            function tooltip:SetHyperlink(link)
+                self.link = link
+                postItem(self, { hyperlink = link })
+            end
+            function tooltip:SetItemByID(itemID)
+                self.itemID = itemID
+                postItem(self, { id = itemID })
+            end
+
+            Load("CharacterData.lua")
+            Load("Tooltip.lua")
+            Fire("ADDON_LOADED", "Wild")
+            local link = "|cff0070dd|Hitem:100::::::::90:::::1:1001|h[Test armor]|h|r"
+            Wild.GetClientData().datastore.characters["Alt-Realm"] = { bank = {
+                { itemID = 100, link = mode == "retail" and link or nil, count = 3 },
+                { itemID = 200, name = "Test reagent", icon = 134401, count = 7 },
+            } }
+            if not enabled then
+                tooltip:SetOwner(env.CreateFrame("Button"))
+                tooltip:SetItemByID(100)
+                Equal(env.WildTooltipFrame, nil, "Normal tooltips still respect the disabled setting")
+                tooltip.itemID = nil
+            end
+
+            Load("ItemSearch.lua")
+            Load("Settings.lua")
+            env.SlashCmdList.WILD("find")
+            Equal(env.SettingsPanel:IsShown(), false, "Item search does not open Settings")
+            local search = assert(FindChild(state, env.UIParent, function(frame)
+                return frame.kind == "EditBox" and frame:IsVisible()
+            end), "Expected a search box in the item window")
+            local window = search
+            while window:GetParent() ~= env.UIParent do window = window:GetParent() end
+            local function FindVisibleResult(itemID, match)
+                return FindChild(state, window, function(frame)
+                    if not frame:IsVisible() or not frame:GetScript("OnEnter") then return end
+                    local matchesID
+                    for _, region in ipairs({ frame:GetRegions() }) do
+                        matchesID = matchesID or region:GetText() == "ID: " .. itemID
+                    end
+                    return matchesID and (not match or match(frame))
+                end)
+            end
+            assert(FindVisibleResult(100), "Show armor before any search text is entered")
+            assert(FindVisibleResult(200), "Show reagents before any search text is entered")
+
+            search:SetText("ARMOR")
+            Equal(FindVisibleResult(200), nil, "A filter hides unrelated items")
+            assert(FindVisibleResult(100), "A name displayed in the list can be found by name")
+            search:SetText("100")
+            Equal(FindVisibleResult(200), nil, "An ID filter hides unrelated items")
+            local row = assert(FindVisibleResult(100, function(frame)
+                local icon, name
+                for _, region in ipairs({ frame:GetRegions() }) do
+                    icon = icon or region.texture == 134400
+                    name = name or region:GetText() == "Test armor"
+                end
+                return icon and name
+            end), "Expected a visible search result with the item icon, name, and ID")
+            row:GetScript("OnEnter")(row)
+            Equal(tooltip:IsShown(), true)
+            Equal(tooltip.link, mode == "retail" and link or nil)
+            Equal(tooltip.itemID, mode == "forever" and 100 or nil)
+
+            local locationTip = assert(env.WildTooltipFrame)
+            Equal(locationTip:IsShown(), true)
+            local text = {}
+            for _, region in ipairs({ locationTip:GetRegions() }) do text[region:GetText()] = true end
+            assert(text.Alt and text.Bank and text["3"], "Expected the character, storage location, and quantity")
+            Equal(Wild.GetSetting("tooltip.enabled"), enabled)
+            Equal(Wild.GetSetting("tooltip.lines.crossCharCount"), "never")
+
+            search:SetText("no matching item")
+            Equal(row:IsVisible(), false)
+            Equal(tooltip:IsShown(), false, "Do not leave a tooltip for a result that is no longer shown")
+            Equal(locationTip:IsShown(), false)
+            search:SetText("")
+            assert(FindVisibleResult(100) and FindVisibleResult(200), "Clearing the filter restores all recorded items")
+
+            local close = assert(FindChild(state, window, function(frame) return frame.template == "UIPanelCloseButton" end))
+            close:Click()
+            Equal(window:IsShown(), false)
+
+            env.SlashCmdList.WILD("itemsearch on")
+            env.SlashCmdList.WILD("itemsearch lock")
+            local launcher = assert(FindItemSearchLauncher(env, state), "Expected a magnifying-glass launcher")
+            launcher:Click("LeftButton")
+            Equal(window:IsShown(), true, "A locked launcher still opens Item Search")
+            Equal(env.SettingsPanel:IsShown(), false)
+        end
+    end },
+    { "the item search launcher is optional and keeps its drag position and lock after reload", function()
+        local function LogInWithItemSearch(state, Load)
+            local first = #state.frames + 1
+            Load("ItemSearch.lua")
+            for index = first, #state.frames do
+                local frame = state.frames[index]
+                if frame.events.PLAYER_ENTERING_WORLD then
+                    frame:GetScript("OnEvent")(frame, "PLAYER_ENTERING_WORLD")
+                end
+            end
+        end
+        for _, mode in ipairs({ "retail", "forever" }) do
+            local Wild, state, env, Setting, _, Load = NewEnvironment(nil, nil, mode)
+            env.GameTooltip = { IsOwned = function() return false end }
+            LogInWithItemSearch(state, Load)
+            Equal(FindItemSearchLauncher(env, state), nil)
+
+            Setting("itemSearch.showButton"):SetValue(true)
+            local launcher = assert(FindItemSearchLauncher(env, state))
+            launcher:Click("RightButton")
+            Equal(state.selected:GetName(), "Item Search")
+            Equal(launcher.dragButton, "LeftButton")
+            launcher:GetScript("OnMouseDown")(launcher, "LeftButton")
+            launcher:GetScript("OnDragStart")(launcher)
+            Equal(launcher.moving, true)
+            launcher:SetPoint("TOPLEFT", env.UIParent, "TOPLEFT", 120, -48)
+            launcher:GetScript("OnDragStop")(launcher)
+            Equal(launcher.moving, false)
+            local opened = 0
+            Wild.OpenItemSearch = function() opened = opened + 1 end
+            launcher:Click("LeftButton")
+            Equal(opened, 0, "The release that stopped the drag must not open the window")
+            launcher:GetScript("OnMouseDown")(launcher, "LeftButton")
+            launcher:Click("LeftButton")
+            Equal(opened, 1, "The next click opens the window")
+
+            Setting("itemSearch.locked"):SetValue(true)
+            Equal(launcher.dragButton, nil)
+            local saved = Copy(Wild.db)
+            env.SlashCmdList.WILD("itemsearch off")
+            Equal(FindItemSearchLauncher(env, state), nil)
+
+            local _, restored, client, RestoredSetting, _, Restore = NewEnvironment(saved, nil, mode)
+            LogInWithItemSearch(restored, Restore)
+            local restoredLauncher = assert(FindItemSearchLauncher(client, restored))
+            local point, relativeTo, relativePoint, x, y = restoredLauncher:GetPoint()
+            Equal(point, "TOPLEFT")
+            Equal(relativeTo, client.UIParent)
+            Equal(relativePoint, "TOPLEFT")
+            Equal(x, 120)
+            Equal(y, -48)
+            Equal(restoredLauncher.dragButton, nil)
+            client.SlashCmdList.WILD("itemsearch unlock")
+            Equal(RestoredSetting("itemSearch.locked"):GetValue(), false)
+            Equal(restoredLauncher.dragButton, "LeftButton")
+        end
     end },
     { "native feature controls and slash commands share saved settings and update functions", function()
         local Wild, state, _, Setting = NewEnvironment()

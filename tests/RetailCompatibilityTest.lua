@@ -61,6 +61,7 @@ local function NewEnvironment(mode, saved, build)
                     state.equipLoc, 134400, 100, state.classID, state.subclassID, 1, 11
             end,
             GetItemIconByID = function() return 134400 end,
+            GetItemNameByID = function(itemID) if itemID == 100 then return "Test armor" end end,
             GetItemInfoInstant = function(source)
                 Equal(source, 100)
                 return 100, "Armor", "Leather", state.equipLoc, 134400,
@@ -385,6 +386,67 @@ local tests = {
         state.guild[2] = nil
         Fire("GUILDBANKBAGSLOTS_CHANGED")
         Equal(Wild.GetItemTotal(100), 2)
+    end },
+    { "name search finds all recorded copies even when some snapshots lack a name", function()
+        local Wild, state = NewEnvironment()
+        local datastore = Wild.GetClientData().datastore
+        datastore.characters["Test-Realm"] = { bags = { { itemID = 100, count = 2, name = "?", link = state.link } } }
+        datastore.characters["Alt-Realm"] = { bank = {
+            { itemID = 100, count = 7 },
+            { itemID = 1000, count = 4, name = "Other armor" },
+        } }
+
+        local results = Wild.FindItems("  ARMOR  ")
+        Equal(#results, 2)
+        Equal(results[1].itemID, 1000, "Sort name matches by their display names")
+        local result = results[2]
+        Equal(result.itemID, 100)
+        Equal(result.name, "Test armor")
+        Equal(result.link, state.link)
+        Equal(result.total, 9)
+        Equal(GetCount(result.breakdown, "bags", "Test-Realm"), 2)
+        Equal(GetCount(result.breakdown, "bank", "Alt-Realm"), 7)
+    end },
+    { "a blank search lists every recorded item ID, including items without names", function()
+        local Wild, state = NewEnvironment()
+        local datastore = Wild.GetClientData().datastore
+        datastore.characters["Test-Realm"] = { bags = {
+            { itemID = 100, count = 2, name = "Test armor" },
+            { itemID = 200, count = 1 },
+        }, mail = { { itemID = 300, count = 4, name = "Expired item", expiresAt = state.now } } }
+        datastore.characters["Alt-Realm"] = { bank = { { itemID = 100, count = 7 } } }
+        datastore.sentMail["recipient-realm"] = {
+            recipient = "Recipient-Realm",
+            items = { { itemID = 400, count = 5, name = "Sent item", expiresAt = state.now + 1 } },
+        }
+
+        local results = Wild.FindItems(" \t ")
+        Equal(#results, 3)
+        Equal(#Wild.FindItems(), 3)
+        local byID = {}
+        for _, item in ipairs(results) do byID[item.itemID] = item end
+        Equal(byID[100].total, 9)
+        Equal(byID[200].total, 1)
+        Equal(byID[300], nil)
+        Equal(byID[400].total, 0)
+        Equal(byID[400].sentMail[1].count, 5)
+    end },
+    { "ID search uses an exact ID in the API and in chat", function()
+        local Wild, state, _, _, env = NewEnvironment()
+        Wild.GetClientData().datastore.characters["Test-Realm"] = { bags = {
+            { itemID = 100, name = "Test armor", count = 2, link = state.link },
+            { itemID = 1000, name = "Other armor", count = 4 },
+            { itemID = 101, name = "100 Token", count = 1 },
+        } }
+
+        local results = Wild.FindItems(" 00100 ")
+        Equal(#results, 1)
+        Equal(results[1].itemID, 100)
+        Equal(Wild.FindItems(100)[1].total, 2)
+        Equal(#Wild.FindItems("999"), 0)
+        env.SlashCmdList.WILD("search 100")
+        local chat = state.chat[#state.chat]
+        assert(chat:find("|Hitem:100:", 1, true) and chat:find("2x total (2x Test-Realm bags)", 1, true), chat)
     end },
     { "only acknowledged sends appear, even for an unvisited recipient and after closing mail", function()
         local Wild, state, Item, Fire, env = NewEnvironment()

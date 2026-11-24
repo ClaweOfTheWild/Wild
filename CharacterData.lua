@@ -52,6 +52,7 @@ local ACCOUNT_BANK_TABS = Wild.GetAccountBankBags()
 local GUILD_BANK_SLOTS_PER_TAB = 98
 local SECONDS_PER_DAY = 86400
 local SENT_MAIL_RETENTION = 30 * SECONDS_PER_DAY
+local Lower = strlower or string.lower
 local isGuildBankOpen = false
 
 local function GetGuildKey()
@@ -77,11 +78,16 @@ local function EnsureCharacterStore(ds, charKey)
     return ds.characters[charKey]
 end
 
+local function GetRecordedItemName(item)
+    if item.name and item.name ~= "" and item.name ~= "?" then return item.name end
+    return item.link and item.link:match("|h%[(.-)%]|h")
+end
+
 local function PopulateItemDetails(item)
     local name, _, quality, itemLevel, _, itemType, itemSubType,
           _, equipLoc, _, sellPrice, classID, subclassID, bindType, expansionID =
         C_Item.GetItemInfo(item.link or item.itemID)
-    item.name = name or item.name or (item.link and item.link:match("|h%[(.-)%]|h")) or "?"
+    item.name = name or GetRecordedItemName(item) or "?"
     item.quality = item.quality or quality
     item.ilvl = (item.link and C_Item.GetDetailedItemLevelInfo(item.link)) or itemLevel
     item.itemType = itemType
@@ -220,8 +226,7 @@ local function NormalizeMailAddress(address)
         if address:find("-", 1, true) then return end
         name, realm = address, GetRealmName()
     end
-    local lower = strlower or string.lower
-    return lower(name .. "-" .. realm:gsub("[%s'%-]", "")), name .. "-" .. realm
+    return Lower(name .. "-" .. realm:gsub("[%s'%-]", "")), name .. "-" .. realm
 end
 
 local function IsUnexpired(item, now)
@@ -342,24 +347,21 @@ local function VisitInventory(ds, visit)
     end
 end
 
-local function CollectItemResults(matches)
-    local ds = GetDatastore()
-    if not ds then return {} end
+local function CollectItemResults(ds, now, matches)
     local results, byID, rowsByID = {}, {}, {}
-    local now = time()
 
     local function Collect(items, location, character, guild, recipient)
         for _, item in ipairs(items or {}) do
-            if IsUnexpired(item, now) and matches(item) then
+            if IsUnexpired(item, now) and (not matches or matches(item)) then
                 local result = byID[item.itemID]
                 if not result then
-                    result = {
-                        itemID = item.itemID, name = item.name, link = item.link, icon = item.icon,
-                        total = 0, breakdown = {}, sentMail = {},
-                    }
+                    result = { itemID = item.itemID, total = 0, breakdown = {}, sentMail = {} }
                     results[#results + 1] = result
                     byID[item.itemID], rowsByID[item.itemID] = result, {}
                 end
+                result.name = result.name or GetRecordedItemName(item)
+                result.link = result.link or item.link
+                result.icon = result.icon or item.icon
 
                 local itemLocation = GetItemLocation(item, location)
                 local key = itemLocation .. ":" .. (character or guild or "") .. ":" .. (recipient or "")
@@ -383,17 +385,56 @@ end
 
 --- Return the observed total and grouped locations for an item ID, and a separate list of sent mail.
 function Wild.GetItemTotal(itemID)
-    local result = CollectItemResults(function(item) return item.itemID == itemID end)[1]
+    local ds = GetDatastore()
+    local result = ds and CollectItemResults(ds, time(), function(item) return item.itemID == itemID end)[1]
     if not result then return 0, {}, {} end
     return result.total, result.breakdown, result.sentMail
 end
 
---- Find items by partial name. Sent-mail quantities are separate from each result's total.
+--- Find recorded items by partial name or exact ID. A blank query lists all recorded items.
 function Wild.FindItems(query)
-    local lowerQuery = query:lower()
-    return CollectItemResults(function(item)
-        return item.name and item.name:lower():find(lowerQuery, 1, true)
+    if query == nil then query = "" end
+    local itemID
+    if type(query) == "number" then
+        itemID = query
+    else
+        assert(type(query) == "string", "Item search requires an item name or ID.")
+        query = query:match("^%s*(.-)%s*$")
+        if query:match("^%d+$") then itemID = tonumber(query) end
+    end
+
+    local ds = GetDatastore()
+    if not ds then return {} end
+    local now = time()
+    local results
+    if itemID then
+        results = CollectItemResults(ds, now, function(item) return item.itemID == itemID end)
+    elseif query == "" then
+        results = CollectItemResults(ds, now)
+    else
+        -- Match names first so the result includes copies from snapshots without a name.
+        local lowerQuery, matchedNames = Lower(query), {}
+        VisitInventory(ds, function(items)
+            for _, item in ipairs(items or {}) do
+                if not matchedNames[item.itemID] and IsUnexpired(item, now) then
+                    local name = GetRecordedItemName(item) or C_Item.GetItemNameByID(item.itemID)
+                    if name and Lower(name):find(lowerQuery, 1, true) then matchedNames[item.itemID] = name end
+                end
+            end
+        end)
+        if not next(matchedNames) then return {} end
+        results = CollectItemResults(ds, now, function(item) return matchedNames[item.itemID] ~= nil end)
+        for _, result in ipairs(results) do result.name = matchedNames[result.itemID] end
+    end
+
+    for _, result in ipairs(results) do
+        result.name = result.name or C_Item.GetItemNameByID(result.itemID)
+    end
+    table.sort(results, function(a, b)
+        local first, second = Lower(a.name or ""), Lower(b.name or "")
+        return first < second or (first == second and a.itemID < b.itemID)
     end)
+    return results
 end
 
 --- Get entries for a specific item in a specific character+location.

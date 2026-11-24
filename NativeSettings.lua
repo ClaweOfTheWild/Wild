@@ -827,6 +827,16 @@ local function CreateVolumePage()
         nil, nil, enabled, { allowAboveMaximum = true })
 end
 
+local function CreateItemSearchPage()
+    local category, layout = AddPage("Item Search")
+    AddButton(layout, "Recorded inventory", "Open Item Search", function() Wild.OpenItemSearch() end,
+        "Open a list of all recorded items. Filter the list by name or item ID.")
+    AddCheckbox(category, "itemSearch.showButton", "Show Item Search button",
+        "Show a magnifying glass on screen. Left-click it to open Item Search.")
+    AddCheckbox(category, "itemSearch.locked", "Lock button position",
+        "Prevent the Item Search button from moving when you drag it. You can still click it.")
+end
+
 local function CreateDurabilityPage()
     local category = AddPage("Durability")
     AddCheckbox(category, "durability.showEquipped", "Show on equipped items",
@@ -931,6 +941,7 @@ local function Initialize()
     }, {
         "vendorAutoRepair", "vendorRepairUseGuild", "reputationCollapseMode", "currencyCollapseMode",
     })
+    CreateItemSearchPage()
     CreateFiltersPage("Auction House", "auctionHouse", "auctionhouse")
     CreateFiltersPage("Crafting Orders", "craftingOrders", "craftingorders")
     CreateMailPage()

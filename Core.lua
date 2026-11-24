@@ -231,6 +231,10 @@ local defaults = {
         autoHideDelay = 5,
         buttonPos = nil,
     },
+    itemSearch = {
+        showButton = false,
+        locked = false,
+    },
     intents = {},
     intentBypassModifier = "SHIFT",
     actors = {
@@ -1012,6 +1016,9 @@ end
 
 function Wild.NotifySettingsChanged(key, source)
     if Wild.RefreshNativeSettings then Wild.RefreshNativeSettings(key, source) end
+    if Wild.UpdateItemSearchLauncher and (not key or key == "itemSearch" or key:match("^itemSearch%.")) then
+        Wild.UpdateItemSearchLauncher()
+    end
     if Wild.UpdateMailRulePlan and (not key or key == "intents" or key == "actors"
         or key == "includeReagentBag" or key == "mail" or key == "mail.autoSend") then
         Wild.UpdateMailRulePlan()
@@ -1042,6 +1049,10 @@ function Wild.SetSetting(key, value, source)
     if key == "volumeControl.autoHideDelay" and
        (type(value) ~= "number" or value ~= value or value < 0 or value == math.huge) then
         Wild.Print("|cffff6600Wild:|r Volume timeout must be a finite number of seconds, 0 or greater. Use 0 to keep the panel open.")
+        return false
+    end
+    if (key == "itemSearch.showButton" or key == "itemSearch.locked") and type(value) ~= "boolean" then
+        Wild.Print("|cffff6600Wild:|r Item Search button settings require true or false.")
         return false
     end
     if key == "intentBypassModifier" and not INTENT_BYPASS_KEYS[value] then

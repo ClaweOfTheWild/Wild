@@ -804,15 +804,17 @@ RegisterFeatureCommand("reputation", "Show or set automatic collapse of reputati
 RegisterFeatureCommand("speed", "Show or set the movement speed display. Normal running speed is 100 percent.")
 RegisterFeatureCommand("tooltip", "Show or set item tooltip enhancements.")
 
-RegisterCommand("find", { { "<name>", "Search for items across all characters by name." } }, function(args)
+RegisterCommand("find", {
+    { "[<name|itemID>]", "Open Item Search, or show recorded locations in chat by partial name or exact item ID." },
+}, function(args, message)
     if #args == 0 then
-        Print("Usage: /wild find <item name>")
+        Wild.OpenItemSearch()
         return
     end
-    local query = table.concat(args, " ")
+    local query = message:match("^%S+%s+(.+)$")
     local results = Wild.FindItems(query)
     if #results == 0 then
-        Print("No items matching \"" .. query .. "\" found in datastore.")
+        Print("No matching items in your recorded inventory.")
         return
     end
     Print("Items matching \"" .. query .. "\":")
@@ -823,6 +825,28 @@ RegisterCommand("find", { { "<name>", "Search for items across all characters by
         Wild.Print(string.format("  %s — %s", display, detail))
     end
 end, { "search" })
+
+RegisterCommand("itemsearch", {
+    { "[on|off|lock|unlock]", "Show the Item Search button status, show or hide the button, or lock or unlock its position." },
+}, function(args)
+    local sub = args[1] and args[1]:lower()
+    if not sub then
+        local visible = Wild.GetSetting("itemSearch.showButton")
+        local locked = Wild.GetSetting("itemSearch.locked")
+        Print("Item Search button: " .. (visible and "shown" or "hidden") ..
+            ". Position: " .. (locked and "locked" or "unlocked") .. ".")
+    elseif #args == 1 and (sub == "on" or sub == "off") then
+        if Wild.SetSetting("itemSearch.showButton", sub == "on") then
+            Print("Item Search button " .. (sub == "on" and "shown." or "hidden."))
+        end
+    elseif #args == 1 and (sub == "lock" or sub == "unlock") then
+        if Wild.SetSetting("itemSearch.locked", sub == "lock") then
+            Print("Item Search button position " .. (sub == "lock" and "locked." or "unlocked."))
+        end
+    else
+        PrintWarn("Usage: /wild itemsearch [on|off|lock|unlock]")
+    end
+end)
 
 RegisterCommand("volume", {
     { "[on|off]", "Show or set whether the volume control button appears." },

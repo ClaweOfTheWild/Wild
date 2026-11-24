@@ -283,9 +283,8 @@ end
 -- Extract bag/slot context from tooltip owner for accurate bind detection
 -- ============================================================
 
-local function GetContainerInfoFromTooltip(tooltip)
+local function GetTooltipContainerInfo(owner)
     -- Try to get bag/slot from the tooltip's owner frame (bag slot buttons)
-    local owner = tooltip:GetOwner()
     if not owner then return nil end
 
     local bag, slot
@@ -403,11 +402,7 @@ end
 -- Render Wild tooltip content into the attached frame
 -- ============================================================
 
-local function RenderWildTip(tooltip, itemID, containerInfo)
-    if not Wild.db or not Wild.db.tooltip then return end
-    local cfg = Wild.db.tooltip
-    if not cfg.enabled then return end
-
+local function RenderWildTip(tooltip, itemID, containerInfo, visibility, showInventory)
     local tip = CreateWildTip()
 
     local yPos = -PADDING
@@ -431,8 +426,8 @@ local function RenderWildTip(tooltip, itemID, containerInfo)
     local hasContent = false
 
     for _, lineDef in ipairs(TOOLTIP_LINES) do
-        local mode = cfg.lines and cfg.lines[lineDef.key] or "never"
-        if CheckVisibility(mode) then
+        local mode = visibility and visibility[lineDef.key]
+        if (showInventory and lineDef.key == "crossCharCount") or CheckVisibility(mode) then
             local result = lineDef.resolve(itemID, containerInfo)
             if result then
                 hasContent = true
@@ -552,9 +547,11 @@ end
 
 local function OnTooltipSetItem(tooltip, data)
     if tooltip ~= GameTooltip then return end
-    if not Wild.db or not Wild.db.tooltip then return end
-    local cfg = Wild.db.tooltip
-    if not cfg.enabled then return end
+    local cfg = Wild.db and Wild.db.tooltip
+    if not cfg then return end
+    local owner = tooltip:GetOwner()
+    local showInventory = owner and owner.wildItemSearchResult
+    if not cfg.enabled and not showInventory then return end
 
     local link = data and data.hyperlink
     if data and CanRead(data.guid) and data.guid then
@@ -571,7 +568,7 @@ local function OnTooltipSetItem(tooltip, data)
     if type(itemID) ~= "number" or itemID <= 0 then return end
 
     -- Build container info for bind-type and intent matching
-    local containerInfo = GetContainerInfoFromTooltip(tooltip)
+    local containerInfo = GetTooltipContainerInfo(owner)
     if containerInfo then
         containerInfo.hyperlink = containerInfo.hyperlink or link
     else
@@ -583,7 +580,7 @@ local function OnTooltipSetItem(tooltip, data)
         containerInfo.tooltipLines = data.lines
     end
 
-    RenderWildTip(tooltip, itemID, containerInfo)
+    RenderWildTip(tooltip, itemID, containerInfo, cfg.enabled and cfg.lines, showInventory)
 end
 
 local function HideWildTip()

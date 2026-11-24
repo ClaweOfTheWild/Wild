@@ -34,6 +34,7 @@ Soiree.lua
 Loot.lua
 Containers.lua
 Tooltip.lua
+ItemSearch.lua
 VolumeControl.lua
 Durability.lua
 Speed.lua
